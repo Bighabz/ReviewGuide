@@ -6,6 +6,22 @@ After completing the steps here, your kickoff move is to open Claude Code in the
 
 ---
 
+## Quickstart (TL;DR)
+
+```bash
+git clone git@github.com:Bighabz/ReviewGuide-SourceCode.git
+cd ReviewGuide-SourceCode
+```
+
+(If you don't have SSH set up with GitHub, use HTTPS instead: `git clone https://github.com/Bighabz/ReviewGuide-SourceCode.git`)
+
+1. Walk through §1–§5 below to install Claude Code, plugins, MCPs, and CLI tools.
+2. Open Claude Code in the repo root.
+3. Paste the kickoff prompt from §7 into Claude Code as your first message.
+4. From there, Claude reads `docs/audits/next-session-prompt-2026-05-19.md` and starts work.
+
+---
+
 ## What travels via `git clone` (already in this repo)
 
 You get these for free when you clone:
@@ -225,7 +241,9 @@ Supporting documents to read in order:
 ```
 You are picking up the ReviewGuide.ai stabilization work from a prior session on another machine. Before doing anything else:
 
-1. Read `docs/CLAUDE-CODE-SETUP.md` to confirm the machine is set up (MCPs enabled, plugins installed, Railway/GitHub/Vercel CLIs authed, /health returns 200).
+0. If the repo isn't cloned in the current working directory yet, clone it first. Repo URL: `git@github.com:Bighabz/ReviewGuide-SourceCode.git` (HTTPS fallback: `https://github.com/Bighabz/ReviewGuide-SourceCode.git`). After clone, `cd ReviewGuide-SourceCode` and continue from step 1.
+
+1. Read `docs/CLAUDE-CODE-SETUP.md` to confirm the machine is set up (MCPs enabled, plugins installed, Railway/GitHub/Vercel CLIs authed, /health returns 200). If any CLI is missing, install + auth it; ask the user to run interactive logins via `! <cmd> login`.
 
 2. Read `docs/audits/next-session-prompt-2026-05-19.md` end to end — that is the current handoff. Then read the documents it references in the order listed.
 
