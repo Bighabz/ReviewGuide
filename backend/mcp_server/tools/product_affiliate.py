@@ -17,6 +17,93 @@ backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__
 if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
+
+# ---------------------------------------------------------------------------
+# Curated-link matching
+#
+# find_curated_links() returns a whole *category bucket* (e.g. the 5-6 entries
+# under "noise cancelling headphone"), NOT a per-product match. The previous
+# code zipped that bucket against the LLM's product list by index, so slot N
+# always got curated entry N regardless of what the LLM picked for slot N —
+# guaranteeing a mismatch (Sony card -> Bose link). Advertising product X with
+# an affiliate link to product Y is an Amazon Associates / FTC compliance risk,
+# so we match by product name and only attach a curated link when it genuinely
+# corresponds to the card's product.
+#
+# We deliberately do NOT reuse _fuzzy_product_match (token-overlap Jaccard,
+# threshold 0.35): in this category-heavy domain it both over-matches across
+# brands (Sony vs Beats both share "wireless/noise/cancelling/headphones") and
+# under-matches short-vs-long titles ("Bose QuietComfort Ultra" vs the long
+# curated Bose title scores ~0.29). For a compliance fix, precision matters far
+# more than recall — a wrong link is exactly the bug we're fixing — so we
+# require a brand anchor plus a shared distinctive (non-generic) token.
+# ---------------------------------------------------------------------------
+
+# Category / marketing words that are too generic to anchor a product identity.
+_GENERIC_TOKENS = frozenset({
+    "the", "a", "an", "with", "for", "and", "of", "by", "new", "best",
+    "wireless", "bluetooth", "wifi", "wi-fi", "portable", "cordless",
+    "noise", "cancelling", "canceling", "cancellation", "anc", "active", "hybrid",
+    "headphones", "headphone", "earbuds", "earbud", "headset", "speaker", "speakers",
+    "smart", "series", "gen", "generation", "edition", "model", "set",
+    "2023", "2024", "2025", "2026",
+})
+
+
+def _normalize_tokens(name: str) -> list:
+    """Lowercase, strip parens, split on whitespace into tokens."""
+    cleaned = (name or "").lower().replace("(", " ").replace(")", " ").replace(",", " ")
+    return [t for t in cleaned.split() if t]
+
+
+def _match_curated_entry(product_name: str, curated_links: list, used: set):
+    """Return the index of the curated entry that genuinely matches product_name,
+    or None if no curated entry corresponds to this product.
+
+    Matching rule (precision over recall):
+      1. Brand anchor — the leading token (brand) of either name must appear in
+         the other name's tokens. This blocks same-category cross-brand collisions
+         (e.g. "LG Front Load Washer" vs "Samsung Front Load Washer").
+      2. At least two shared distinctive (non-generic) tokens, so a bare brand
+         match isn't enough (blocks "Sony WH-1000XM5" matching "Sony WH-1000XM4").
+
+    Already-used indices are skipped so two different cards never get the same link.
+    Among candidates, the one with the most shared distinctive tokens wins.
+    """
+    p_tokens = _normalize_tokens(product_name)
+    if not p_tokens:
+        return None
+    p_set = set(p_tokens)
+
+    best_idx = None
+    best_overlap = 0
+    for idx, entry in enumerate(curated_links):
+        if idx in used:
+            continue
+        title = entry.get("title", "") if isinstance(entry, dict) else str(entry)
+        c_tokens = _normalize_tokens(title)
+        if not c_tokens:
+            continue
+        c_set = set(c_tokens)
+
+        brand_anchor = (c_tokens[0] in p_set) or (p_tokens[0] in c_set)
+        if not brand_anchor:
+            continue
+
+        shared_distinctive = {
+            t for t in (p_set & c_set)
+            if t not in _GENERIC_TOKENS and len(t) >= 2
+        }
+        if len(shared_distinctive) < 2:
+            continue
+
+        if len(shared_distinctive) > best_overlap:
+            best_overlap = len(shared_distinctive)
+            best_idx = idx
+
+    return best_idx
+
+
 # Tool contract for planner
 TOOL_CONTRACT = {
     "name": "product_affiliate",
@@ -167,12 +254,22 @@ async def product_affiliate(
         # Helper function to search a provider for all products (in parallel)
         async def search_provider(provider_name: str) -> Dict[str, Any]:
             """Search all products on a single provider using asyncio.gather."""
-            # For Amazon: use curated links if available (matched against user query)
+            # For Amazon: match curated links to each product BY NAME (not by index).
+            # A curated entry is only attached when it genuinely corresponds to the
+            # card's product (see _match_curated_entry). Products with no curated
+            # match fall through to a tagged Amazon search URL for the correct
+            # product name — never a mismatched curated link.
             if provider_name == "amazon" and curated_amazon_links:
                 results = []
-                for i, product_name in enumerate(products_to_search):
-                    if i < len(curated_amazon_links):
-                        curated = curated_amazon_links[i]
+                used_curated = set()
+                matched_count = 0
+                search_url_count = 0
+                for product_name in products_to_search:
+                    match_idx = _match_curated_entry(product_name, curated_amazon_links, used_curated)
+
+                    if match_idx is not None:
+                        used_curated.add(match_idx)
+                        curated = curated_amazon_links[match_idx]
                         # Support both old format (string URL) and new format (dict with metadata)
                         if isinstance(curated, dict):
                             link = curated.get("url", "")
@@ -184,6 +281,7 @@ async def product_affiliate(
                             title = product_name
                             price = 0
                             image = ""
+                        matched_count += 1
                         results.append({
                             "product_name": product_name,
                             "offers": [{
@@ -199,7 +297,37 @@ async def product_affiliate(
                                 "source": "amazon",
                             }]
                         })
-                logger.info(f"[product_affiliate] Amazon: used {len(results)} curated links (matched user query)")
+                        continue
+
+                    # A2 — no curated match: give this product a tagged Amazon search
+                    # URL for its own name so the Amazon link still corresponds to the
+                    # card (and earns commission), instead of a wrong curated product.
+                    search_url = affiliate_manager.get_amazon_search_url(product_name, country_code)
+                    if search_url:
+                        search_url_count += 1
+                        results.append({
+                            "product_name": product_name,
+                            "offers": [{
+                                "merchant": "Amazon",
+                                "price": 0,
+                                "currency": "USD",
+                                "url": search_url,
+                                "condition": "new",
+                                "title": product_name,
+                                "image_url": "",
+                                "rating": None,
+                                "review_count": None,
+                                "source": "amazon",
+                            }]
+                        })
+                    # else: no curated match and no search URL available -> skip (A1);
+                    # other providers (e.g. eBay) still populate the card.
+
+                logger.info(
+                    f"[product_affiliate] Amazon: {matched_count} curated name-matches, "
+                    f"{search_url_count} search-URL fallbacks "
+                    f"({len(products_to_search) - matched_count - search_url_count} skipped)"
+                )
                 return {"provider": provider_name, "results": results}
 
             provider = affiliate_manager.get_provider(provider_name)
