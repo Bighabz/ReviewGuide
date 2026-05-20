@@ -74,7 +74,10 @@ jobs:
           ADMIN_PASSWORD: test-admin-password
           OPENAI_API_KEY: sk-test-placeholder
           ENV: test
-        run: pytest -x --ignore=tests/integration -q
+        # Use `python -m pytest` (not bare `pytest`) so the backend/ working dir
+        # is on sys.path — otherwise `import app` / `import mcp_server` fails with
+        # ModuleNotFoundError during collection and -x aborts the whole suite.
+        run: python -m pytest -x --ignore=tests/integration -q
 
       - name: Ruff lint
         run: ruff check backend/ || true # soft-warn for now; make hard-fail once clean
