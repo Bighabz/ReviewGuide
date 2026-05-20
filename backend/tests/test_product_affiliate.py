@@ -22,7 +22,67 @@ os.environ.setdefault("OPENAI_API_KEY", "test-api-key")
 os.environ.setdefault("RATE_LIMIT_ENABLED", "false")
 os.environ.setdefault("LOG_ENABLED", "false")
 
-from mcp_server.tools.product_affiliate import product_affiliate  # noqa: E402
+from mcp_server.tools.product_affiliate import (  # noqa: E402
+    product_affiliate,
+    _match_curated_entry,
+)
+from app.services.affiliate.providers.curated_amazon_links import (  # noqa: E402
+    CURATED_LINKS,
+)
+
+
+# ---------------------------------------------------------------------------
+# Fix 1 (P0): curated links must match products BY NAME, not by list position.
+# These lock in the compliance fix for the positional-zip mismapping bug.
+# ---------------------------------------------------------------------------
+
+HEADPHONES = CURATED_LINKS["noise cancelling headphone"]
+WASHERS = CURATED_LINKS["washing machine"]
+
+
+def _title_at(bucket, idx):
+    return bucket[idx]["title"]
+
+
+def test_match_curated_matches_correct_brand():
+    """A Bose product matches the Bose curated entry, not whatever is at its slot."""
+    idx = _match_curated_entry("Bose QuietComfort Ultra", HEADPHONES, used=set())
+    assert idx is not None
+    assert "Bose" in _title_at(HEADPHONES, idx)
+
+
+def test_match_curated_no_cross_brand_false_positive():
+    """Sony/Apple products must NOT match the curated bucket that lacks them —
+    shared category words (wireless/noise/cancelling/headphones) must not be
+    enough to link them to a Beats/Bose/Anker entry."""
+    assert _match_curated_entry(
+        "Sony WH-1000XM5 Wireless Noise Cancelling Headphones", HEADPHONES, used=set()
+    ) is None
+    assert _match_curated_entry("Apple AirPods Max", HEADPHONES, used=set()) is None
+
+
+def test_match_curated_same_category_different_brand_disambiguated():
+    """LG vs Samsung washers share 'front load washer' but must each map to their
+    own brand via the brand anchor."""
+    lg_idx = _match_curated_entry("LG Front Load Washer", WASHERS, used=set())
+    samsung_idx = _match_curated_entry("Samsung Front Load Washer", WASHERS, used=set())
+    assert lg_idx is not None and "LG" in _title_at(WASHERS, lg_idx)
+    assert samsung_idx is not None and "Samsung" in _title_at(WASHERS, samsung_idx)
+    assert lg_idx != samsung_idx
+
+
+def test_match_curated_respects_used_indices():
+    """A curated entry already assigned to one card is not reused for another."""
+    used = set()
+    first = _match_curated_entry("Bose QuietComfort Ultra", HEADPHONES, used=used)
+    assert first is not None
+    used.add(first)
+    second = _match_curated_entry("Bose QuietComfort Ultra", HEADPHONES, used=used)
+    assert second != first  # either a different Bose-ish entry or None, never the same
+
+
+def test_match_curated_empty_name_returns_none():
+    assert _match_curated_entry("", HEADPHONES, used=set()) is None
 
 
 # ---------------------------------------------------------------------------
