@@ -9,13 +9,13 @@ interface ChipConfig {
 
 const CHIPS: ChipConfig[] = [
   { label: 'Popular', query: 'Best products of 2026' },
-  { label: 'Tech', query: 'Best noise-cancelling headphones' },
+  { label: 'Tech', query: 'Best laptops for productivity' },
   { label: 'Travel', query: 'Top all-inclusive resorts in the Caribbean' },
-  { label: 'Kitchen', query: 'Best robot vacuums for pet hair' },
-  { label: 'Fitness', query: 'Best hiking boots for beginners' },
+  { label: 'Kitchen', query: 'Best kitchen appliances 2026' },
+  { label: 'Fitness', query: 'Best running shoes 2026' },
   { label: 'Home', query: 'Best Alexa-compatible smart home gadgets' },
   { label: 'Fashion', query: 'Best white sneakers for everyday wear' },
-  { label: 'Outdoor', query: 'Best hiking boots for beginners' },
+  { label: 'Outdoor', query: 'Best camping gear for beginners' },
 ]
 
 const FOR_YOU_CHIP: ChipConfig = { label: 'For You' }
