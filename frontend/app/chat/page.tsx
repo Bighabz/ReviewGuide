@@ -8,6 +8,11 @@ import ConversationSidebar from '@/components/ConversationSidebar'
 import ErrorBoundary from '@/components/ErrorBoundary'
 import { CHAT_CONFIG } from '@/lib/constants'
 
+// Sentinel stored in processedQueryRef for the "new session, no query" case so the
+// effect's router.replace fires once per /chat?new=1 navigation instead of re-running
+// every time the replace mutates searchParams and re-triggers the effect.
+const NEW_EMPTY_SESSION = '__new_empty_session__'
+
 function ChatPageContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -53,9 +58,11 @@ function ChatPageContent() {
       setTimeout(() => {
         router.replace('/chat', { scroll: false })
       }, 100)
-    } else if (isNewSession && !query) {
-      // New session without query - just start fresh
-      processedQueryRef.current = null
+    } else if (isNewSession && !query && processedQueryRef.current !== NEW_EMPTY_SESSION) {
+      // New session without query - just start fresh.
+      // Gate on the sentinel so this branch (and its router.replace) runs once per
+      // /chat?new=1 navigation rather than re-firing on every effect re-entry.
+      processedQueryRef.current = NEW_EMPTY_SESSION
 
       const newSessionId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
         const r = Math.random() * 16 | 0

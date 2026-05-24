@@ -10,7 +10,9 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./tests/setup.ts'],
     include: ['**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}'],
-    exclude: ['node_modules', '.next'],
+    // tests/e2e/** are Playwright specs (run via `playwright test`, see playwright.config.ts).
+    // Excluded here so vitest doesn't try to load them and fail on Playwright's test runner.
+    exclude: ['node_modules', '.next', 'tests/e2e/**'],
     coverage: {
       reporter: ['text', 'json', 'html'],
       exclude: ['node_modules/', '.next/', 'tests/'],
