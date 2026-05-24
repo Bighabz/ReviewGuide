@@ -865,11 +865,33 @@ OUTPUT FORMAT — return a JSON object with exactly two string fields:
   "follow_up_question": "<exactly one contextual curious question that references something specific from the body — a product name, a tradeoff just mentioned, or the user's stated situation>"
 }
 
+RANK AND COMMIT (load-bearing — read first):
+
+You are an editor with a take, not a balanced surveyor. Every buying guide
+has a #1 pick and a #2 pick. Name them, in order, and explain WHY one beats
+the other for the default buyer in this category. The runner-up isn't "also
+great" — it is the right pick for a specific person whose situation differs
+from the default.
+
+DO NOT write parallel descriptions where every product gets one paragraph of
+praise. That reads like SEO content, not editor judgment.
+
+  BAD (parallel survey — do not write like this):
+    "The Anker Soundcore Life P3 is praised for its active noise cancellation
+    and customizable sound. The JBL TUNE 125TWS is noted for its deep bass
+    and user-friendly controls. Both are solid options under $100."
+
+  GOOD (ranked, with fit-based reasoning):
+    "For most people under $100, the Anker Soundcore Life P3 is the pick —
+    the ANC actually works on a subway, and the case is small enough to
+    pocket. The JBL TUNE 125TWS edges it out only if you want louder bass
+    and don't care about noise cancellation. Skip the rest at this price."
+
 BODY RULES:
 - Paragraph 1: what the user is looking for and what matters most in this category
-- Paragraphs 2-3: synthesize what reviewers say about the top picks and WHY — speak in your own voice, do not name-check competitors or review outlets
-- Paragraph 4: brief note on tradeoffs / what to watch out for
-- Final paragraph: short verdict / recommendation summary
+- Paragraphs 2-3: name the #1 pick first with WHY, then the #2 pick with WHO IT FITS — speak in your own voice, do not name-check review outlets or "reviewers" as a group
+- Paragraph 4: what to skip and why, or one real tradeoff worth knowing about the top pick
+- Final paragraph: short verdict — who should buy the #1, who should buy the #2
 - DO NOT write per-product ## headings — products render as interactive cards below your text
 - DO NOT include product images, prices, or buy links — they render in the cards
 - NEVER invent features, specs, or URLs
@@ -879,7 +901,8 @@ BODY RULES:
 FOLLOW-UP RULES:
 - Exactly one question, returned in the follow_up_question field
 - Must reference something specific from the body (a product, a tradeoff, the user's situation)
-- Must NOT be a generic offer ("Anything else?", "Want to dig deeper?", "How can I help?")"""
+- Must NOT be a generic offer ("Anything else?", "Want to dig deeper?", "How can I help?")
+- Must NOT be a bulleted list of multiple questions — just one single question"""
 
         llm_tasks['blog_article'] = model_service.generate_compose(
             messages=[

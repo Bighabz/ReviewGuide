@@ -292,3 +292,28 @@ def test_snippet_kind_still_includes_examples() -> None:
     assert "Example 1" in composed
     assert "Example 2" in composed
     assert "Example 3" in composed
+
+
+def test_blog_composer_prompt_has_ranking_directive() -> None:
+    """Guards against accidental deletion of the RANK-AND-COMMIT section
+    of the blog composer prompt.
+
+    The PR #6 post-merge voice regression had two failure modes: leaking
+    citations (covered by sanitize_voice) AND parallel survey reading
+    ("Anker is praised for X, JBL is noted for Y") that the role prompt
+    failed to prevent. Hotfix Commit 4a added a load-bearing RANK-AND-COMMIT
+    section with a worked BAD/GOOD counter-example. If a future refactor
+    deletes any of those markers, this test goes red so the regression
+    surfaces at PR review rather than in production.
+    """
+    path = BACKEND_ROOT / "mcp_server/tools/product_compose.py"
+    content = path.read_text(encoding="utf-8")
+    # Load-bearing header.
+    assert "RANK AND COMMIT" in content, (
+        "Blog composer prompt lost its RANK-AND-COMMIT section. Re-read the "
+        "PR #6 post-merge incident before re-deleting — that section is what "
+        "stops the parallel-survey voice regression."
+    )
+    # The BAD/GOOD counter-example pair.
+    assert "BAD (parallel survey" in content
+    assert "GOOD (ranked" in content
