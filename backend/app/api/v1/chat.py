@@ -540,6 +540,27 @@ async def generate_chat_stream(
         assistant_text = result_state.get('assistant_text') or ''
         detected_intent = result_state.get("intent", "unknown")
 
+        # Voice compliance gate (PR #voice-hotfix). Universal SSE-exit point —
+        # runs regardless of which composer produced assistant_text, so we
+        # don't have to re-wire every composer individually (that's how dead
+        # code regrew last time). Sanitization is mechanical regex
+        # replacement; the underlying prompt regression surfaces in the
+        # warning log so it can be triaged in Langfuse.
+        if assistant_text:
+            from app.services.prompts import sanitize_voice
+            cleaned_text, voice_violations = sanitize_voice(assistant_text)
+            if voice_violations:
+                logger.warning(
+                    f"[voice_compliance] Stripped {len(voice_violations)} violation(s) "
+                    f"from assistant_text (session={session_id}, intent={detected_intent}, "
+                    f"original={len(assistant_text)} chars -> cleaned={len(cleaned_text)} chars). "
+                    f"Violations: {voice_violations}"
+                )
+                # Mutate result_state so the re-read at line ~591 (response_text)
+                # and any downstream consumer picks up the cleaned text.
+                assistant_text = cleaned_text
+                result_state['assistant_text'] = cleaned_text
+
         # Get CallbackHandler trace data
         langfuse_trace_url = None
         if langfuse_handler:

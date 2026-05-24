@@ -150,3 +150,102 @@ def check_follow_up_specificity(follow_up: str) -> Optional[str]:
             return opener
 
     return None
+
+
+def sanitize_voice(text: str) -> tuple[str, list[str]]:
+    """Strip voice violations from generated text. Returns (cleaned, violations).
+
+    This is the active SSE-exit gate, called once per response just before
+    streaming. Three sanitization passes, applied in order:
+
+    1. Literal banned phrases (`BANNED_PHRASES`): every match replaced
+       with an empty string. Sentence-level — a banned phrase mid-paragraph
+       leaves the surrounding prose intact (possibly with minor
+       grammatical artifacts; acceptable tradeoff vs. shipping the bad
+       voice or stalling for a retry).
+    2. The split phrase "Take your [X] to the next level" via the
+       precompiled `_NEXT_LEVEL_PATTERN`.
+    3. Trailing generic follow-up blocks: if a paragraph within the last
+       five starts with a generic opener (anything `check_follow_up_specificity`
+       would flag), strip from that paragraph to the end of the text.
+       Catches the "Want to dig deeper?" + bulleted-questions block that
+       gpt-4o-mini reproduces from training-data priors despite explicit
+       prompt instructions to avoid it.
+
+    Returns:
+        ``(cleaned_text, violations)`` where ``violations`` is the list of
+        matched phrases / opener slugs (with ``trailing-generic-block:``
+        prefix for case 3). Empty list = no sanitization applied.
+
+    Callers should log every non-empty ``violations`` return to
+    observability so the underlying prompt regression surfaces. Do NOT
+    log-and-pass-through the original text — silent pass-through masks
+    the moat erosion this gate exists to prevent.
+
+    If sanitization would yield empty text (pathological case where the
+    entire response was bad voice), the function returns the ORIGINAL
+    text with violations recorded. The caller can then decide whether
+    to ship the original (with the log alarm) or surface an error to
+    the user. Returning empty text is never the right answer.
+    """
+    if not text:
+        return text, []
+
+    violations: list[str] = []
+    cleaned = text
+
+    # Pass 1 — literal banned phrases.
+    for phrase, pattern in zip(BANNED_PHRASES, _BANNED_PATTERNS):
+        if phrase == "Take your":
+            # Handled by the next-level pattern in pass 2.
+            continue
+        if pattern.search(cleaned):
+            violations.append(phrase)
+            cleaned = pattern.sub("", cleaned)
+
+    # Pass 2 — split phrase "Take your [X] to the next level".
+    if _NEXT_LEVEL_PATTERN.search(cleaned):
+        violations.append("Take your [X] to the next level")
+        cleaned = _NEXT_LEVEL_PATTERN.sub("", cleaned)
+
+    # Pass 3 — trailing generic follow-up block.
+    cleaned, stripped_opener = _strip_trailing_generic_block(cleaned)
+    if stripped_opener is not None:
+        violations.append(f"trailing-generic-block:{stripped_opener}")
+
+    # Pathological case — empty result. Better to ship the original with
+    # the alarm than serve a blank response.
+    if violations and not cleaned.strip():
+        return text, violations
+
+    return cleaned, violations
+
+
+def _strip_trailing_generic_block(text: str) -> tuple[str, Optional[str]]:
+    """Walk backwards through the last five paragraphs; if any starts with
+    a generic follow-up opener, strip from that paragraph to end of text.
+
+    A "paragraph" here is a blank-line-separated block (markdown convention).
+    Catches both:
+
+    - Single trailing question: ``...body.\n\nWant to dig deeper?``
+    - Question + bulleted continuation: ``...body.\n\nWant to dig deeper?\n\n* a\n* b\n* c``
+
+    Returns:
+        ``(cleaned_text, matched_opener)``. ``matched_opener`` is None if
+        no generic block was found at the tail.
+    """
+    if not text or not text.strip():
+        return text, None
+
+    paragraphs = text.split("\n\n")
+    # Walk backwards through the last five paragraphs (look-back window).
+    start_idx = max(0, len(paragraphs) - 5)
+    for i in range(start_idx, len(paragraphs)):
+        first_line = paragraphs[i].strip().split("\n", 1)[0].strip()
+        generic = check_follow_up_specificity(first_line)
+        if generic is not None:
+            cleaned = "\n\n".join(paragraphs[:i]).rstrip()
+            return cleaned, generic
+
+    return text, None

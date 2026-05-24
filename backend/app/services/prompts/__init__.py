@@ -14,6 +14,7 @@ from .voice_compliance import (
     GENERIC_FOLLOW_UPS,
     check_voice_compliance,
     check_follow_up_specificity,
+    sanitize_voice,
 )
 
 __all__ = [
@@ -23,4 +24,5 @@ __all__ = [
     "GENERIC_FOLLOW_UPS",
     "check_voice_compliance",
     "check_follow_up_specificity",
+    "sanitize_voice",
 ]
