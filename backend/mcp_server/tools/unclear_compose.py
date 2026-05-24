@@ -17,6 +17,7 @@ if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
 from app.services.model_service import model_service
+from app.services.prompts.voice import build_system_prompt
 from app.core.config import settings
 
 logger = get_logger(__name__)
@@ -83,8 +84,17 @@ If you truly cannot determine what they mean, generate a short friendly message 
 
 Keep it brief (2-3 sentences max), warm, and helpful."""
 
+        unclear_role = (
+            "The user's last message wasn't classifiable. If the conversation "
+            "history makes the meaning clear (e.g. they earlier said their "
+            "name and now ask 'what's my name'), answer their question "
+            "directly. Otherwise help them try again in 1-2 sentences and "
+            "offer one or two concrete example questions they could ask. "
+            "Keep it brief and useful — no apologies or filler."
+        )
         response = await model_service.generate(
             messages=[
+                {"role": "system", "content": build_system_prompt(role_prompt=unclear_role, kind="response")},
                 {"role": "user", "content": prompt}
             ],
             model=settings.COMPOSER_MODEL,
