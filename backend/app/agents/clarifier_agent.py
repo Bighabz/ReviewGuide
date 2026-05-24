@@ -25,6 +25,7 @@ from tool_contracts import get_tool_contracts_dict  # noqa: E402
 from ..schemas.graph_state import GraphState
 from .base_agent import BaseAgent
 from ..services.halt_state_manager import HaltStateManager
+from ..services.prompts.voice import build_system_prompt
 from app.lib.toon_python import encode
 
 logger = get_logger(__name__)
@@ -603,8 +604,7 @@ Many brands make multiple product types. For the "category" question:
 - Keep it natural — don't just say "what category?"
 """
 
-        system_prompt = f"""
-You are a warm, human assistant.
+        role_prompt = f"""You collect missing information from the user before downstream tools run.
 
 Context:
 - Current user message: "{user_message}"
@@ -614,14 +614,13 @@ Context:
 {conversation_context}{disambiguation_hint}
 Generate a JSON response with:
 1. "intro" - one short sentence acknowledging their request and asking for details (based on FULL conversation context, not just current message)
-2. "questions" - one question per missing slot (friendly, 12-25 words each, no technical terms)
+2. "questions" - one question per missing slot (12-25 words each, no technical terms)
 3. "closing" - one short sentence about what you'll create for them (based on context)
 
 Rules:
-- Be contextual - reference what they already told you in the conversation
+- Be contextual — reference what they already told you in the conversation
 - Use the CORRECT destination from conversation history (e.g., if they said "Paris" earlier, say "Paris" not "Berlin")
-- Be warm but concise
-- No hardcoded phrases - generate based on actual context
+- No hardcoded phrases — generate based on actual context
 
 Return ONLY valid JSON:
 {{
@@ -634,6 +633,7 @@ Return ONLY valid JSON:
 }}
 """
 
+        system_prompt = build_system_prompt(role_prompt=role_prompt, kind="snippet")
         user_prompt = f"Generate follow-up questions for these missing slots: {slots_str}"
 
         try:
