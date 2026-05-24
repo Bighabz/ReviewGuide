@@ -11,7 +11,7 @@ conversation history, and tool outputs.
 See tone.md (gospel for voice) and BACKEND_AGENT_CONTEXT.md (architecture).
 """
 
-from typing import Optional
+from typing import Literal, Optional
 
 
 VOICE_PROMPT = """You are ReviewGuide. You sound like texting an editor from CNET, Tom's
@@ -130,8 +130,44 @@ manufacture doubt to seem objective. Curious follow-up grounds it in
 the user's actual trip.)"""
 
 
+# Sentinels used to slice VOICE_PROMPT when emitting the snippet variant. Kept
+# in sync with the headings inside VOICE_PROMPT above; if those headings ever
+# change, update these too or the snippet variant will fall back to the full
+# follow-up rule.
+_FOLLOW_UP_HEADER = "FOLLOW-UP QUESTION RULE (non-negotiable):"
+_EXAMPLES_HEADER = "EXAMPLES — INTERNALIZE THE VOICE"
+
+
+_SNIPPET_FOLLOW_UP_STUB = """SNIPPET CONTEXT:
+
+This output is a snippet that will be combined with other content into one
+response. Do NOT end with a follow-up question — the surrounding response
+owns that."""
+
+
+def _voice_for_kind(kind: "Literal['response', 'snippet']") -> str:
+    if kind == "response":
+        return VOICE_PROMPT
+    if kind == "snippet":
+        before, sep, rest = VOICE_PROMPT.partition(_FOLLOW_UP_HEADER)
+        if not sep:
+            # Sentinel drifted — fall back to the full prompt rather than
+            # silently dropping voice content.
+            return VOICE_PROMPT
+        _, sep2, after = rest.partition(_EXAMPLES_HEADER)
+        if not sep2:
+            return VOICE_PROMPT
+        return (
+            f"{before.rstrip()}\n\n{_SNIPPET_FOLLOW_UP_STUB}\n\n"
+            f"{_EXAMPLES_HEADER}{after}"
+        )
+    raise ValueError(f"Unknown kind: {kind!r}")
+
+
 def build_system_prompt(
     role_prompt: str,
+    *,
+    kind: Literal["response", "snippet"] = "response",
     profile_inject: Optional[str] = None,
     history: Optional[str] = None,
     tool_outputs: Optional[str] = None,
@@ -144,6 +180,15 @@ def build_system_prompt(
 
     Args:
         role_prompt: The agent/tool-specific role instructions.
+        kind: "response" (default) emits the full VOICE_PROMPT including the
+            "exactly ONE follow-up question" rule — use this for prompts
+            whose output becomes a complete chat response on its own.
+            "snippet" replaces the follow-up rule with a "do not emit a
+            follow-up" stub — use this for prompts whose output is one piece
+            of a larger composed response (e.g. the five parallel composer
+            calls in product_compose.py whose outputs are concatenated). If
+            every snippet emitted its own follow-up, the assembled response
+            would trail multiple questions, the opposite of the rule.
         profile_inject: Optional personality profile fragment. For new users
             with no profile, pass None — never an empty string.
         history: Optional formatted conversation history for the current
@@ -156,7 +201,7 @@ def build_system_prompt(
         The composed system prompt string, ready to be passed as the
         content of a system-role message.
     """
-    sections = [VOICE_PROMPT, "", "ROLE", "", role_prompt.strip()]
+    sections = [_voice_for_kind(kind), "", "ROLE", "", role_prompt.strip()]
 
     if profile_inject:
         sections += ["", "ABOUT THIS USER", "", profile_inject.strip()]

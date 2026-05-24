@@ -111,3 +111,34 @@ class TestBuildSystemPrompt:
         idx_history = result.index("CONVERSATION SO FAR")
         idx_tools = result.index("RESEARCH FOR THIS TURN")
         assert idx_voice < idx_role < idx_profile < idx_history < idx_tools
+
+    def test_default_kind_is_response(self):
+        # Without an explicit kind, the full follow-up rule must be present.
+        result = build_system_prompt(role_prompt="Composer.")
+        assert "FOLLOW-UP QUESTION RULE" in result
+        assert "EXACTLY ONE" in result
+
+    def test_snippet_kind_omits_follow_up_rule(self):
+        # Snippet variant must remove the literal follow-up rule heading and
+        # the "exactly one" wording so a snippet generator doesn't emit a
+        # trailing question that collides with sibling snippets.
+        result = build_system_prompt(role_prompt="Composer.", kind="snippet")
+        assert "FOLLOW-UP QUESTION RULE" not in result
+        assert "EXACTLY ONE" not in result
+        # And the replacement marker must be present so the model knows why.
+        assert "SNIPPET CONTEXT" in result
+
+    def test_snippet_kind_preserves_banned_phrases(self):
+        result = build_system_prompt(role_prompt="Composer.", kind="snippet")
+        assert "BANNED PHRASES" in result
+        # Spot-check a couple of banned phrases survive the slice.
+        assert "Great choice!" in result
+        assert "As an AI" in result
+
+    def test_snippet_kind_preserves_examples(self):
+        # The examples teach the tone and must remain in both variants.
+        result = build_system_prompt(role_prompt="Composer.", kind="snippet")
+        assert "Example 1" in result
+        assert "Example 2" in result
+        assert "Example 3" in result
+        assert "EXAMPLES — INTERNALIZE THE VOICE" in result

@@ -67,9 +67,6 @@ docker-compose.override.yml
 # Folders with prefix 1_
 1_*/
 
-# Test files with prefix test_
-test_*
-
 *.log
 logs/
 
