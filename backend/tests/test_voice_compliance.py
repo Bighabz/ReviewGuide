@@ -223,3 +223,153 @@ class TestSanitizeVoice:
         # No trailing-generic-block violation because it's not in the tail.
         assert not any(v.startswith("trailing-generic-block:") for v in violations)
         assert "Want to dig deeper?" in cleaned
+
+
+class TestSanitizeVoiceCitations:
+    """Pass 0 — citation patterns (review-site links + attribution phrases).
+
+    These exercise the production-incident patterns: "According to RTINGS",
+    "Reviewers from Wirecutter", "Reviewers highlight X", markdown links
+    to review-site domains. The known-source whitelist is the firewall
+    against product-brand false positives.
+    """
+
+    def test_according_to_known_source_stripped(self):
+        text = "According to RTINGS, the Anker Life P3 has a balanced sound signature."
+        cleaned, violations = sanitize_voice(text)
+        assert any(v.startswith("citation:") for v in violations)
+        assert "RTINGS" not in cleaned
+        assert "According to" not in cleaned
+        assert "the Anker Life P3" in cleaned
+
+    def test_according_to_markdown_link_stripped(self):
+        text = "According to [RTINGS](https://www.rtings.com/), the Anker Life P3 offers value."
+        cleaned, violations = sanitize_voice(text)
+        assert "RTINGS" not in cleaned
+        assert "rtings.com" not in cleaned
+        assert "the Anker Life P3 offers value" in cleaned
+
+    def test_reviewers_from_source_stripped(self):
+        text = "Reviewers from Wirecutter commend the JBL for its bass."
+        cleaned, violations = sanitize_voice(text)
+        assert "Wirecutter" not in cleaned
+        assert "Reviewers from" not in cleaned
+        assert "commend the JBL for its bass" in cleaned
+
+    def test_reviewers_from_markdown_link_stripped(self):
+        # Production-incident shape: Reviewers from [Wirecutter](nyt-url).
+        text = (
+            "Reviewers from [Wirecutter](https://www.nytimes.com/wirecutter) "
+            "commend the JBL for its straightforward controls."
+        )
+        cleaned, violations = sanitize_voice(text)
+        assert "Wirecutter" not in cleaned
+        assert "nytimes" not in cleaned
+        assert "commend the JBL for its straightforward controls" in cleaned
+
+    def test_source_says_pattern_stripped(self):
+        text = "Wirecutter highlights its noise cancellation."
+        cleaned, violations = sanitize_voice(text)
+        assert "Wirecutter highlights" not in cleaned
+        # The trailing object survives ("its noise cancellation.").
+        assert "noise cancellation" in cleaned
+
+    def test_source_possessive_review_stripped(self):
+        text = "CNET's review of the XM5 is glowing."
+        cleaned, violations = sanitize_voice(text)
+        assert "CNET" not in cleaned
+        assert "review" not in cleaned or "of the XM5 is glowing" in cleaned
+
+    def test_generic_reviewers_pattern_stripped(self):
+        text = "Reviewers highlight the Anker Life P3 as a top contender."
+        cleaned, violations = sanitize_voice(text)
+        assert "Reviewers highlight" not in cleaned
+        assert "the Anker Life P3 as a top contender" in cleaned
+
+    def test_generic_critics_praise_stripped(self):
+        text = "Critics praise the XM5 for its travel-ready case."
+        cleaned, violations = sanitize_voice(text)
+        assert "Critics praise" not in cleaned
+        assert "the XM5 for its travel-ready case" in cleaned
+
+    def test_markdown_link_to_review_domain_stripped(self):
+        # Bare review-site link not in a citation phrase context — caught
+        # by the markdown-link fallback pass.
+        text = "More detail at [the full review](https://www.theverge.com/review/123)."
+        cleaned, violations = sanitize_voice(text)
+        assert any(v.startswith("review-link:") for v in violations)
+        assert "theverge" not in cleaned.lower()
+        assert "[the full review]" not in cleaned
+
+    def test_product_brand_attribution_NOT_stripped(self):
+        # Sony / JBL / Anker are product brands, not review sources. The
+        # known-source whitelist is the firewall: brand attributions must
+        # survive the strip pass.
+        text = "Sony highlights ANC capability in its marketing materials."
+        cleaned, violations = sanitize_voice(text)
+        assert "Sony highlights" in cleaned
+        assert not any(v.startswith("citation:") for v in violations)
+
+    def test_per_known_source_stripped(self):
+        text = "Per CNET, the JBL has solid controls."
+        cleaned, violations = sanitize_voice(text)
+        assert "CNET" not in cleaned
+        assert "the JBL has solid controls" in cleaned
+
+    def test_per_non_source_preserved(self):
+        # "Per" is ambiguous — "per the spec" / "per your request" are
+        # not citations. The known-source whitelist gates the strip so
+        # those forms survive.
+        text = "Per the spec sheet, battery life is 8 hours."
+        cleaned, violations = sanitize_voice(text)
+        assert "Per the spec sheet" in cleaned
+
+    def test_link_to_non_review_domain_preserved(self):
+        # Links to merchant pages / brand sites / unknown domains stay.
+        text = "Check the price at [Amazon](https://amazon.com/dp/X)."
+        cleaned, violations = sanitize_voice(text)
+        assert "Amazon" in cleaned
+        assert "amazon.com" in cleaned
+        assert not any(v.startswith("review-link:") for v in violations)
+
+    def test_production_incident_verbatim_sanitized(self):
+        # Reproduction of the PR #6 post-merge regression text. All three
+        # named-source citations must be excised while product names and
+        # technical content survive.
+        text = (
+            "Reviewers highlight the Anker Soundcore Life P3 as a top contender "
+            "in this category, praised for its active noise cancellation. "
+            "According to [RTINGS](https://www.rtings.com/), the Life P3 offers "
+            "a balanced sound signature. Reviewers from [Wirecutter](https://www.nytimes.com/wirecutter) "
+            "commend the JBL for its straightforward controls."
+        )
+        cleaned, violations = sanitize_voice(text)
+        # At least 3 citation-class violations recorded.
+        citation_violations = [
+            v for v in violations
+            if v.startswith("citation:") or v.startswith("review-link:")
+        ]
+        assert len(citation_violations) >= 3, (
+            f"expected >=3 citation violations, got {len(citation_violations)}: {citation_violations}"
+        )
+        # All three named sources gone.
+        for name in ("RTINGS", "Wirecutter", "rtings", "wirecutter", "nytimes"):
+            assert name not in cleaned, f"{name} survived sanitization: {cleaned!r}"
+        # Product names preserved.
+        assert "Anker Soundcore Life P3" in cleaned
+        assert "JBL" in cleaned
+        # Substantive content preserved.
+        assert "noise cancellation" in cleaned
+        assert "balanced sound signature" in cleaned
+        assert "straightforward controls" in cleaned
+
+    def test_normalize_whitespace_after_strip(self):
+        # The cleanup pass collapses doubled spaces and orphaned commas
+        # left behind by previous strips so the shipped prose isn't
+        # visibly jagged.
+        text = "According to RTINGS,  the Anker is great."
+        cleaned, _ = sanitize_voice(text)
+        # No doubled space surviving the cleanup.
+        assert "  " not in cleaned
+        # No orphaned leading comma on the line.
+        assert not cleaned.lstrip().startswith(",")
