@@ -658,9 +658,17 @@ async def product_compose(state: Dict[str, Any]) -> Dict[str, Any]:
             # Full LLM consensus for top products
             for product_name, bundle in top_products:
                 review_bundles[product_name] = bundle
+                # Strip site_name from each snippet — the LLM must never see
+                # named source attributions ("Wirecutter:", "RTINGS:") because
+                # VOICE_PROMPT forbids citing competitors but the model treats
+                # whatever names appear in its user message as canonical
+                # citation material and weaves them into the output. The
+                # review_sources UI block at line ~1268 still surfaces source
+                # names to the USER for explainability. See voice-hotfix PR.
                 source_snippets = "\n".join([
-                    f"- {s.get('site_name', 'Review')}: {s.get('snippet', '')}"
+                    f"- {s.get('snippet', '')}"
                     for s in bundle.get("sources", [])[:5]
+                    if s.get('snippet')
                 ])
                 consensus_role = (
                     "Write a 3-5 sentence summary that covers: (1) what reviewers "
@@ -787,28 +795,27 @@ Products to describe:
                     if link_parts:
                         buy_links_str = " | Buy: " + " ; ".join(link_parts)
 
-                # Build review source references and excerpts
-                source_refs = ""
+                # Build review excerpts WITHOUT named source attribution.
+                # The LLM must never see "[Wirecutter](url)" or "RTINGS:"
+                # because VOICE_PROMPT forbids citing competitors but the
+                # model uses whatever names appear in its user message as
+                # citation material. Sources are still rendered in the
+                # review_sources UI block (line ~1268) for user-facing
+                # explainability — they just don't reach the LLM. See
+                # voice-hotfix PR.
                 review_excerpts = ""
                 sources = bundle.get("sources", [])
                 if sources:
                     top_sources = sources[:3]
-                    ref_parts = []
-                    excerpt_parts = []
-                    for s in top_sources:
-                        site = s.get("site_name", "Review")
-                        url = s.get("url", "")
-                        snippet = s.get("snippet", "")
-                        if url:
-                            ref_parts.append(f"[{site}]({url})")
-                        if snippet:
-                            excerpt_parts.append(f"  - {site}: {snippet[:120]}")
-                    if ref_parts:
-                        source_refs = f" | Reviews: {', '.join(ref_parts)}"
+                    excerpt_parts = [
+                        f"  - {s.get('snippet', '')[:120]}"
+                        for s in top_sources
+                        if s.get("snippet")
+                    ]
                     if excerpt_parts:
                         review_excerpts = "\n" + "\n".join(excerpt_parts)
 
-                blog_data_parts.append(f"Product: {pname}{label_str} | Rating: {rating}/5 ({total} reviews){buy_links_str} | Image: {image_str}{source_refs}{review_excerpts}")
+                blog_data_parts.append(f"Product: {pname}{label_str} | Rating: {rating}/5 ({total} reviews){buy_links_str} | Image: {image_str}{review_excerpts}")
                 blog_product_names.append(pname)
 
         # Also add affiliate-only products NOT already covered by review_bundles
