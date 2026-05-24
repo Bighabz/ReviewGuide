@@ -18,6 +18,7 @@ if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
 from app.services.model_service import model_service
+from app.services.prompts.voice import build_system_prompt
 from app.core.config import settings
 
 logger = get_logger(__name__)
@@ -310,10 +311,18 @@ Return ONLY valid JSON:
   ]
 }}"""
 
+        suggestion_role = (
+            "You generate contextual follow-up suggestions that the user "
+            "could tap as next-step chips. Each suggestion must reference "
+            "something specific from the conversation — a product just "
+            "discussed, a tradeoff surfaced, a constraint the user mentioned. "
+            "Avoid generic offers ('Anything else?', 'Want to dig deeper?'). "
+            "Return JSON in the schema specified by the user prompt."
+        )
         # Generate suggestions using LLM
         response = await model_service.generate(
             messages=[
-                {"role": "system", "content": "You generate helpful, contextual follow-up questions — like a friend who remembers what they said earlier. Be warm, specific, and concise."},
+                {"role": "system", "content": build_system_prompt(role_prompt=suggestion_role, kind="snippet")},
                 {"role": "user", "content": prompt}
             ],
             model=settings.DEFAULT_MODEL,

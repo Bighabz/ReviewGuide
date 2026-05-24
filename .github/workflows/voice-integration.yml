@@ -1,0 +1,82 @@
+name: Voice Integration
+
+# Gates merges when prompts, agents, or composer tools change. Two layers:
+#
+#   1. Structural wiring (always-on, no API needed) verifies every
+#      voice-applicable site imports build_system_prompt and uses it, and that
+#      classifier / extractor / search-retrieval sites do NOT wire voice.
+#
+#   2. Live LLM compliance (skipped automatically if ANTHROPIC_API_KEY and
+#      OPENAI_API_KEY are both placeholders) drives a handful of canonical
+#      composer prompts against the real model and asserts
+#      check_voice_compliance() returns no violations.
+#
+# See backend/tests/test_voice_integration.py for the two-layer rationale.
+
+on:
+  pull_request:
+    paths:
+      - 'backend/app/services/prompts/**'
+      - 'backend/mcp_server/tools/**'
+      - 'backend/app/agents/**'
+      - 'backend/tests/test_voice_*.py'
+      - '.github/workflows/voice-integration.yml'
+  push:
+    branches: [main, feat/voice-rebuild]
+    paths:
+      - 'backend/app/services/prompts/**'
+      - 'backend/mcp_server/tools/**'
+      - 'backend/app/agents/**'
+      - 'backend/tests/test_voice_*.py'
+      - '.github/workflows/voice-integration.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  voice:
+    name: Voice (wiring + compliance)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: requirements.txt
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Foundation unit tests (voice + compliance)
+        working-directory: backend
+        env:
+          ENV: test
+          SECRET_KEY: test-secret-key-32-characters-long-xxx
+          DATABASE_URL: 'sqlite+aiosqlite:///:memory:'
+          REDIS_URL: 'redis://localhost:6379/0'
+          OPENAI_API_KEY: sk-test-placeholder
+          RATE_LIMIT_ENABLED: 'false'
+          LOG_ENABLED: 'false'
+        run: python -m pytest tests/test_voice_prompt.py tests/test_voice_compliance.py -v
+      - name: Voice wiring + live compliance
+        working-directory: backend
+        env:
+          ENV: test
+          SECRET_KEY: test-secret-key-32-characters-long-xxx
+          DATABASE_URL: 'sqlite+aiosqlite:///:memory:'
+          REDIS_URL: 'redis://localhost:6379/0'
+          # The live compliance tests gate on whether a real key is present
+          # (not the literal "sk-test-placeholder"). If ANTHROPIC_API_KEY is
+          # configured as a repo secret, the live layer runs; otherwise only
+          # the structural wiring layer runs (still merge-blocking).
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || 'sk-test-placeholder' }}
+          USE_ANTHROPIC_COMPOSE: 'true'
+          RATE_LIMIT_ENABLED: 'false'
+          LOG_ENABLED: 'false'
+        run: python -m pytest tests/test_voice_integration.py -v

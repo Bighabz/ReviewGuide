@@ -373,6 +373,7 @@ async def product_compose(state: Dict[str, Any]) -> Dict[str, Any]:
     # Import here to avoid settings validation at module load
     from app.core.centralized_logger import get_logger
     from app.services.model_service import model_service
+    from app.services.prompts.voice import build_system_prompt
     from app.core.config import settings
 
     logger = get_logger(__name__)
@@ -618,9 +619,16 @@ async def product_compose(state: Dict[str, Any]) -> Dict[str, Any]:
                     parts.append(f"favors {', '.join(past_brands)}")
                 pref_note = f"\nReturning user who {' and '.join(parts)}."
 
+            concierge_role = (
+                "Write 2-3 SHORT sentences (max 60 words) explaining WHY these "
+                "products match the user's needs. Reference their criteria from "
+                "the conversation (budget, features, use case). Do NOT list "
+                "products — they are shown in cards below. Do NOT describe your "
+                "process or mention how many sources you searched."
+            )
             llm_tasks['concierge'] = model_service.generate_compose(
                 messages=[
-                    {"role": "system", "content": "You are ReviewGuide, a friendly and knowledgeable AI shopping assistant. Never open with phrases like 'Based on X sources' or mention how many sources you searched. Never describe your process. Write 2-3 SHORT sentences (max 60 words) explaining WHY these products match the user's needs. Reference their criteria from the conversation (budget, features, use case). Do NOT list products — they are shown in cards below. End with 2-3 specific follow-up questions like 'Want to compare the top two?' or 'Looking for budget alternatives?' — make them relevant to the specific products shown."},
+                    {"role": "system", "content": build_system_prompt(role_prompt=concierge_role, kind="snippet")},
                     {"role": "user", "content": f'User asked: "{user_message}"\nContext:\n{context_summary}{pref_note}\nProducts: {", ".join(product_name_list)}\nSources: {", ".join(provider_names)}'}
                 ],
                 temperature=0.7,
@@ -654,9 +662,16 @@ async def product_compose(state: Dict[str, Any]) -> Dict[str, Any]:
                     f"- {s.get('site_name', 'Review')}: {s.get('snippet', '')}"
                     for s in bundle.get("sources", [])[:5]
                 ])
+                consensus_role = (
+                    "Write a 3-5 sentence summary that covers: (1) what reviewers "
+                    "consistently praise, (2) any notable criticisms or caveats, "
+                    "and (3) who this product is best suited for. End with a "
+                    "sentence describing the ideal buyer. Do NOT describe your "
+                    "process or mention how many sources you searched."
+                )
                 llm_tasks[f'consensus:{product_name}'] = model_service.generate_compose(
                     messages=[
-                        {"role": "system", "content": "You are an editorial product reviewer writing a concise expert summary. Write a 3-5 sentence summary that covers: (1) what reviewers consistently praise, (2) any notable criticisms or caveats, and (3) who this product is best suited for. Write in a warm, authoritative editorial voice — like a knowledgeable friend giving the tldr. Never open with \"Based on X sources\" or mention how many sources. Weave in source names only when it adds credibility (e.g., \"Wirecutter highlights its noise cancellation\"). End with a sentence describing the ideal buyer."},
+                        {"role": "system", "content": build_system_prompt(role_prompt=consensus_role, kind="snippet")},
                         {"role": "user", "content": f"Product: {product_name}\nAvg Rating: {bundle.get('avg_rating', 0)}/5 from {bundle.get('total_reviews', 0)} reviews\n\nReview excerpts:\n{source_snippets}\n\nWrite a 3-5 sentence editorial summary covering: strengths, criticisms, and ideal buyer."}
                     ],
                     temperature=0.5,
@@ -701,8 +716,7 @@ RULES:
 2. ONLY reference personal details (names, pets, family) if they appear in the conversation context. NEVER invent or assume personal details.
 3. If no personal context exists, write objectively about the product's strengths
 4. Vary your descriptions — don't repeat the same pattern
-5. Be warm and informative, like a knowledgeable friend
-6. Return descriptions in the EXACT same order as the products listed
+5. Return descriptions in the EXACT same order as the products listed
 
 Return JSON: {"descriptions": {"Product Title 1": "desc1", "Product Title 2": "desc2", ...}}"""
 
@@ -716,7 +730,7 @@ Products to describe:
 
             llm_tasks['descriptions'] = model_service.generate_compose(
                 messages=[
-                    {"role": "system", "content": desc_system},
+                    {"role": "system", "content": build_system_prompt(role_prompt=desc_system, kind="snippet")},
                     {"role": "user", "content": desc_user}
                 ],
                 temperature=0.7,
@@ -836,41 +850,38 @@ Products to describe:
 
         blog_data = "\n".join(blog_data_parts)
 
-        llm_tasks['blog_article'] = model_service.generate_compose_with_streaming(
-            messages=[
-                {"role": "system", "content": """You are an expert product journalist writing a buying guide for ReviewGuide.ai. Write in a warm, authoritative voice — like a Wirecutter or The Verge review.
+        blog_role = """Write a buying guide for ReviewGuide.ai.
 
-FORMAT — FOLLOW THIS EXACT STRUCTURE EVERY TIME:
+OUTPUT FORMAT — return a JSON object with exactly two string fields:
+{
+  "body": "<3-5 paragraphs of markdown, no per-product headings>",
+  "follow_up_question": "<exactly one contextual curious question that references something specific from the body — a product name, a tradeoff just mentioned, or the user's stated situation>"
+}
 
-**SECTION 1: Blog Review (3-5 paragraphs)**
-- Paragraph 1: What the user is looking for and what matters most in this category
-- Paragraph 2-3: Summarize what reviewers say — reference specific reviewer insights using inline citations (e.g., "[Wirecutter](url) highlights..." or "According to [RTINGS](url)..."). Name the top picks and WHY reviewers recommend them.
-- Paragraph 4: Brief mention of what to watch out for — common tradeoffs, things reviewers flag
-- Final paragraph: A short verdict/recommendation summary
-
-**SECTION 2: Follow-up Questions (MANDATORY)**
-After your review, ALWAYS end with exactly 3 conversational follow-up questions to help the user explore further. Write them as a short paragraph starting with something like "Want to dig deeper?" followed by questions like:
-- "Want to compare the top two head-to-head?"
-- "Looking for budget alternatives under $X?"
-- "Want more details on battery life and durability?"
-- "Interested in seeing what real users say about these?"
-- "Need help picking between [Product A] and [Product B]?"
-Make the questions SPECIFIC to the products and category — not generic.
-
-RULES:
-- DO NOT write per-product ## headings or sections — the individual products are shown as interactive cards below your text
-- DO NOT include product images, prices, or buy links — those are in the cards
-- DO include review source names and citation links throughout the text
-- Write naturally — vary sentence structure, don't be formulaic
-- NEVER invent features or specs not in the data
-- NEVER invent URLs — only link to sources explicitly listed in the data
+BODY RULES:
+- Paragraph 1: what the user is looking for and what matters most in this category
+- Paragraphs 2-3: synthesize what reviewers say about the top picks and WHY — speak in your own voice, do not name-check competitors or review outlets
+- Paragraph 4: brief note on tradeoffs / what to watch out for
+- Final paragraph: short verdict / recommendation summary
+- DO NOT write per-product ## headings — products render as interactive cards below your text
+- DO NOT include product images, prices, or buy links — they render in the cards
+- NEVER invent features, specs, or URLs
 - NEVER mention personal details unless the user provided them
-- Keep the total response under 400 words
-- The follow-up questions at the end are REQUIRED — never skip them"""},
+- Keep the body under 400 words total
+
+FOLLOW-UP RULES:
+- Exactly one question, returned in the follow_up_question field
+- Must reference something specific from the body (a product, a tradeoff, the user's situation)
+- Must NOT be a generic offer ("Anything else?", "Want to dig deeper?", "How can I help?")"""
+
+        llm_tasks['blog_article'] = model_service.generate_compose(
+            messages=[
+                {"role": "system", "content": build_system_prompt(role_prompt=blog_role, kind="response")},
                 {"role": "user", "content": blog_data}
             ],
             temperature=0.7,
-            max_tokens=500,
+            max_tokens=700,
+            response_format={"type": "json_object"},
             agent_name="blog_article_composer"
         )
 
@@ -885,9 +896,16 @@ RULES:
             if sorted_by_quality and sorted_by_quality[0][1].get("quality_score", 0) > 0:
                 best_product_name = sorted_by_quality[0][0]
                 best_bundle = sorted_by_quality[0][1]
+                top_pick_role = (
+                    "Given a top-rated product, write a JSON object with exactly "
+                    "three keys: headline (one sentence why it's the best pick), "
+                    "best_for (who should buy it, one sentence), not_for (who "
+                    "should look elsewhere, one sentence). Be specific and "
+                    "opinionated. Do not use generic phrases."
+                )
                 llm_tasks['top_pick'] = model_service.generate_compose(
                     messages=[
-                        {"role": "system", "content": "You are an editorial product reviewer. Given a top-rated product, write a JSON object with exactly three keys: headline (one sentence why it's the best pick), best_for (who should buy it, one sentence), not_for (who should look elsewhere, one sentence). Be specific and opinionated. Do not use generic phrases."},
+                        {"role": "system", "content": build_system_prompt(role_prompt=top_pick_role, kind="snippet")},
                         {"role": "user", "content": f'Product: {best_product_name}\nRating: {best_bundle.get("avg_rating", 0)}/5 from {best_bundle.get("total_reviews", 0)} reviews\nUser asked: "{user_message}"'}
                     ],
                     temperature=0.5,
@@ -1277,8 +1295,27 @@ RULES:
 
         blog_article = _get_result('blog_article', '')
         if blog_article:
-            assistant_text = blog_article
-            logger.info(f"[product_compose] LLM blog article: {len(assistant_text)} chars")
+            # Blog composer now returns JSON {body, follow_up_question}. Parse
+            # and concatenate body + follow-up so the existing assistant_text
+            # delivery path (chunked SSE in chat.py) keeps working unchanged.
+            # Frontend visual treatment of the follow-up as a separate chip is
+            # a follow-up PR; this PR ships the structural separation in the
+            # prompt + the data routing.
+            try:
+                parsed = json.loads(blog_article)
+                body = (parsed.get("body") or "").strip()
+                follow_up = (parsed.get("follow_up_question") or "").strip()
+                assistant_text = body + (f"\n\n{follow_up}" if follow_up else "")
+                logger.info(
+                    f"[product_compose] LLM blog article: body={len(body)} chars, "
+                    f"follow_up={len(follow_up)} chars"
+                )
+            except (json.JSONDecodeError, TypeError, AttributeError) as e:
+                logger.warning(
+                    f"[product_compose] Blog JSON parse failed ({e}); "
+                    f"using raw text. Raw prefix: {blog_article[:120]!r}"
+                )
+                assistant_text = blog_article
         elif review_data and review_bundles:
             # Fallback: template assembly (same as current code)
             opener = _get_result('opener', '')

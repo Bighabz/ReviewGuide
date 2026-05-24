@@ -17,6 +17,7 @@ if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
 from app.services.model_service import model_service
+from app.services.prompts.voice import build_system_prompt
 from app.core.config import settings
 
 logger = get_logger(__name__)
@@ -55,21 +56,23 @@ async def intro_compose(state: Dict[str, Any]) -> Dict[str, Any]:
         logger.info("Generating intro response...")
 
         # Prompt for generating minimal, one-screen introduction
-        user_prompt = """Generate a brief, friendly introduction for a smart assistant that helps with product reviews, travel planning, and general information.
-
-Requirements:
-- Start with a warm, natural greeting — like texting a knowledgeable friend, not a corporate chatbot
-- One sentence describing what you help with
-- Include 3 diverse example questions (using bullet points)
-- End with an encouraging invitation to ask anything
-- Keep it conversational and minimal (one screen only)
-- No long explanations or capability lists
-
-Return only the introduction message."""
+        intro_role = (
+            "You are ReviewGuide and you just opened a chat with this person. "
+            "Welcome them in 2-3 sentences. Mention you help with product "
+            "reviews, travel planning, and general information. Include three "
+            "diverse example questions as bullet points. End with one short "
+            "contextual invitation — not a generic 'how can I help'. Keep it "
+            "to one screen; no long capability lists."
+        )
+        user_prompt = (
+            "Generate the welcome message now. Return only the message text — "
+            "no JSON, no preamble, no closing meta-commentary."
+        )
 
         # Generate intro using model service
         intro_message = await model_service.generate(
             messages=[
+                {"role": "system", "content": build_system_prompt(role_prompt=intro_role, kind="response")},
                 {"role": "user", "content": user_prompt}
             ],
             model=settings.COMPOSER_MODEL,

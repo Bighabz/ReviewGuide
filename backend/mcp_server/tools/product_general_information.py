@@ -106,11 +106,20 @@ Focus on:
 Keep the answer concise (2-3 paragraphs) and helpful.
 
 Return valid JSON:
-{{"answer": "Your answer here", "sources": []}}"""
+{{"answer": "Your answer here", "follow_up_question": "<exactly one contextual curious question that references something specific from the answer>", "sources": []}}"""
 
+        from app.services.prompts.voice import build_system_prompt
+        role_prompt = (
+            "You answer product knowledge questions with clear, opinionated "
+            "explanations. Return a JSON object with three fields: answer "
+            "(the explanation, 2-3 paragraphs of markdown), follow_up_question "
+            "(exactly one contextual curious question that references "
+            "something specific from the answer — not a generic offer), and "
+            "sources (an empty list unless you have explicit URLs to cite)."
+        )
         response = await model_service.generate(
             messages=[
-                {"role": "system", "content": "You are a product knowledge expert. Provide clear, helpful explanations about products and technology."},
+                {"role": "system", "content": build_system_prompt(role_prompt=role_prompt, kind="response")},
                 {"role": "user", "content": prompt}
             ],
             model=settings.DEFAULT_MODEL,
@@ -121,12 +130,17 @@ Return valid JSON:
         )
 
         data = json.loads(response)
-        answer = data.get("answer", "")
+        answer = (data.get("answer") or "").strip()
+        follow_up = (data.get("follow_up_question") or "").strip()
+        # Concatenate the follow-up so the existing product_compose consumer
+        # path (general_product_info → assistant_text at product_compose.py:444)
+        # delivers the structurally-separated follow-up to the user.
+        combined = answer + (f"\n\n{follow_up}" if follow_up else "")
 
-        logger.info(f"[product_general_information] Generated answer ({len(answer)} chars)")
+        logger.info(f"[product_general_information] Generated answer ({len(answer)} chars), follow_up ({len(follow_up)} chars)")
 
         return {
-            "general_product_info": answer,
+            "general_product_info": combined,
             "success": True
         }
 

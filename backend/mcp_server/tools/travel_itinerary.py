@@ -19,6 +19,7 @@ if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
 from app.services.model_service import model_service
+from app.services.prompts.voice import build_system_prompt
 from app.core.config import settings
 
 logger = get_logger(__name__)
@@ -87,9 +88,14 @@ Keep activities concise (max 15 words each). Max 2 highlights per day."""
         # Limit max_tokens to speed up response - each day needs ~150 tokens
         max_tokens = min(200 + (duration_days * 180), 1500)
 
+        itinerary_role = (
+            "You generate a tight day-by-day itinerary as JSON. Each activity "
+            "string must be concrete (≤15 words), not generic. Vary the rhythm "
+            "across days — don't repeat the same structure verbatim."
+        )
         response = await model_service.generate(
             messages=[
-                {"role": "system", "content": "You are a travel planner. Be concise."},
+                {"role": "system", "content": build_system_prompt(role_prompt=itinerary_role, kind="snippet")},
                 {"role": "user", "content": prompt}
             ],
             model=settings.DEFAULT_MODEL,
