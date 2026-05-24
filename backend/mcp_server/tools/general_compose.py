@@ -18,6 +18,7 @@ if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
 from app.services.model_service import model_service
+from app.services.prompts.voice import build_system_prompt
 from app.core.config import settings
 from app.utils.date_utils import get_current_date_str
 
@@ -81,8 +82,16 @@ async def general_compose(
                 "If discussing specific products or models that may have been released after your training "
                 "cutoff, briefly acknowledge that you may not have the most current specifications or pricing.\n\n"
             )
+            no_search_role = system_prefix + (
+                "You are answering a conversational question with no search "
+                "results available. Use the conversation history as context "
+                "— if the user shared their name, preferences, family, or "
+                "budget earlier, weave those details in naturally. Keep the "
+                "response under 50 words. Do NOT describe your process or "
+                "mention how many sources you searched."
+            )
             messages = [
-                {"role": "system", "content": system_prefix + "You are ReviewGuide, a friendly and knowledgeable AI shopping assistant. Never open with phrases like 'Based on X sources' or mention how many sources you searched. Never describe your process. You remember everything the user has told you. If the user introduced themselves or shared their name earlier in the conversation, always address them by name. Remember their preferences, budget, family members, pets, etc. Use these personal details naturally in your responses. Be warm, engaging, and personalized. Keep responses under 50 words."},
+                {"role": "system", "content": build_system_prompt(role_prompt=no_search_role, kind="response")},
             ]
 
             # Add recent history as actual message objects so the LLM sees real context
@@ -146,9 +155,17 @@ Answer the user's question directly and concisely. If the user's question refers
             "If discussing specific products or models that may have been released after your training "
             "cutoff, briefly acknowledge that you may not have the most current specifications or pricing.\n\n"
         )
+        search_role = search_system_prefix + (
+            "You are answering a question using both search results and the "
+            "conversation so far. Use the search results for factual "
+            "questions; use the conversation history for personal ones "
+            "(names, preferences, family, budget). Weave personal details in "
+            "naturally when relevant. Do NOT describe your process or mention "
+            "how many sources you searched."
+        )
         assistant_text = await model_service.generate(
             messages=[
-                {"role": "system", "content": search_system_prefix + "You are ReviewGuide, a friendly and knowledgeable AI assistant. Never open with phrases like 'Based on X sources' or mention how many sources you searched. Never describe your process. Respond immediately in a warm, conversational tone like a knowledgeable friend. You remember everything the user has told you. If the user introduced themselves or shared their name earlier in the conversation, always address them by name. Remember their preferences, budget, family members, pets, etc. Use these personal details naturally in your responses. Use search results for factual questions, but use conversation history for personal questions."},
+                {"role": "system", "content": build_system_prompt(role_prompt=search_role, kind="response")},
                 {"role": "user", "content": prompt}
             ],
             model=settings.COMPOSER_MODEL,

@@ -17,6 +17,7 @@ if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
 from app.services.model_service import model_service
+from app.services.prompts.voice import build_system_prompt
 from app.core.config import settings
 
 logger = get_logger(__name__)
@@ -144,10 +145,17 @@ User asks "best restaurants in Tokyo" → Return: {{"restaurants": ["...", "..."
 User asks "attractions in Rome" → Return: {{"attractions": ["...", "...", ...]}}
 User asks "attractions and where to eat in Barcelona" → Return: {{"attractions": [...], "restaurants": [...]}}"""
 
+        facts_role = (
+            "You return factual destination information shaped to what the "
+            "user actually asked about — weather, restaurants, attractions, "
+            "activities, customs, tips. Tailor the JSON fields populated to "
+            "the question; do not return data the user didn't ask for. The "
+            "downstream renderer turns each field into a separate UI card."
+        )
         # Callbacks are automatically inherited from LangGraph context
         response = await model_service.generate(
             messages=[
-                {"role": "system", "content": "You are a travel expert providing factual destination information. Tailor your response based on what the user is asking about."},
+                {"role": "system", "content": build_system_prompt(role_prompt=facts_role, kind="snippet")},
                 {"role": "user", "content": prompt}
             ],
             model=settings.DEFAULT_MODEL,

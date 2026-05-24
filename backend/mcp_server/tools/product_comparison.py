@@ -123,14 +123,21 @@ Use this exact structure:
 
 Return ONLY the HTML, nothing else."""
 
+        from app.services.prompts.voice import build_system_prompt
         comparison_system_prefix = (
             f"Today's date is {get_current_date_str()}.\n"
             "If discussing specific products or models that may have been released after your training "
             "cutoff, briefly acknowledge that you may not have the most current specifications or pricing.\n\n"
         )
+        comparison_role = comparison_system_prefix + (
+            "Generate an accurate, well-formatted HTML comparison table for the "
+            "given products. Return only valid HTML with inline CSS — no prose "
+            "preamble, no markdown. The verdict paragraph inside the HTML should "
+            "be opinionated and specific, not glazing."
+        )
         html_response = await model_service.generate(
             messages=[
-                {"role": "system", "content": comparison_system_prefix + "You are a tech product expert. Generate accurate, well-formatted HTML comparison tables. Return only valid HTML with inline CSS."},
+                {"role": "system", "content": build_system_prompt(role_prompt=comparison_role, kind="snippet")},
                 {"role": "user", "content": comparison_prompt}
             ],
             model=settings.COMPOSER_MODEL,
