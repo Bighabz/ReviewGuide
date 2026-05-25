@@ -24,6 +24,13 @@ FROM python:3.11-slim AS production
 
 WORKDIR /app
 
+# Build arg threading the running git SHA into the container so the
+# /health endpoint can expose it. railway.json passes
+# $RAILWAY_GIT_COMMIT_SHA at build time; local builds can override
+# with --build-arg GIT_SHA=... or fall back to "unknown".
+ARG GIT_SHA=unknown
+ENV GIT_SHA=${GIT_SHA}
+
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
