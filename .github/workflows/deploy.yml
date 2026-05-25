@@ -1,0 +1,78 @@
+name: Deploy backend
+
+# Redundant deploy trigger for the Railway backend. Railway's GitHub
+# integration (configured in the Railway dashboard) is the primary
+# auto-deploy mechanism; this workflow is a belt-and-suspenders safety
+# net so a silent webhook disconnect — exactly what happened between
+# 2026-05-20 and 2026-05-25 — can't again result in four days of
+# undeployed commits sitting on `main`.
+#
+# Activation requirements:
+#   1. RAILWAY_TOKEN secret added to the GitHub repo (Settings →
+#      Secrets and variables → Actions). Generate via:
+#         railway login --browserless    # produces a long-lived token
+#      or via the Railway dashboard → Account → Tokens.
+#   2. The Railway CLI on this runner uses the token to authenticate
+#      and deploys whatever's currently on `main`.
+#
+# If RAILWAY_TOKEN is missing, the step fails cleanly (one log line
+# saying so) rather than ghosting. That's by design — better to see
+# a red X than to silently no-op.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-backend
+  cancel-in-progress: false
+
+jobs:
+  deploy-backend:
+    name: Deploy backend to Railway
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Only run on main pushes. Manual dispatch is allowed for one-off
+    # redeploys without a code change.
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Guard — RAILWAY_TOKEN must be set
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          if [ -z "$RAILWAY_TOKEN" ]; then
+            echo "::error::RAILWAY_TOKEN secret is not configured."
+            echo "::error::Add it via Settings → Secrets and variables → Actions."
+            echo "::error::Generate the token via 'railway login --browserless' or the Railway dashboard."
+            exit 1
+          fi
+          echo "RAILWAY_TOKEN present (len: ${#RAILWAY_TOKEN})"
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli@latest
+
+      - name: Deploy
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        # `--from-source` deploys the latest commit from the Railway-
+        # configured GitHub source — same path the dashboard webhook
+        # uses. Avoids the local-tarball-upload path that OOM'd on the
+        # 2026-05-25 manual deploy (the working tree, including
+        # frontend/node_modules, exceeded the indexer's memory budget).
+        #
+        # Project / environment / service IDs are non-secret identifiers
+        # for the reviewguide-backend project. Hardcoded so the workflow
+        # is self-contained — the alternative is `railway link` in a
+        # prior step which requires `--yes` patches that vary by CLI
+        # version. If these IDs ever change (project rename, env clone,
+        # service migration), update them here.
+        run: |
+          railway redeploy \
+            --project 0827e58a-47ff-4199-8fae-4f634a8384e8 \
+            --environment 9db39bf6-45d6-40ca-acbe-c627b43b710e \
+            --service backend \
+            --from-source \
+            --yes
