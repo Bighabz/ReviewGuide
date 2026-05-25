@@ -658,9 +658,17 @@ async def product_compose(state: Dict[str, Any]) -> Dict[str, Any]:
             # Full LLM consensus for top products
             for product_name, bundle in top_products:
                 review_bundles[product_name] = bundle
+                # Strip site_name from each snippet — the LLM must never see
+                # named source attributions ("Wirecutter:", "RTINGS:") because
+                # VOICE_PROMPT forbids citing competitors but the model treats
+                # whatever names appear in its user message as canonical
+                # citation material and weaves them into the output. The
+                # review_sources UI block at line ~1268 still surfaces source
+                # names to the USER for explainability. See voice-hotfix PR.
                 source_snippets = "\n".join([
-                    f"- {s.get('site_name', 'Review')}: {s.get('snippet', '')}"
+                    f"- {s.get('snippet', '')}"
                     for s in bundle.get("sources", [])[:5]
+                    if s.get('snippet')
                 ])
                 consensus_role = (
                     "Write a 3-5 sentence summary that covers: (1) what reviewers "
@@ -787,28 +795,27 @@ Products to describe:
                     if link_parts:
                         buy_links_str = " | Buy: " + " ; ".join(link_parts)
 
-                # Build review source references and excerpts
-                source_refs = ""
+                # Build review excerpts WITHOUT named source attribution.
+                # The LLM must never see "[Wirecutter](url)" or "RTINGS:"
+                # because VOICE_PROMPT forbids citing competitors but the
+                # model uses whatever names appear in its user message as
+                # citation material. Sources are still rendered in the
+                # review_sources UI block (line ~1268) for user-facing
+                # explainability — they just don't reach the LLM. See
+                # voice-hotfix PR.
                 review_excerpts = ""
                 sources = bundle.get("sources", [])
                 if sources:
                     top_sources = sources[:3]
-                    ref_parts = []
-                    excerpt_parts = []
-                    for s in top_sources:
-                        site = s.get("site_name", "Review")
-                        url = s.get("url", "")
-                        snippet = s.get("snippet", "")
-                        if url:
-                            ref_parts.append(f"[{site}]({url})")
-                        if snippet:
-                            excerpt_parts.append(f"  - {site}: {snippet[:120]}")
-                    if ref_parts:
-                        source_refs = f" | Reviews: {', '.join(ref_parts)}"
+                    excerpt_parts = [
+                        f"  - {s.get('snippet', '')[:120]}"
+                        for s in top_sources
+                        if s.get("snippet")
+                    ]
                     if excerpt_parts:
                         review_excerpts = "\n" + "\n".join(excerpt_parts)
 
-                blog_data_parts.append(f"Product: {pname}{label_str} | Rating: {rating}/5 ({total} reviews){buy_links_str} | Image: {image_str}{source_refs}{review_excerpts}")
+                blog_data_parts.append(f"Product: {pname}{label_str} | Rating: {rating}/5 ({total} reviews){buy_links_str} | Image: {image_str}{review_excerpts}")
                 blog_product_names.append(pname)
 
         # Also add affiliate-only products NOT already covered by review_bundles
@@ -858,11 +865,33 @@ OUTPUT FORMAT — return a JSON object with exactly two string fields:
   "follow_up_question": "<exactly one contextual curious question that references something specific from the body — a product name, a tradeoff just mentioned, or the user's stated situation>"
 }
 
+RANK AND COMMIT (load-bearing — read first):
+
+You are an editor with a take, not a balanced surveyor. Every buying guide
+has a #1 pick and a #2 pick. Name them, in order, and explain WHY one beats
+the other for the default buyer in this category. The runner-up isn't "also
+great" — it is the right pick for a specific person whose situation differs
+from the default.
+
+DO NOT write parallel descriptions where every product gets one paragraph of
+praise. That reads like SEO content, not editor judgment.
+
+  BAD (parallel survey — do not write like this):
+    "The Anker Soundcore Life P3 is praised for its active noise cancellation
+    and customizable sound. The JBL TUNE 125TWS is noted for its deep bass
+    and user-friendly controls. Both are solid options under $100."
+
+  GOOD (ranked, with fit-based reasoning):
+    "For most people under $100, the Anker Soundcore Life P3 is the pick —
+    the ANC actually works on a subway, and the case is small enough to
+    pocket. The JBL TUNE 125TWS edges it out only if you want louder bass
+    and don't care about noise cancellation. Skip the rest at this price."
+
 BODY RULES:
 - Paragraph 1: what the user is looking for and what matters most in this category
-- Paragraphs 2-3: synthesize what reviewers say about the top picks and WHY — speak in your own voice, do not name-check competitors or review outlets
-- Paragraph 4: brief note on tradeoffs / what to watch out for
-- Final paragraph: short verdict / recommendation summary
+- Paragraphs 2-3: name the #1 pick first with WHY, then the #2 pick with WHO IT FITS — speak in your own voice, do not name-check review outlets or "reviewers" as a group
+- Paragraph 4: what to skip and why, or one real tradeoff worth knowing about the top pick
+- Final paragraph: short verdict — who should buy the #1, who should buy the #2
 - DO NOT write per-product ## headings — products render as interactive cards below your text
 - DO NOT include product images, prices, or buy links — they render in the cards
 - NEVER invent features, specs, or URLs
@@ -872,7 +901,8 @@ BODY RULES:
 FOLLOW-UP RULES:
 - Exactly one question, returned in the follow_up_question field
 - Must reference something specific from the body (a product, a tradeoff, the user's situation)
-- Must NOT be a generic offer ("Anything else?", "Want to dig deeper?", "How can I help?")"""
+- Must NOT be a generic offer ("Anything else?", "Want to dig deeper?", "How can I help?")
+- Must NOT be a bulleted list of multiple questions — just one single question"""
 
         llm_tasks['blog_article'] = model_service.generate_compose(
             messages=[
