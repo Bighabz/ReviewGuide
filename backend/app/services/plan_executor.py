@@ -885,6 +885,16 @@ class PlanExecutor:
                 results["assistant_text"] = value.get("assistant_text", "")
                 results["ui_blocks"] = value.get("ui_blocks", [])
                 results["citations"] = value.get("citations", [])
+                # B.3 follow-up — extract structured follow_up_question so it
+                # reaches chat.py's SSE generator. Without this, product_compose
+                # writes follow_up_question to its return dict but this
+                # extractor only copied the three fields above, silently
+                # dropping the value before it propagated into GraphState.
+                # Detected 2026-05-25 in B verification: LLM emitted a
+                # 130-char follow_up, parse succeeded, plan_executor dropped
+                # it, chat.py read empty, no SSE event fired.
+                if value.get("follow_up_question"):
+                    results["follow_up_question"] = value.get("follow_up_question")
 
         # Look for next_step_suggestion results
         for key, value in self.context.items():
