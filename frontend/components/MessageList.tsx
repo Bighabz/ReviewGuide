@@ -65,11 +65,33 @@ export default function MessageList({ messages, isStreaming }: MessageListProps)
     }
   }, [isStreaming])
 
-  // Scroll to top of the latest AI message when a new message arrives
+  // B.5 — track whether this is the very first messages-state update
+  // (hydrate from localStorage / SSE history fetch on resumed session)
+  // vs a real new-message event. The first transition gets scroll-to-
+  // bottom (spec §2.5: "Tapping a past chat in history opens it scrolled
+  // to the bottom, latest blog visible"); subsequent ones get the
+  // existing scroll-to-top-of-new-message behavior.
+  const isInitialHydrateRef = useRef(true)
+
   useEffect(() => {
     const newCount = messages.length
     const isNewMessage = newCount > prevMessageCountRef.current
     prevMessageCountRef.current = newCount
+
+    // B.5 — resumed-chat hydrate path. Instant scroll (behavior: 'auto')
+    // because the user expects to land there, not watch an animation.
+    // Pre-claim the lastAiMessageIdRef so the new-message branch below
+    // won't double-fire on the same render.
+    if (isInitialHydrateRef.current && newCount > 0) {
+      isInitialHydrateRef.current = false
+      const container = containerRef.current
+      if (container) {
+        container.scrollTop = container.scrollHeight
+      }
+      const newestAi = [...messages].reverse().find(m => m.role === 'assistant')
+      if (newestAi) lastAiMessageIdRef.current = newestAi.id
+      return
+    }
 
     if (isNewMessage) {
       userScrolledUpRef.current = false
