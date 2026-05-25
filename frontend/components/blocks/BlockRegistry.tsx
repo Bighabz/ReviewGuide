@@ -21,10 +21,12 @@ import ComparisonTable from '@/components/ComparisonTable'
 import ListBlock from '@/components/ListBlock'
 import DestinationInfo from '@/components/DestinationInfo'
 import CarRentalCard from '@/components/CarRentalCard'
-import ReviewSources from '@/components/ReviewSources'
+// NOTE: ReviewSources + SourceCitations removed (PR #9). They rendered
+// review-site names as user-visible badges, contradicting tone.md's
+// "No source citations. Synthesize." rule. Backend no longer emits
+// `review_sources` ui_blocks.
 import PriceComparison from '@/components/PriceComparison'
 import InlineProductCard from '@/components/InlineProductCard'
-import SourceCitations from '@/components/SourceCitations'
 import ProductReviewCarousel from '@/components/ProductReviewCarousel'
 import DOMPurify from 'dompurify'
 
@@ -103,9 +105,6 @@ const BLOCK_RENDERERS: Record<string, BlockRenderer> = {
     destination_info: (b) => <DestinationInfo data={(b.data as any) ?? {}} />,
     inline_product_card: (b) => (
         <InlineProductCard products={(b.data as any)?.products ?? []} />
-    ),
-    review_sources: (b) => (
-        <SourceCitations data={(b.data as any) ?? { products: [] }} title={b.title} />
     ),
     price_comparison: (b) => (
         <div>
