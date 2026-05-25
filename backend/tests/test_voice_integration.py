@@ -403,6 +403,67 @@ def test_chat_user_facing_errors_are_on_voice() -> None:
     )
 
 
+def test_comparison_blocks_only_emitted_on_comparison_intent() -> None:
+    """B.6 — spec §11.6 forbids spec tables on Results.
+
+    product_compose can emit two comparison-table-style ui_blocks:
+      - ``"type": "comparison_html"`` (line ~1033) — wrapper around
+        the HTML produced by product_comparison.py.
+      - ``"type": "product_comparison"`` (line ~422) — explicit
+        spec-grid block for the comparison-follow-up path.
+
+    Both must be gated on actual user-intent signals — emitting them
+    on every product query would slap a spec table on every Results
+    screen and violate the spec. This test pins the gating at the
+    source level so a refactor that removes the guard fails CI.
+
+    The product_comparison TOOL (which writes ``comparison_html`` to
+    state) is itself only invoked by the planner when intent
+    classification flags a comparison query — see
+    planner_agent.py:577 (``elif complexity in ("comparison", ...)``)
+    and the LLM-planner's tool-selection prompt at
+    planner_agent.py:61–62 ("compare X and Y" → product_comparison).
+    """
+    path = BACKEND_ROOT / "mcp_server/tools/product_compose.py"
+    content = path.read_text(encoding="utf-8")
+
+    # Guard 1: comparison_html ui_block must be inside an `if comparison_html`
+    # branch. The textual sequence we lock in is:
+    #   if comparison_html:
+    #       ui_blocks.append({
+    #           "type": "comparison_html",
+    # (intervening whitespace ignored — match the structural shape, not
+    # exact whitespace, so the test survives black formatting drift.)
+    import re as _re_audit
+    pattern_html = _re_audit.compile(
+        r"if\s+comparison_html\s*:\s*\n[\s\S]{0,200}?ui_blocks\.append\([\s\S]{0,40}?"
+        r'"type"\s*:\s*"comparison_html"',
+    )
+    assert pattern_html.search(content), (
+        "product_compose.py emits a `comparison_html` ui_block outside "
+        "an `if comparison_html:` guard. The spec (§11.6) forbids spec "
+        "tables on Results unless the user actually asked for a "
+        "comparison. Re-gate the emission."
+    )
+
+    # Guard 2: product_comparison ui_block must be inside the
+    # `_is_comparison_follow_up(...)` branch. The branch body builds a
+    # `comparison_block` dict and returns it — distance between the
+    # branch-opening if and the literal "product_comparison" string is
+    # the full body of the branch (~700 chars). Width covers the
+    # current structure plus reasonable refactor headroom.
+    pattern_pc = _re_audit.compile(
+        r"if\s+_is_comparison_follow_up\([\s\S]{0,1200}?"
+        r'"type"\s*:\s*"product_comparison"',
+    )
+    assert pattern_pc.search(content), (
+        "product_compose.py emits a `product_comparison` ui_block outside "
+        "the `if _is_comparison_follow_up(...):` branch. That branch is the "
+        "only sanctioned trigger for the spec-grid block on Results — "
+        "any other path is a spec §11.6 violation."
+    )
+
+
 def test_blog_composer_prompt_has_ranking_directive() -> None:
     """Guards against accidental deletion of the RANK-AND-COMMIT section
     of the blog composer prompt.
