@@ -185,6 +185,16 @@ _CITATION_PATTERNS: List[Pattern[str]] = [
         r"(?:highlight|recommend|note|praise|commend|criticize|advise|suggest|prefer|favor)\w*\s+",
         re.IGNORECASE,
     ),
+    # Numeric citation markers: "good for travel [1]", "noisy environments [2]."
+    # Anchored on preceding word + whitespace so it doesn't false-flag bracket
+    # syntax in code-like prose (``arr[0]``, ``items[3]``). The leading
+    # whitespace is consumed alongside the marker so the strip doesn't leave
+    # doubled spaces; trailing punctuation belongs to the sentence and is
+    # preserved (don't consume it — "travel [1]." should become "travel.").
+    # general_compose used to instruct the LLM to emit these explicitly; the
+    # instruction was removed alongside this pattern in A.1, but defense-in-
+    # depth here covers the model emitting them anyway from training priors.
+    re.compile(r"(?<=\w)\s+\[\d+\]", re.IGNORECASE),
 ]
 
 
@@ -394,6 +404,56 @@ def _normalize_whitespace(text: str) -> str:
     text = re.sub(r"(?m)^[,;:]\s*", "", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text
+
+
+def sanitize_voice_payload(value):
+    """Recursively sanitize a payload that may be a string, dict, or list.
+
+    The single-string ``sanitize_voice`` gate at ``chat.py:549`` doesn't
+    cover the halted-state path where ``result_state['assistant_text']``
+    arrives as a dict from the clarifier agent (shape:
+    ``{intro, followups, questions}``). Passing a dict to
+    ``sanitize_voice`` directly would crash on the first regex ``.sub()``.
+
+    This helper applies ``sanitize_voice`` to every string leaf and
+    aggregates violations from each leaf with a dotted path prefix
+    (e.g. ``"intro:citation:..."`` / ``"followups[2]:..."``) so the
+    warning log stays diagnosable.
+
+    Args:
+        value: A string, dict, list, or any other value. Non-string
+            leaves (numbers, bools, None) are returned unchanged with
+            no violations recorded.
+
+    Returns:
+        ``(cleaned_value, violations)`` — ``cleaned_value`` mirrors
+        ``value``'s structure with strings replaced by their sanitized
+        versions; ``violations`` is the aggregated list of violation
+        strings from every leaf, with path prefixes.
+
+    Behavior matches ``sanitize_voice`` for string input — this helper
+    is a strict superset.
+    """
+    if isinstance(value, str):
+        return sanitize_voice(value)
+    if isinstance(value, dict):
+        cleaned: dict = {}
+        all_violations: list[str] = []
+        for k, v in value.items():
+            sub_cleaned, sub_violations = sanitize_voice_payload(v)
+            cleaned[k] = sub_cleaned
+            all_violations.extend(f"{k}:{vi}" for vi in sub_violations)
+        return cleaned, all_violations
+    if isinstance(value, list):
+        cleaned_list: list = []
+        all_violations = []
+        for i, item in enumerate(value):
+            sub_cleaned, sub_violations = sanitize_voice_payload(item)
+            cleaned_list.append(sub_cleaned)
+            all_violations.extend(f"[{i}]:{vi}" for vi in sub_violations)
+        return cleaned_list, all_violations
+    # Non-text leaf (number, bool, None, etc.) — return unchanged.
+    return value, []
 
 
 def _strip_trailing_generic_block(text: str) -> tuple[str, Optional[str]]:

@@ -147,7 +147,7 @@ async def general_compose(
 
 {context}
 
-Answer the user's question directly and concisely. If the user's question refers to something from the conversation (like their name, preferences, or previous topics), answer from conversation context instead of search results. Use citation markers [1], [2], etc. when referencing sources."""
+Answer the user's question directly and concisely. If the user's question refers to something from the conversation (like their name, preferences, or previous topics), answer from conversation context instead of search results. Speak in your own voice — synthesize what the sources show, never name them or emit citation markers."""
 
         # Callbacks are automatically inherited from LangGraph context
         search_system_prefix = (

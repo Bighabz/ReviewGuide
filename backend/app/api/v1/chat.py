@@ -540,26 +540,43 @@ async def generate_chat_stream(
         assistant_text = result_state.get('assistant_text') or ''
         detected_intent = result_state.get("intent", "unknown")
 
-        # Voice compliance gate (PR #voice-hotfix). Universal SSE-exit point —
-        # runs regardless of which composer produced assistant_text, so we
-        # don't have to re-wire every composer individually (that's how dead
-        # code regrew last time). Sanitization is mechanical regex
+        # Voice compliance gate (PR #voice-hotfix + A.1). Universal SSE-exit
+        # point — runs regardless of which composer produced assistant_text,
+        # so we don't have to re-wire every composer individually (that's
+        # how dead code regrew last time). Sanitization is mechanical regex
         # replacement; the underlying prompt regression surfaces in the
         # warning log so it can be triaged in Langfuse.
+        #
+        # ``sanitize_voice_payload`` (A.1) handles both string and dict
+        # shapes. The clarifier agent emits ``assistant_text`` as a dict
+        # ``{intro, followups, questions}`` on halt, which the prior
+        # string-only ``sanitize_voice`` would have crashed on. The
+        # downstream halt path at line ~654 reads this same field and
+        # passes it through to the SSE ``done`` event — sanitizing here
+        # covers that path too.
         if assistant_text:
-            from app.services.prompts import sanitize_voice
-            cleaned_text, voice_violations = sanitize_voice(assistant_text)
+            from app.services.prompts import sanitize_voice_payload
+            cleaned_payload, voice_violations = sanitize_voice_payload(assistant_text)
             if voice_violations:
+                # Size diagnostics only apply when both sides are strings;
+                # for dict payloads, fall back to a structural marker.
+                if isinstance(assistant_text, str) and isinstance(cleaned_payload, str):
+                    size_note = (
+                        f"original={len(assistant_text)} chars "
+                        f"-> cleaned={len(cleaned_payload)} chars"
+                    )
+                else:
+                    size_note = f"payload_type={type(assistant_text).__name__}"
                 logger.warning(
                     f"[voice_compliance] Stripped {len(voice_violations)} violation(s) "
                     f"from assistant_text (session={session_id}, intent={detected_intent}, "
-                    f"original={len(assistant_text)} chars -> cleaned={len(cleaned_text)} chars). "
-                    f"Violations: {voice_violations}"
+                    f"{size_note}). Violations: {voice_violations}"
                 )
-                # Mutate result_state so the re-read at line ~591 (response_text)
-                # and any downstream consumer picks up the cleaned text.
-                assistant_text = cleaned_text
-                result_state['assistant_text'] = cleaned_text
+                # Mutate result_state so the re-read at line ~612 (response_text)
+                # AND the halt-state read at line ~654 (followups_to_send)
+                # both pick up the cleaned payload.
+                assistant_text = cleaned_payload
+                result_state['assistant_text'] = cleaned_payload
 
         # Get CallbackHandler trace data
         langfuse_trace_url = None

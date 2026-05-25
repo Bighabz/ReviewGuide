@@ -12,6 +12,7 @@ from app.services.prompts.voice_compliance import (
     check_follow_up_specificity,
     check_voice_compliance,
     sanitize_voice,
+    sanitize_voice_payload,
 )
 
 
@@ -373,3 +374,128 @@ class TestSanitizeVoiceCitations:
         assert "  " not in cleaned
         # No orphaned leading comma on the line.
         assert not cleaned.lstrip().startswith(",")
+
+
+class TestSanitizeVoiceNumericMarkers:
+    """Tests for the A.1 numeric citation marker pattern.
+
+    general_compose.py used to instruct the LLM to emit ``[1]``, ``[2]``
+    markers. The instruction was removed in A.1, but the regex pattern
+    is defense-in-depth for models that emit the markers from training
+    priors anyway.
+    """
+
+    def test_numeric_marker_after_word_is_stripped(self):
+        text = "The Bose is the pick for travel [1]."
+        cleaned, violations = sanitize_voice(text)
+        assert "[1]" not in cleaned
+        # The strip should leave clean prose, not a dangling space + period.
+        assert "Bose" in cleaned and cleaned.rstrip().endswith(".")
+        assert violations  # the violation list should be non-empty
+
+    def test_multiple_numeric_markers_stripped(self):
+        text = "Good for travel [1] and excellent for calls [2]."
+        cleaned, _ = sanitize_voice(text)
+        assert "[1]" not in cleaned and "[2]" not in cleaned
+        assert "travel" in cleaned and "calls" in cleaned
+
+    def test_double_digit_marker_stripped(self):
+        text = "Comfort is the standout [12]."
+        cleaned, _ = sanitize_voice(text)
+        assert "[12]" not in cleaned
+
+    def test_code_like_bracket_is_not_stripped(self):
+        # No space between identifier and bracket — pattern's preceding
+        # whitespace anchor ensures this doesn't get falsely consumed.
+        text = "Use arr[0] to access the first element."
+        cleaned, violations = sanitize_voice(text)
+        assert "arr[0]" in cleaned
+        # No violation should be reported for the code snippet.
+        assert not any("citation:" in v for v in violations)
+
+    def test_bracket_at_sentence_start_is_not_stripped(self):
+        # No preceding word char + space, so the pattern doesn't fire.
+        # This avoids stripping things like list markers in markdown.
+        text = "[1] is the top pick."
+        cleaned, _ = sanitize_voice(text)
+        assert "[1]" in cleaned
+
+
+class TestSanitizeVoicePayload:
+    """Tests for the A.1 dict/list-aware payload helper.
+
+    The string-only ``sanitize_voice`` gate at ``chat.py:549`` would
+    crash if ``result_state['assistant_text']`` arrived as a dict from
+    the clarifier-halt path. ``sanitize_voice_payload`` recurses into
+    dicts and lists so the gate handles both shapes.
+    """
+
+    def test_string_input_matches_sanitize_voice(self):
+        text = "According to RTINGS, the Bose is great."
+        cleaned, violations = sanitize_voice_payload(text)
+        # Same shape and outcome as plain sanitize_voice.
+        plain_cleaned, plain_violations = sanitize_voice(text)
+        assert cleaned == plain_cleaned
+        assert violations == plain_violations
+
+    def test_dict_input_recurses_into_string_values(self):
+        # Mirrors the clarifier halt payload shape.
+        payload = {
+            "intro": "According to RTINGS, the Bose is great.",
+            "questions": ["What's your budget?", "Glasses-friendly fit?"],
+        }
+        cleaned, violations = sanitize_voice_payload(payload)
+        assert isinstance(cleaned, dict)
+        assert "RTINGS" not in cleaned["intro"]
+        assert "Bose" in cleaned["intro"]
+        # Untouched leaves stay verbatim.
+        assert cleaned["questions"] == payload["questions"]
+        # Violation paths are namespaced so the log can pinpoint the leaf.
+        assert any(v.startswith("intro:") for v in violations)
+
+    def test_list_input_recurses_into_string_elements(self):
+        payload = ["Clean string.", "Per Wirecutter, the Sonos is great."]
+        cleaned, violations = sanitize_voice_payload(payload)
+        assert isinstance(cleaned, list)
+        assert cleaned[0] == "Clean string."
+        assert "Wirecutter" not in cleaned[1]
+        assert any(v.startswith("[1]:") for v in violations)
+
+    def test_nested_dict_with_list_recurses(self):
+        payload = {
+            "intro": "Hi there.",
+            "followups": [
+                "What's your budget?",
+                "According to TechRadar, the XM5 has great sound.",
+            ],
+        }
+        cleaned, violations = sanitize_voice_payload(payload)
+        assert "TechRadar" not in cleaned["followups"][1]
+        # The nested path "followups:[1]:..." is preserved.
+        assert any("followups:" in v and "[1]:" in v for v in violations)
+
+    def test_non_text_leaves_pass_through(self):
+        payload = {
+            "intro": "Plain.",
+            "count": 3,
+            "active": True,
+            "ratio": 0.5,
+            "nothing": None,
+        }
+        cleaned, violations = sanitize_voice_payload(payload)
+        assert cleaned == payload
+        assert violations == []
+
+    def test_empty_dict_returns_empty(self):
+        cleaned, violations = sanitize_voice_payload({})
+        assert cleaned == {}
+        assert violations == []
+
+    def test_compliant_dict_returns_unchanged(self):
+        payload = {
+            "intro": "Got it. A few questions:",
+            "questions": ["What's your budget?", "Glasses-friendly fit?"],
+        }
+        cleaned, violations = sanitize_voice_payload(payload)
+        assert cleaned == payload
+        assert violations == []
