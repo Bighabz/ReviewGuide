@@ -1290,36 +1290,15 @@ FOLLOW-UP RULES:
         if fallback_card_count > 0:
             logger.info(f"[product_compose] Added {fallback_card_count} fallback product cards with Amazon search links")
 
-        # ── Restore review_sources UI block (deleted in bd4b5c3) ──
-        if review_data and review_bundles:
-            review_products = []
-            for product_name, bundle in review_bundles.items():
-                review_products.append({
-                    "name": product_name,
-                    "avg_rating": bundle.get("avg_rating", 0),
-                    "total_reviews": bundle.get("total_reviews", 0),
-                    "consensus": "",  # Intentionally empty — blog text handles prose
-                    "editorial_label": editorial_labels.get(product_name),
-                    "sources": [
-                        {
-                            "site_name": s.get("site_name", ""),
-                            "url": s.get("url", ""),
-                            "title": s.get("title", ""),
-                            "snippet": s.get("snippet", ""),
-                            "rating": s.get("rating"),
-                            "favicon_url": s.get("favicon_url", ""),
-                            "date": s.get("date"),
-                        }
-                        for s in bundle.get("sources", [])[:6]
-                    ],
-                })
-            if review_products:
-                ui_blocks.append({
-                    "type": "review_sources",
-                    "title": "Sources",
-                    "data": {"products": review_products}
-                })
-                logger.info(f"[product_compose] Added review_sources block with {len(review_products)} products")
+        # NOTE: review_sources UI block intentionally removed.
+        # tone.md mandates "No source citations. Synthesize." and
+        # BACKEND_AGENT_CONTEXT.md done-criterion is "No client-facing
+        # citation surface." The block previously rendered TechRadar /
+        # The Verge / Wirecutter / RTINGS as user-visible badge pills
+        # via SourceCitations.tsx, which directly contradicted both
+        # specs. The PR #7 voice hotfix only sanitized assistant_text;
+        # this surface bypassed it. Removed entirely along with the
+        # frontend renderer. See PR #9.
 
         # ── Build blog-style assistant_text ──
 
@@ -1421,16 +1400,14 @@ FOLLOW-UP RULES:
             if not assistant_text:
                 assistant_text = "Here's what I found for you."
 
-        # Create citations — prefer review source URLs (Wirecutter, Reddit, etc.)
-        # Only include URLs that start with "http" to exclude fabricated/empty URLs
-        review_source_urls = []
-        for bundle in review_bundles.values():
-            for source in bundle.get("sources", [])[:2]:
-                url = source.get("url")
-                if url and url.startswith("http"):
-                    review_source_urls.append(url)
-
-        citations = review_source_urls[:5] or [p["url"] for p in normalized_products if p.get("url") and p["url"].startswith("http")][:5]
+        # citations field: product-page URLs only (no review-source URLs).
+        # The review-source URL accumulation that previously fed this
+        # field has been removed along with the review_sources UI
+        # block; surfacing review-site domains via citations would be
+        # an alternate channel for the same tone.md violation. The
+        # field exists for response_metadata.source_count + chat
+        # history persistence; nothing in the frontend renders it.
+        citations = [p["url"] for p in normalized_products if p.get("url") and p["url"].startswith("http")][:5]
 
         # Log summary
         provider_summary = ", ".join([f"{len(affiliate_products.get(p, []))} {p}" for p in sorted_providers])

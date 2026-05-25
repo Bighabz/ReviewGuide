@@ -317,3 +317,34 @@ def test_blog_composer_prompt_has_ranking_directive() -> None:
     # The BAD/GOOD counter-example pair.
     assert "BAD (parallel survey" in content
     assert "GOOD (ranked" in content
+
+
+def test_product_compose_does_not_emit_review_sources_block() -> None:
+    """Guards against re-introducing the review_sources UI block.
+
+    PR #9 removed a UI block that exposed TechRadar / The Verge /
+    Wirecutter / RTINGS site names as user-visible badge pills. That
+    surface bypassed sanitize_voice (which only operates on
+    assistant_text) and directly contradicted tone.md ("No source
+    citations. Synthesize.") and BACKEND_AGENT_CONTEXT.md's
+    "No client-facing citation surface" done-criterion.
+
+    The PR #7 hotfix that this builds on was specifically about
+    citation prevention. If a future PR re-adds a ui_block with
+    type=='review_sources', this test goes red so the regression
+    surfaces at PR review rather than in production.
+    """
+    path = BACKEND_ROOT / "mcp_server/tools/product_compose.py"
+    content = path.read_text(encoding="utf-8")
+    assert '"type": "review_sources"' not in content, (
+        "product_compose.py is emitting a ui_block of type 'review_sources'. "
+        "That block was removed in PR #9 because it exposed review-site "
+        "names (TechRadar, The Verge, etc.) as user-visible badge pills, "
+        "contradicting tone.md and the PR #7 hotfix's intent. If you need "
+        "to surface sources, do it through assistant_text (which is gated "
+        "by sanitize_voice) — never via a parallel UI surface."
+    )
+    # The string can appear as `"review_sources"` in surrounding prose
+    # (comments referencing the removal) but should not appear as a dict
+    # value for a `"type"` key in a ui_blocks.append() call. The exact-
+    # phrase check above is the surgical guard.
