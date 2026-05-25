@@ -38,6 +38,11 @@ export interface Message {
   ui_blocks?: any[]
   itinerary?: any[]  // Travel itinerary data
   followups?: string[] | StructuredFollowups  // Follow-up questions (legacy array or new structured format)
+  // B.3 — the curious follow-up question that ends the AI's response.
+  // Carried as its own field so Message.tsx can render it distinctly
+  // (own line, italic) below the body, per spec §11 / §13 #3 — instead
+  // of relying on the model to slap it on the end of message.content.
+  followUpQuestion?: string
   next_suggestions?: NextSuggestion[]  // Follow-up questions from next_step_suggestion tool
   isSuggestionClick?: boolean  // True when message was triggered by clicking a suggestion button
   isThinking?: boolean  // True while waiting for real tokens (status updates hidden)
@@ -481,7 +486,7 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
 
           setMessages((prev) => [...prev, followupMessage])
           currentMessageIdRef.current = followupMessageId
-        } else if (data.ui_blocks || data.itinerary || data.followups) {
+        } else if (data.ui_blocks || data.itinerary || data.followups || data.follow_up_question) {
           setMessages((prev) =>
             prev.map((msg) =>
               msg.id === currentMessageIdRef.current
@@ -490,6 +495,9 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
                   ...(data.ui_blocks && data.ui_blocks.length > 0 ? { ui_blocks: data.ui_blocks } : {}),
                   ...(data.itinerary ? { itinerary: data.itinerary } : {}),
                   ...(data.followups ? { followups: data.followups } : {}),
+                  // B.3 — wire-format is snake_case; map to camelCase on
+                  // the Message interface so React state stays idiomatic.
+                  ...(data.follow_up_question ? { followUpQuestion: data.follow_up_question } : {}),
                 }
                 : msg
             )

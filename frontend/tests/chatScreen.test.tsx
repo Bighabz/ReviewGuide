@@ -304,6 +304,51 @@ describe('CHAT-03 — Status display', () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
+// B.3 — Curious follow-up question as a structurally separate field
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('B.3 — Curious follow-up question rendering', () => {
+  it('renders followUpQuestion below body when present', () => {
+    const message = makeAssistantMessage({
+      content: 'The Bose QC Ultra is the pick for your situation.',
+      followUpQuestion: 'Want me to factor in glasses fit too?',
+    })
+    render(<Message message={message} />)
+    expect(screen.getByText('Want me to factor in glasses fit too?')).toBeTruthy()
+  })
+
+  it('does NOT render any follow-up element when followUpQuestion is undefined', () => {
+    const message = makeAssistantMessage({
+      content: 'Here you go.',
+    })
+    const { container } = render(<Message message={message} />)
+    // Sanity: no italic text-secondary span with a paragraph in it.
+    // (The render uses italic + text-[var(--text-secondary)]; absence
+    // of any "?" italic paragraph proves the block didn't render.)
+    const italics = container.querySelectorAll('p.italic')
+    for (const p of Array.from(italics)) {
+      expect(p.textContent).not.toMatch(/\?$/)
+    }
+  })
+
+  it('followUpQuestion renders BEFORE the UI blocks (carousel) in DOM order', () => {
+    const message = makeAssistantMessage({
+      content: 'Top pick is the QC Ultra.',
+      followUpQuestion: 'Open to a Sonos alternative?',
+      ui_blocks: [{ type: 'carousel', data: { items: [] } }],
+    })
+    const { container } = render(<Message message={message} />)
+    const fuEl = screen.getByText('Open to a Sonos alternative?')
+    const blocksEl = container.querySelector('[data-testid="ui-blocks-container"]')
+    expect(fuEl).toBeTruthy()
+    expect(blocksEl).toBeTruthy()
+    // Per spec §11: follow-up sits INSIDE the blog card, above the carousel.
+    const position = fuEl.compareDocumentPosition(blocksEl!)
+    expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
 // CHAT-06 — Chip restyle: pill shape, horizontal row, outside AI bubble
 // ─────────────────────────────────────────────────────────────────────────────
 

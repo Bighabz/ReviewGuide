@@ -90,6 +90,13 @@ class GraphState(TypedDict):
 
     # Response Composition
     assistant_text: Optional[str]
+    # B.3 — Curious follow-up question. Carried as a structurally separate
+    # field so the frontend can render it distinctly (italic, separate line)
+    # below the blog body rather than concatenated into the streamed prose.
+    # Populated by composer tools that emit a {body, follow_up_question}
+    # JSON shape (product_compose today). Sanitized by sanitize_voice at the
+    # SSE-exit gate (chat.py) alongside assistant_text.
+    follow_up_question: Optional[str]
     ui_blocks: List[Dict[str, Any]]
     citations: Annotated[List[str], operator.add]
     next_suggestions: List[Dict[str, Any]]  # Follow-up questions from next_step_suggestion tool

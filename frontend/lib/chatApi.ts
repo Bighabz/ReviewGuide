@@ -79,6 +79,11 @@ export interface StreamChunk {
   followups?: string[]
   itinerary?: any[]  // Travel itinerary data
   next_suggestions?: NextSuggestion[]  // Follow-up questions from next_step_suggestion tool
+  // B.3 — the curious follow-up question, emitted by the backend as its own
+  // SSE event (`event: follow_up_question`) after the content stream finishes.
+  // Frontend renders it distinctly (own line, italic) below the message body
+  // per spec §11 / §13 #3. snake_case to match the wire format.
+  follow_up_question?: string
   placeholder?: boolean
   clear?: boolean
   status_update?: string  // Agent status messages (e.g., "writing itinerary...")
@@ -334,6 +339,17 @@ export async function streamChat({
                     itinerary: chunk.itinerary,
                     create_new_message: chunk.create_new_message,
                   })
+                }
+                continue
+              }
+
+              // B.3 — the curious follow-up question, emitted after the
+              // content stream finishes. Routed through onComplete (no
+              // session_id, so the consumer-side branch attaches to the
+              // current message without flipping the FSM to finalized).
+              if (currentEventType === 'follow_up_question') {
+                if (chunk.text) {
+                  onComplete({ follow_up_question: chunk.text })
                 }
                 continue
               }
