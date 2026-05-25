@@ -1,15 +1,33 @@
 name: Voice Integration
 
-# Gates merges when prompts, agents, or composer tools change. Two layers:
+# Three-job matrix gating voice quality on every PR / push that touches
+# prompts, agents, composer tools, or the voice test files.
 #
-#   1. Structural wiring (always-on, no API needed) verifies every
-#      voice-applicable site imports build_system_prompt and uses it, and that
-#      classifier / extractor / search-retrieval sites do NOT wire voice.
+# 1. voice-foundation — deterministic, no API. Runs the unit tests
+#    (test_voice_prompt + test_voice_compliance) and the structural
+#    wiring tests from test_voice_integration. Merge-blocking. Gates
+#    the two live jobs — if foundation fails we don't burn API quota.
 #
-#   2. Live LLM compliance (skipped automatically if ANTHROPIC_API_KEY and
-#      OPENAI_API_KEY are both placeholders) drives a handful of canonical
-#      composer prompts against the real model and asserts
-#      check_voice_compliance() returns no violations.
+# 2. voice-live-prod-model — live LLM compliance against
+#    settings.COMPOSER_MODEL = gpt-4o-mini. THIS is the gate that mirrors
+#    production. The PR #6 post-merge regression happened because the
+#    CI only tested Claude while prod ran gpt-4o-mini — the two model
+#    families had different instruction-following behavior on the same
+#    prompts. Merge-blocking when OPENAI_API_KEY is configured; skips
+#    cleanly otherwise (still safe to merge — the structural layer
+#    above is the floor).
+#
+# 3. voice-live-claude — same live tests but with USE_ANTHROPIC_COMPOSE
+#    routing composer calls to Claude. Non-blocking (continue-on-error)
+#    because the prod model is gpt-4o-mini and we don't want a Claude
+#    regression to block PRs; this is signal for "what would change if
+#    we swapped to Claude" rather than a gate.
+#
+# Pin protection: every live job runs a startup assertion that
+# settings.COMPOSER_MODEL matches the CI_COMPOSER_MODEL env pin. If a
+# future PR changes settings.COMPOSER_MODEL default without updating
+# this workflow, the assertion fails loud — silent drift is what caused
+# the PR #6 regression.
 #
 # See backend/tests/test_voice_integration.py for the two-layer rationale.
 
@@ -22,7 +40,7 @@ on:
       - 'backend/tests/test_voice_*.py'
       - '.github/workflows/voice-integration.yml'
   push:
-    branches: [main, feat/voice-rebuild]
+    branches: [main, feat/voice-rebuild, feat/voice-hotfix]
     paths:
       - 'backend/app/services/prompts/**'
       - 'backend/mcp_server/tools/**'
@@ -35,11 +53,18 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # The composer model that CI tests must match settings.COMPOSER_MODEL.
+  # Update BOTH this and backend/app/core/config.py in lockstep when
+  # rotating models. The pin-assertion step (below) enforces the
+  # invariant — silent drift fails CI.
+  CI_COMPOSER_MODEL: gpt-4o-mini
+
 jobs:
-  voice:
-    name: Voice (wiring + compliance)
+  voice-foundation:
+    name: Voice foundation (deterministic, no API)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python 3.11
@@ -52,31 +77,122 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
-      - name: Foundation unit tests (voice + compliance)
+      - name: Foundation unit tests
         working-directory: backend
         env:
           ENV: test
-          SECRET_KEY: test-secret-key-32-characters-long-xxx
+          SECRET_KEY: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
           DATABASE_URL: 'sqlite+aiosqlite:///:memory:'
           REDIS_URL: 'redis://localhost:6379/0'
           OPENAI_API_KEY: sk-test-placeholder
           RATE_LIMIT_ENABLED: 'false'
           LOG_ENABLED: 'false'
         run: python -m pytest tests/test_voice_prompt.py tests/test_voice_compliance.py -v
-      - name: Voice wiring + live compliance
+      - name: Structural wiring tests
         working-directory: backend
         env:
           ENV: test
-          SECRET_KEY: test-secret-key-32-characters-long-xxx
+          SECRET_KEY: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
           DATABASE_URL: 'sqlite+aiosqlite:///:memory:'
           REDIS_URL: 'redis://localhost:6379/0'
-          # The live compliance tests gate on whether a real key is present
-          # (not the literal "sk-test-placeholder"). If ANTHROPIC_API_KEY is
-          # configured as a repo secret, the live layer runs; otherwise only
-          # the structural wiring layer runs (still merge-blocking).
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: sk-test-placeholder
+          RATE_LIMIT_ENABLED: 'false'
+          LOG_ENABLED: 'false'
+        run: python -m pytest tests/test_voice_integration.py -v -m "not integration"
+      - name: Composer-model pin assertion
+        working-directory: backend
+        env:
+          ENV: test
+          SECRET_KEY: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+          # ADMIN_PASSWORD is required by Settings() validation. The pytest
+          # steps above get this from conftest.py at module-load; this step
+          # runs `python -c` outside pytest, so we must set it explicitly.
+          ADMIN_PASSWORD: test-admin-password
+          DATABASE_URL: 'sqlite+aiosqlite:///:memory:'
+          REDIS_URL: 'redis://localhost:6379/0'
+          OPENAI_API_KEY: sk-test-placeholder
+          RATE_LIMIT_ENABLED: 'false'
+          LOG_ENABLED: 'false'
+          CI_COMPOSER_MODEL: ${{ env.CI_COMPOSER_MODEL }}
+        run: |
+          python -c "
+          import os
+          from app.core.config import settings
+          pin = os.environ['CI_COMPOSER_MODEL']
+          actual = settings.COMPOSER_MODEL
+          assert actual == pin, (
+              f'CI pin drift: settings.COMPOSER_MODEL={actual!r} but '
+              f'CI_COMPOSER_MODEL={pin!r}. Update both in lockstep '
+              '(backend/app/core/config.py + .github/workflows/voice-integration.yml). '
+              'Silent drift is what caused the PR #6 post-merge voice regression.'
+          )
+          print(f'pin OK: composer model = {actual}')
+          "
+
+  voice-live-prod-model:
+    name: Voice live compliance (gpt-4o-mini — prod-model gate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: voice-foundation
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: requirements.txt
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Live compliance — gpt-4o-mini (prod model)
+        working-directory: backend
+        env:
+          ENV: test
+          SECRET_KEY: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+          DATABASE_URL: 'sqlite+aiosqlite:///:memory:'
+          REDIS_URL: 'redis://localhost:6379/0'
+          # Routes composer calls to OpenAI gpt-4o-mini (matches prod).
+          # USE_ANTHROPIC_COMPOSE deliberately omitted (defaults to false).
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || 'sk-test-placeholder' }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          RATE_LIMIT_ENABLED: 'false'
+          LOG_ENABLED: 'false'
+        # Run only the @integration tests; foundation already covered
+        # structural in the prior job.
+        run: python -m pytest tests/test_voice_integration.py -v -m integration
+
+  voice-live-claude:
+    name: Voice live compliance (Claude — non-blocking signal)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: voice-foundation
+    # Non-blocking — prod runs gpt-4o-mini, so a Claude divergence is
+    # signal ("would the swap to Claude work?") not a gate.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: requirements.txt
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Live compliance — Claude (secondary, non-blocking)
+        working-directory: backend
+        env:
+          ENV: test
+          SECRET_KEY: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+          DATABASE_URL: 'sqlite+aiosqlite:///:memory:'
+          REDIS_URL: 'redis://localhost:6379/0'
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || 'sk-test-placeholder' }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           USE_ANTHROPIC_COMPOSE: 'true'
           RATE_LIMIT_ENABLED: 'false'
           LOG_ENABLED: 'false'
-        run: python -m pytest tests/test_voice_integration.py -v
+        run: python -m pytest tests/test_voice_integration.py -v -m integration
