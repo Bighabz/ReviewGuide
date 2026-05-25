@@ -2,7 +2,10 @@
 
 import { useEffect, useState, useCallback, Suspense, useRef } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import CategorySidebar from '@/components/CategorySidebar'
+// CategorySidebar removed from /chat in B.4 — spec §11.6 forbids filter chip
+// bars / refinement sidebars on the chat surface; the conversation IS the
+// filter. Component still lives at frontend/components/CategorySidebar.tsx
+// because it's used by frontend/components/browse/BrowseLayout.tsx.
 import ChatContainer from '@/components/ChatContainer'
 import ConversationSidebar from '@/components/ConversationSidebar'
 import ErrorBoundary from '@/components/ErrorBoundary'
@@ -16,7 +19,7 @@ const NEW_EMPTY_SESSION = '__new_empty_session__'
 function ChatPageContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const [sidebarOpen, setSidebarOpen] = useState(false)
+  // sidebarOpen state removed in B.4 alongside CategorySidebar.
   const [conversationSidebarOpen, setConversationSidebarOpen] = useState(false)
   const [clearHistoryTrigger, setClearHistoryTrigger] = useState(0)
   const [showClearDialog, setShowClearDialog] = useState(false)
@@ -136,20 +139,11 @@ function ChatPageContent() {
   return (
     <div className="h-full flex flex-col overflow-hidden bg-[var(--background)] text-[var(--text)]">
 
-      {/* Content area below topbar */}
+      {/* Content area below topbar. CategorySidebar removed in B.4 (spec
+          §11.6 — no filter chip bars / refinement sidebars on /chat).
+          Main content now spans the full viewport width. */}
       <div className="flex-1 flex overflow-hidden relative min-h-0">
-        {/* Desktop sidebar — fixed, same as BrowseLayout */}
-        <aside className="hidden lg:block fixed left-0 top-14 sm:top-16 bottom-0 w-56 z-30">
-          <CategorySidebar />
-        </aside>
-
-        {/* Mobile sidebar overlay */}
-        {sidebarOpen && (
-          <CategorySidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
-        )}
-
-        {/* Main chat content — offset for sidebar */}
-        <main className="flex-1 flex flex-col overflow-hidden lg:ml-56 min-h-0">
+        <main className="flex-1 flex flex-col overflow-hidden min-h-0">
           <ErrorBoundary>
             <ChatContainer
               clearHistoryTrigger={clearHistoryTrigger}
