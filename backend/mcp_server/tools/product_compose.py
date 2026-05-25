@@ -28,7 +28,7 @@ TOOL_CONTRACT = {
         "post": []
     },
     "produces": ["assistant_text", "ui_blocks", "citations"],
-    "citation_message": "Putting together your recommendations...",
+    "citation_message": "Putting it together…",
     "tool_order": 800,
     "is_default": True,
     "is_required": True
@@ -1303,21 +1303,21 @@ FOLLOW-UP RULES:
         # ── Build blog-style assistant_text ──
 
         blog_article = _get_result('blog_article', '')
+        # B.3: keep body and follow_up_question structurally separate so the
+        # frontend can render the question distinctly (italic, own line)
+        # below the blog body — the spec §11 / §13 #3 visual treatment.
+        # chat.py emits the follow-up as a dedicated SSE event after the
+        # content stream completes.
+        follow_up_text: str = ""
         if blog_article:
-            # Blog composer now returns JSON {body, follow_up_question}. Parse
-            # and concatenate body + follow-up so the existing assistant_text
-            # delivery path (chunked SSE in chat.py) keeps working unchanged.
-            # Frontend visual treatment of the follow-up as a separate chip is
-            # a follow-up PR; this PR ships the structural separation in the
-            # prompt + the data routing.
             try:
                 parsed = json.loads(blog_article)
                 body = (parsed.get("body") or "").strip()
-                follow_up = (parsed.get("follow_up_question") or "").strip()
-                assistant_text = body + (f"\n\n{follow_up}" if follow_up else "")
+                follow_up_text = (parsed.get("follow_up_question") or "").strip()
+                assistant_text = body
                 logger.info(
                     f"[product_compose] LLM blog article: body={len(body)} chars, "
-                    f"follow_up={len(follow_up)} chars"
+                    f"follow_up={len(follow_up_text)} chars"
                 )
             except (json.JSONDecodeError, TypeError, AttributeError) as e:
                 logger.warning(
@@ -1454,6 +1454,11 @@ FOLLOW-UP RULES:
 
         return {
             "assistant_text": assistant_text,
+            # B.3 — structurally separate from the body so the frontend
+            # can render it distinctly (own line, italic) per spec §11.
+            # chat.py emits a dedicated SSE `follow_up_question` event
+            # after the content stream finishes.
+            "follow_up_question": follow_up_text or None,
             "ui_blocks": ui_blocks,
             "citations": citations,
             "last_search_context": new_context,

@@ -35,7 +35,7 @@ TOOL_CONTRACT = {
     },
     "produces": ["itinerary"],
     "required_slots": ["destination", "duration_days"],
-    "citation_message": "Creating your itinerary...",
+    "citation_message": "Putting it together…",
     "tool_order": 100,
     "slot_types": {
         "destination": {"type": "string", "format": "city"},

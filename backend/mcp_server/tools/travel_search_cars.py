@@ -33,7 +33,7 @@ TOOL_CONTRACT = {
     "produces": ["cars"],
     "required_slots": ["destination"],
     "optional_slots": ["departure_date", "duration_days", "return_date"],
-    "citation_message": "Looking up rental car options...",
+    "citation_message": "Asking around…",
     "tool_order": 100,
     "slot_types": {
         "destination": {"type": "string", "format": "city"},

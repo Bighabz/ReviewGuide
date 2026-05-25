@@ -33,7 +33,7 @@ TOOL_CONTRACT = {
         "post": ["travel_search_hotels", "travel_search_flights"]
     },
     "produces": ["destination_facts"],
-    "citation_message": "Researching your destination...",
+    "citation_message": "Reading the room…",
     "tool_order": 100
 }
 

@@ -28,7 +28,7 @@ TOOL_CONTRACT = {
         "post": ["product_normalize"]
     },
     "produces": ["review_data"],
-    "citation_message": "Checking Wirecutter, Reddit, RTINGS for reviews...",
+    "citation_message": "Seeing what others are saying…",
     "tool_order": 200,
     "is_default": True,
 }

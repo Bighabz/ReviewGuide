@@ -341,6 +341,11 @@ async def generate_chat_stream(
             "tool_timing": {},
             "ranked_items": [],
             "assistant_text": None,
+            # B.3 — Initialize follow_up_question so LangGraph's TypedDict
+            # channel validator doesn't crash when product_compose tries
+            # to write it. See CONCERNS.md "GraphState ↔ initial_state
+            # Coupling" for the recurring pattern.
+            "follow_up_question": None,
             "ui_blocks": [],
             "citations": [],
             "next_suggestions": [],  # Follow-up questions from next_step_suggestion tool
@@ -514,7 +519,7 @@ async def generate_chat_stream(
             clear_tool_citation_callbacks()
             yield _sse_event("error", {
                 "code": "request_timeout",
-                "message": "Request exceeded the 60-second time limit. Please try a simpler query.",
+                "message": "Took longer than expected on this one. Want to try narrowing it down?",
                 "recoverable": True,
             })
             return
@@ -577,6 +582,23 @@ async def generate_chat_stream(
                 # both pick up the cleaned payload.
                 assistant_text = cleaned_payload
                 result_state['assistant_text'] = cleaned_payload
+
+        # B.3 — also sanitize the structured follow_up_question. The body
+        # gate above only covers assistant_text; the follow-up emits via
+        # its own SSE event after the content stream and would otherwise
+        # bypass voice enforcement.
+        follow_up_question_text = result_state.get("follow_up_question") or ""
+        if follow_up_question_text:
+            from app.services.prompts import sanitize_voice as _sanitize_voice
+            cleaned_fu, fu_violations = _sanitize_voice(follow_up_question_text)
+            if fu_violations:
+                logger.warning(
+                    f"[voice_compliance] Stripped {len(fu_violations)} violation(s) "
+                    f"from follow_up_question (session={session_id}, intent={detected_intent}). "
+                    f"Violations: {fu_violations}"
+                )
+                follow_up_question_text = cleaned_fu
+                result_state['follow_up_question'] = cleaned_fu
 
         # Get CallbackHandler trace data
         langfuse_trace_url = None
@@ -663,6 +685,17 @@ async def generate_chat_stream(
                 await asyncio.sleep(0.02)  # 20ms typing effect between chunks
         else:
             logger.info(f"🔍 DEBUG: Skipping text streaming (halted={is_halted}, has_text={bool(response_text)}, data_streamed={data_already_streamed})")
+
+        # B.3 — emit the curious follow-up question as its own SSE event,
+        # after the body finishes streaming and before the terminal `done`
+        # event. The frontend renders this distinctly (italic, own line)
+        # below the blog body per spec §11 / §13 #3. Skipped on halt — the
+        # clarifier owns the followups field in that case.
+        if follow_up_question_text and not is_halted:
+            yield _sse_event("follow_up_question", {"text": follow_up_question_text})
+            logger.info(
+                f"🔍 Emitted follow_up_question SSE event ({len(follow_up_question_text)} chars)"
+            )
 
         # Only include followup questions if the workflow is HALTED (not completed)
         # Just pass through whatever the clarifier agent returns - no processing here
@@ -850,10 +883,11 @@ async def generate_chat_stream(
             }
         )
 
-        # Emit a named error event so the stream always ends with a terminal event
+        # Emit a named error event so the stream always ends with a terminal event.
+        # Copy follows tone.md §10.5 error-state voice — curious, low-alarm.
         yield _sse_event("error", {
             "code": "internal_error",
-            "message": "Something went wrong. If this issue persists please try again.",
+            "message": "Hit a wall pulling info on this one. Want to try a different angle?",
             "recoverable": True,
         })
 

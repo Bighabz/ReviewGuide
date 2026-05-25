@@ -33,7 +33,7 @@ TOOL_CONTRACT = {
         "post": []
     },
     "produces": ["next_suggestions"],
-    "citation_message": "Generating follow-up suggestions...",
+    "citation_message": "Reading the room…",
     "tool_order": 900,
     "is_default": True,
     "is_required": True

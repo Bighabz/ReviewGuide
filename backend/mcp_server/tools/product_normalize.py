@@ -40,7 +40,7 @@ TOOL_CONTRACT = {
         "post": ["product_affiliate"]  # Compose is auto-added at end of intent
     },
     "produces": ["normalized_products"],
-    "citation_message": "Organizing your results...",
+    "citation_message": "Sorting the contenders…",
     "is_default": True
 }
 

@@ -40,7 +40,7 @@ TOOL_CONTRACT = {
         "post": []  # Compose is auto-added at end of intent
     },
     "produces": ["ranked_products"],
-    "citation_message": "Ranking by quality and value...",
+    "citation_message": "Weighing the tradeoffs…",
     "is_default": True
 }
 

@@ -27,7 +27,7 @@ TOOL_CONTRACT = {
         "post": ["product_normalize"]  # Compose is auto-added at end of intent
     },
     "produces": ["comparison_html", "comparison_data"],
-    "citation_message": "Generating product comparison..."
+    "citation_message": "Comparing the contenders…"
 }
 
 

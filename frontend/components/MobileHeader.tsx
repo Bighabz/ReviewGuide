@@ -5,6 +5,7 @@ import { ArrowLeft, User, Maximize2 } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { useChatStatus } from '@/lib/chatStatusContext'
 import { CHAT_CONFIG } from '@/lib/constants'
+import LoadingStatusText from './LoadingStatusText'
 
 export default function MobileHeader() {
   const pathname = usePathname()
@@ -56,12 +57,12 @@ export default function MobileHeader() {
             >
               {sessionTitle}
             </div>
-            {isStreaming && statusText && (
+            {isStreaming && (
               <div
                 className="text-[12px] truncate"
                 style={{ color: 'var(--text-secondary)' }}
               >
-                {statusText}
+                <LoadingStatusText statusText={statusText} />
               </div>
             )}
           </div>

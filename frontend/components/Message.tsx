@@ -8,6 +8,7 @@ import { NextSuggestion, SuggestionCategory } from '@/lib/chatApi'
 import { normalizeBlocks } from '@/lib/normalizeBlocks'
 import { UIBlocks } from '@/components/blocks/BlockRegistry'
 import MessageRecoveryUI from './MessageRecoveryUI'
+import LoadingStatusText from './LoadingStatusText'
 
 import { useState, useEffect, useMemo } from 'react'
 import { formatTimestamp, formatFullTimestamp, SUGGESTION_CLICK_PREFIX } from '@/lib/utils'
@@ -180,13 +181,19 @@ export default function Message({ message, isLast = false }: MessageProps) {
                   ✦ ReviewGuide
                 </div>
 
-                {/* Status indicator — shown while tools are working */}
+                {/* Status indicator — shown while tools are working.
+                    Copy: server-emitted statusText for first ~4s of each
+                    tool, then rotates through the tone.md §10.1
+                    vocabulary while the tool keeps running. Never
+                    "Thinking..." — that fallback was the most visible
+                    voice violation on the chat screen pre-B.1. */}
                 {!message.content && message.isThinking && (
                   <div className="flex items-center gap-2 py-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-[var(--primary)] animate-pulse" />
-                    <span className="stream-status-text tracking-tight">
-                      {message.statusText || 'Thinking...'}
-                    </span>
+                    <LoadingStatusText
+                      statusText={message.statusText}
+                      className="stream-status-text tracking-tight"
+                    />
                   </div>
                 )}
 
@@ -204,6 +211,20 @@ export default function Message({ message, isLast = false }: MessageProps) {
                     >
                       <ReactMarkdown>{message.content}</ReactMarkdown>
                     </div>
+                  </div>
+                )}
+
+                {/* B.3 — Curious follow-up question. Lives between the body
+                    and the UI blocks (carousel) so it's still inside the
+                    AI bubble per spec §11. Visual treatment is the restrained
+                    baseline noted in plan B.3: italic + medium weight + muted
+                    color + small top margin + thin hairline above. Design
+                    review (§13 #3 open question) may iterate on this. */}
+                {message.followUpQuestion && (
+                  <div className="mt-4 pt-3 border-t border-[var(--border)]/60">
+                    <p className="italic font-medium text-[15px] leading-snug text-[var(--text-secondary)]">
+                      {message.followUpQuestion}
+                    </p>
                   </div>
                 )}
 

@@ -31,7 +31,7 @@ TOOL_CONTRACT = {
         "post": []  # Compose is auto-added at end of intent
     },
     "produces": ["search_results", "search_query"],
-    "citation_message": "Searching the web...",
+    "citation_message": "Searching the web…",
     "tool_order": 50
 }
 

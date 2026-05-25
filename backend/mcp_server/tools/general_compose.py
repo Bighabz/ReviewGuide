@@ -34,7 +34,7 @@ TOOL_CONTRACT = {
         "post": []
     },
     "produces": ["assistant_text", "ui_blocks", "citations"],
-    "citation_message": "Writing answer...",
+    "citation_message": "Digging for answers…",
     "tool_order": 800,
     "is_default": True,
     "is_required": True
