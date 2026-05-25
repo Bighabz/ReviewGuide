@@ -514,7 +514,7 @@ async def generate_chat_stream(
             clear_tool_citation_callbacks()
             yield _sse_event("error", {
                 "code": "request_timeout",
-                "message": "Request exceeded the 60-second time limit. Please try a simpler query.",
+                "message": "Took longer than expected on this one. Want to try narrowing it down?",
                 "recoverable": True,
             })
             return
@@ -850,10 +850,11 @@ async def generate_chat_stream(
             }
         )
 
-        # Emit a named error event so the stream always ends with a terminal event
+        # Emit a named error event so the stream always ends with a terminal event.
+        # Copy follows tone.md §10.5 error-state voice — curious, low-alarm.
         yield _sse_event("error", {
             "code": "internal_error",
-            "message": "Something went wrong. If this issue persists please try again.",
+            "message": "Hit a wall pulling info on this one. Want to try a different angle?",
             "recoverable": True,
         })
 

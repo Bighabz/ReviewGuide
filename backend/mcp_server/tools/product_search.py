@@ -42,7 +42,7 @@ TOOL_CONTRACT = {
         "use_case": {"type": "string", "description": "Intended use (e.g., 'running', 'office work', 'travel', 'photography')"},
         "gender": {"type": "string", "description": "Gender specification (e.g., 'men', 'women', 'unisex')"},
     },
-    "citation_message": "Finding the best products for you..."
+    "citation_message": "Sorting the contenders…"
 }
 
 

@@ -33,7 +33,7 @@ TOOL_CONTRACT = {
         "post": []  # comparison runs after extractor
     },
     "produces": ["product_names"],
-    "citation_message": "Extracting product names...",
+    "citation_message": "Reading the room…",
     "is_default": True
 }
 

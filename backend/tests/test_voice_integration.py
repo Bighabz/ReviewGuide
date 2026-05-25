@@ -294,6 +294,115 @@ def test_snippet_kind_still_includes_examples() -> None:
     assert "Example 3" in composed
 
 
+# ---------------------------------------------------------------------------
+# B.1 — Tool citation_message values are on-voice and never name competitors
+# ---------------------------------------------------------------------------
+
+import re as _re  # local alias so the existing top-level imports don't shift
+
+# Competitor / source names that must NEVER appear in any citation_message.
+# Catches both literal site names ("Wirecutter") and common variant spellings
+# ("TomsGuide" vs "Tom's Guide"). Matches the canonical-source whitelist
+# in voice_compliance.py plus a few extras ("Reddit") that we don't want
+# named in loading copy either.
+_LOADING_COPY_COMPETITOR_NAMES = _re.compile(
+    r"\b(?:RTINGS|Wirecutter|Reddit|Tom['’]?s\s*Guide|TomsGuide|"
+    r"CNET|TechRadar|The\s*Verge|Engadget|PCMag|Consumer\s*Reports|"
+    r"Trusted\s*Reviews|Digital\s*Trends|Android\s*Authority|Mashable|"
+    r"Forbes|Ars\s*Technica|Gizmodo|9to5Mac|9to5Google)\b",
+    _re.IGNORECASE,
+)
+
+
+def _tool_citation_messages() -> list[tuple[str, str]]:
+    """Walk ``mcp_server/tools/*.py`` and return ``(rel_path, citation)``
+    for every TOOL_CONTRACT-style ``citation_message`` definition.
+
+    Pure source-level scan — runs without a Python import of the tool
+    module so a syntax error in one tool can't mask the others.
+    """
+    tools_dir = BACKEND_ROOT / "mcp_server" / "tools"
+    out: list[tuple[str, str]] = []
+    citation_re = _re.compile(r'"citation_message"\s*:\s*"([^"]*)"')
+    for py_path in sorted(tools_dir.glob("*.py")):
+        if py_path.name.startswith("_") or py_path.name == "__init__.py":
+            continue
+        content = py_path.read_text(encoding="utf-8")
+        match = citation_re.search(content)
+        if match:
+            out.append((py_path.relative_to(BACKEND_ROOT).as_posix(), match.group(1)))
+    return out
+
+
+def test_every_tool_with_contract_has_citation_message() -> None:
+    """Smoke check — at least one tool defines a citation_message.
+    Guards against the source scan returning an empty list silently
+    (e.g., if the TOOL_CONTRACT pattern is ever refactored)."""
+    citations = _tool_citation_messages()
+    assert len(citations) >= 15, (
+        f"Expected to find citation_message in at least 15 tools, "
+        f"found {len(citations)}. Check whether TOOL_CONTRACT was renamed."
+    )
+
+
+@pytest.mark.parametrize("citation_pair", _tool_citation_messages(), ids=lambda p: p[0])
+def test_tool_citation_message_does_not_name_competitors(
+    citation_pair: tuple[str, str],
+) -> None:
+    """Tool ``citation_message`` strings are user-visible loading copy.
+
+    tone.md §10.1 / spec §10.1 mandate ambiguous, curious phrasing
+    ("Seeing what others are saying…") with NO competitor review-site
+    names. The 2026-05-25 production incident's most visible voice
+    violation was ``review_search.py`` emitting
+    "Checking Wirecutter, Reddit, RTINGS for reviews..." — this guard
+    locks the regression out at PR review.
+    """
+    rel_path, citation = citation_pair
+    match = _LOADING_COPY_COMPETITOR_NAMES.search(citation)
+    assert not match, (
+        f"{rel_path}: citation_message names a competitor "
+        f"({match.group(0)!r}). Loading copy must follow tone.md §10.1 "
+        f"ambiguous vocabulary. Got: {citation!r}"
+    )
+
+
+@pytest.mark.parametrize("citation_pair", _tool_citation_messages(), ids=lambda p: p[0])
+def test_tool_citation_message_passes_voice_compliance(
+    citation_pair: tuple[str, str],
+) -> None:
+    """The literal banned-phrases blocklist applies to loading copy too.
+    No "Great choice!", no "Elevate", no AI-disclaimer language."""
+    rel_path, citation = citation_pair
+    violations = check_voice_compliance(citation)
+    assert not violations, (
+        f"{rel_path}: citation_message contains voice violations "
+        f"({violations}). Got: {citation!r}"
+    )
+
+
+def test_chat_user_facing_errors_are_on_voice() -> None:
+    """The two SSE error messages that reach the user (timeout + internal
+    error) must follow tone.md §10.5 error voice — curious, low-alarm,
+    not 'Something went wrong'. Source-level scan so a refactor that
+    reverts the strings fails this test rather than silently shipping
+    flat error copy to the user."""
+    path = BACKEND_ROOT / "app/api/v1/chat.py"
+    content = path.read_text(encoding="utf-8")
+    # Strings the prior version emitted; their presence indicates a
+    # regression back to the pre-B.1 voice baseline.
+    forbidden = [
+        "Request exceeded the 60-second time limit. Please try a simpler query.",
+        "Something went wrong. If this issue persists please try again.",
+    ]
+    found = [s for s in forbidden if s in content]
+    assert not found, (
+        f"chat.py reverted to pre-B.1 error copy ({found!r}). "
+        "User-facing errors should follow tone.md §10.5 — see B.1 in "
+        "the plan file ~/.claude/plans/buzzing-orbiting-dewdrop.md."
+    )
+
+
 def test_blog_composer_prompt_has_ranking_directive() -> None:
     """Guards against accidental deletion of the RANK-AND-COMMIT section
     of the blog composer prompt.

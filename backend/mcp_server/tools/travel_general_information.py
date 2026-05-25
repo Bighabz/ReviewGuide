@@ -27,7 +27,7 @@ TOOL_CONTRACT = {
         "post": []  # Compose is auto-added at end of intent
     },
     "produces": ["general_travel_info"],
-    "citation_message": "Searching for travel information...",
+    "citation_message": "Digging for answers…",
     "tool_order": 150  # Lower priority - fallback tool
 }
 

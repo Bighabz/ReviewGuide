@@ -26,7 +26,7 @@ TOOL_CONTRACT = {
         "post": ["product_normalize"]  # Compose is auto-added at end of intent
     },
     "produces": ["review_aspects"],
-    "citation_message": "Reading expert reviews and ratings...",
+    "citation_message": "Pulling the receipts…",
     "is_default": True
 }
 
