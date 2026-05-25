@@ -8,6 +8,7 @@ import { NextSuggestion, SuggestionCategory } from '@/lib/chatApi'
 import { normalizeBlocks } from '@/lib/normalizeBlocks'
 import { UIBlocks } from '@/components/blocks/BlockRegistry'
 import MessageRecoveryUI from './MessageRecoveryUI'
+import LoadingStatusText from './LoadingStatusText'
 
 import { useState, useEffect, useMemo } from 'react'
 import { formatTimestamp, formatFullTimestamp, SUGGESTION_CLICK_PREFIX } from '@/lib/utils'
@@ -180,13 +181,19 @@ export default function Message({ message, isLast = false }: MessageProps) {
                   ✦ ReviewGuide
                 </div>
 
-                {/* Status indicator — shown while tools are working */}
+                {/* Status indicator — shown while tools are working.
+                    Copy: server-emitted statusText for first ~4s of each
+                    tool, then rotates through the tone.md §10.1
+                    vocabulary while the tool keeps running. Never
+                    "Thinking..." — that fallback was the most visible
+                    voice violation on the chat screen pre-B.1. */}
                 {!message.content && message.isThinking && (
                   <div className="flex items-center gap-2 py-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-[var(--primary)] animate-pulse" />
-                    <span className="stream-status-text tracking-tight">
-                      {message.statusText || 'Thinking...'}
-                    </span>
+                    <LoadingStatusText
+                      statusText={message.statusText}
+                      className="stream-status-text tracking-tight"
+                    />
                   </div>
                 )}
 

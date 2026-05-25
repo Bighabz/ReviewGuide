@@ -269,14 +269,17 @@ describe('CHAT-03 — Status display', () => {
     expect(screen.getByText('Researching 4 sources')).toBeTruthy()
   })
 
-  it('renders fallback "Thinking..." when isThinking=true but statusText is empty', () => {
+  it('renders a §10.1 loading phrase when isThinking=true but statusText is empty', () => {
+    // B.1: 'Thinking...' fallback removed. The empty-statusText path now
+    // shows the first phrase from tone.md §10.1 — "Searching the web…" —
+    // and the useRotatingLoadingCopy hook cycles thereafter.
     const message = makeAssistantMessage({
       content: '',
       isThinking: true,
       statusText: '',
     })
     render(<Message message={message} />)
-    expect(screen.getByText('Thinking...')).toBeTruthy()
+    expect(screen.getByText('Searching the web…')).toBeTruthy()
   })
 
   it('does NOT render status text when isThinking=false', () => {
