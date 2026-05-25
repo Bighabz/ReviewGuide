@@ -417,6 +417,15 @@ async def plan_executor_node(state: GraphState) -> Dict[str, Any]:
             "citations": results.get("citations", []),
             "next_suggestions": results.get("next_suggestions", []),
             "tool_citations": results.get("tool_citations", []),
+            # B.3 follow-up — propagate the structured follow_up_question
+            # from plan_executor's results into the LangGraph state update.
+            # Without this, PR #13's _extract_results fix is silently dropped
+            # at the node boundary: LangGraph only merges what the node
+            # returns, so a field present in `results` but missing from
+            # `inner_update` never lands in GraphState. chat.py then reads
+            # result_state.get("follow_up_question") as None and skips the
+            # SSE event. Detected 2026-05-25 post-PR #13 prod verification.
+            "follow_up_question": results.get("follow_up_question"),
             "current_agent": "plan_executor",
             "status": "halted" if results.get("halt") else "completed",
             "next_agent": None,
@@ -433,6 +442,7 @@ async def plan_executor_node(state: GraphState) -> Dict[str, Any]:
         "citations": [],
         "next_suggestions": [],
         "tool_citations": [],
+        "follow_up_question": None,
         "current_agent": "plan_executor",
         "status": "completed",
         "next_agent": None,
