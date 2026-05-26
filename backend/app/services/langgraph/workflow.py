@@ -426,6 +426,11 @@ async def plan_executor_node(state: GraphState) -> Dict[str, Any]:
             # result_state.get("follow_up_question") as None and skips the
             # SSE event. Detected 2026-05-25 post-PR #13 prod verification.
             "follow_up_question": results.get("follow_up_question"),
+            # affiliate_products is written to self.state by product_affiliate
+            # via _write_tool_outputs_to_state, then lifted into results by
+            # _extract_results. Without this entry, chat.py never sees it and
+            # always reports amazon/ebay as "unavailable".
+            "affiliate_products": results.get("affiliate_products", {}),
             "current_agent": "plan_executor",
             "status": "halted" if results.get("halt") else "completed",
             "next_agent": None,
@@ -443,6 +448,7 @@ async def plan_executor_node(state: GraphState) -> Dict[str, Any]:
         "next_suggestions": [],
         "tool_citations": [],
         "follow_up_question": None,
+        "affiliate_products": {},
         "current_agent": "plan_executor",
         "status": "completed",
         "next_agent": None,
