@@ -51,14 +51,25 @@ class ProductComposeOutput(BaseModel):
 
     The tool returns:
         assistant_text:      str
+        follow_up_question:  Optional[str]  — B.3 curious follow-up emitted as
+                             its own SSE event by chat.py after the body finishes
         ui_blocks:           List[Any]  — list of UI block dicts
         citations:           List[Any]  — list of citation URL strings
         last_search_context: dict       — optional context dict for follow-ups
         search_history:      List[Any]  — optional search history list
         success:             bool
         error:               Optional[str]
+
+    Any field not declared here is silently dropped by ``model_dump()`` at
+    ``validate()`` (line ~163). PRs #13 and #14 fixed the lower layers
+    (_extract_results, plan_executor_node wrapper) but the validator was
+    quietly stripping ``follow_up_question`` upstream of both, so the
+    end-to-end SSE event never fired in prod despite the composer emitting
+    100+ char follow-ups (per ``[product_compose] LLM blog article: ...``
+    log line). Declaring the field here unblocks the chain.
     """
     assistant_text: Optional[str] = ""
+    follow_up_question: Optional[str] = None
     ui_blocks: Optional[List[Any]] = []
     citations: Optional[List[Any]] = []
     last_search_context: Optional[Dict[str, Any]] = {}
