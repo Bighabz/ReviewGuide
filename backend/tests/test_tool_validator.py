@@ -120,6 +120,30 @@ class TestProductComposeValidator:
         assert isinstance(result["citations"], list)
         assert result["assistant_text"] == ""
 
+    def test_follow_up_question_preserved(self):
+        """Regression for the 2026-05-26 prod-verification gap: the
+        composer emits ``follow_up_question`` (per
+        ``backend/mcp_server/tools/product_compose.py:1461``) and chat.py
+        emits a dedicated SSE event for it. If this field isn't declared
+        on the Pydantic schema, ``model_dump()`` silently strips it and
+        the SSE event never fires, regardless of any downstream
+        passthrough fix. Lock in that a real value survives validation."""
+        output = {
+            **self.VALID,
+            "follow_up_question": "Want me to compare these on noise cancellation?",
+        }
+        result = ToolOutputValidator.validate(self.TOOL, output)
+        assert result.get("follow_up_question") == (
+            "Want me to compare these on noise cancellation?"
+        )
+
+    def test_follow_up_question_defaults_to_none(self):
+        """Composer didn't emit a follow-up — validator should still
+        present the key (so downstream ``.get()`` is unambiguous)."""
+        result = ToolOutputValidator.validate(self.TOOL, self.VALID)
+        assert "follow_up_question" in result
+        assert result["follow_up_question"] is None
+
 
 # ---------------------------------------------------------------------------
 # travel_search_hotels
