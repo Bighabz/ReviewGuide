@@ -2,14 +2,18 @@
 Tests for plan_executor_node in app/services/langgraph/workflow.py.
 
 Locks in the contract that fields plan_executor.execute() returns in its
-results dict — specifically follow_up_question — propagate into the
-LangGraph state update returned by plan_executor_node. The node builds
-inner_update field-by-field; any new GraphState field that needs to flow
-back from plan_executor must be wired here.
+results dict propagate into the LangGraph state update returned by
+plan_executor_node. The node builds inner_update field-by-field; any new
+GraphState field that needs to flow back from plan_executor must be wired
+here.
 
-Regression coverage for the 2026-05-25 bug where PR #13 fixed
-_extract_results but the node wrapper dropped the field before it reached
-GraphState, so chat.py's SSE emission never fired.
+Regression coverage for two passthrough bugs:
+- 2026-05-25: PR #13 fixed _extract_results for follow_up_question but the
+  node wrapper dropped the field before it reached GraphState, so chat.py's
+  SSE emission never fired.
+- 2026-05-26: affiliate_products written by product_affiliate to executor.state
+  was never lifted into _extract_results' return dict, so chat.py always read
+  {} and reported amazon/ebay as "unavailable" even when the tool found results.
 """
 from __future__ import annotations
 
@@ -126,3 +130,68 @@ async def test_fallback_on_timeout_clears_follow_up_question():
     # cleanly on the timeout path too.
     assert "follow_up_question" in update
     assert update["follow_up_question"] is None
+
+
+@pytest.mark.asyncio
+async def test_node_propagates_affiliate_products_from_results():
+    """When _extract_results surfaces affiliate_products from executor.state,
+    the node's inner_update must include it so LangGraph merges it into
+    GraphState and chat.py can build an accurate provider_coverage entry.
+
+    Regression: product_affiliate writes affiliate_products to executor.state
+    in-place; it never appears in the compose tool's output dict. Before the
+    fix, _extract_results never included it in results{}, so inner_update's
+    `results.get("affiliate_products", {})` always returned {} — causing
+    chat.py to report amazon/ebay as result_count:0 / "unavailable" even when
+    the tool found 7+ results per provider."""
+    fake_affiliate = {
+        "amazon": [{"product_name": "Sony WH-1000XM5", "offers": [{"price": 279.99}]}],
+        "ebay": [{"product_name": "Sony WH-1000XM5", "offers": [{"price": 249.99}]}],
+    }
+    fake_results = {
+        "assistant_text": "Here are the best options.",
+        "ui_blocks": [],
+        "citations": [],
+        "next_suggestions": [],
+        "tool_citations": [],
+        "affiliate_products": fake_affiliate,
+    }
+
+    with patch(
+        "app.services.langgraph.workflow.PlanExecutor"
+    ) as mock_executor_cls:
+        mock_executor = mock_executor_cls.return_value
+        mock_executor.execute = AsyncMock(return_value=fake_results)
+
+        update = await plan_executor_node(_minimal_state())
+
+    assert "affiliate_products" in update, (
+        "plan_executor_node must include affiliate_products in its returned "
+        "update dict. Missing it means chat.py reads {} from GraphState and "
+        "marks every provider as unavailable in provider_coverage."
+    )
+    assert update["affiliate_products"] == fake_affiliate
+
+
+@pytest.mark.asyncio
+async def test_node_returns_empty_dict_when_no_affiliate_products():
+    """When no affiliate_products in results (non-product intent or tool
+    skipped), the node should return {} — not omit the key — so downstream
+    GraphState always has a consistent type for the field."""
+    fake_results = {
+        "assistant_text": "Here is some general info.",
+        "ui_blocks": [],
+        "citations": [],
+        "next_suggestions": [],
+        "tool_citations": [],
+    }
+
+    with patch(
+        "app.services.langgraph.workflow.PlanExecutor"
+    ) as mock_executor_cls:
+        mock_executor = mock_executor_cls.return_value
+        mock_executor.execute = AsyncMock(return_value=fake_results)
+
+        update = await plan_executor_node(_minimal_state())
+
+    assert update.get("affiliate_products") == {}
