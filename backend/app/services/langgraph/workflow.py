@@ -426,6 +426,12 @@ async def plan_executor_node(state: GraphState) -> Dict[str, Any]:
             # result_state.get("follow_up_question") as None and skips the
             # SSE event. Detected 2026-05-25 post-PR #13 prod verification.
             "follow_up_question": results.get("follow_up_question"),
+            # Propagate affiliate_products so chat.py can build an accurate
+            # provider_coverage entry. Without this, _extract_results' fix
+            # (which reads from plan_executor.state) never reaches GraphState
+            # because LangGraph only merges keys present in the node's return
+            # dict. Result: amazon/ebay always show result_count:0 + "unavailable".
+            "affiliate_products": results.get("affiliate_products", {}),
             "current_agent": "plan_executor",
             "status": "halted" if results.get("halt") else "completed",
             "next_agent": None,
@@ -443,6 +449,7 @@ async def plan_executor_node(state: GraphState) -> Dict[str, Any]:
         "next_suggestions": [],
         "tool_citations": [],
         "follow_up_question": None,
+        "affiliate_products": {},
         "current_agent": "plan_executor",
         "status": "completed",
         "next_agent": None,
