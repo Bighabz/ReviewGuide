@@ -848,6 +848,17 @@ async def generate_chat_stream(
             assistant_metadata["intent"] = result_state.get("intent")
         if result_state.get("status"):
             assistant_metadata["status"] = result_state.get("status")
+        # Persist the follow-up so reloaded history renders the italic
+        # line below the body, matching the live turn. Stored under the
+        # camelCase key the frontend Message component reads
+        # (Message.tsx:223 `message.followUpQuestion`) — the rehydration
+        # spread in ChatContainer.tsx:210 does no case conversion, and
+        # the live SSE path already normalizes snake→camel at
+        # ChatContainer.tsx:500, so persisting camelCase keeps both
+        # paths consistent. Sanitization already happened at line ~593;
+        # the stored value is voice-clean.
+        if follow_up_question_text and not is_halted:
+            assistant_metadata["followUpQuestion"] = follow_up_question_text
 
         _save_task = asyncio.create_task(
             chat_history_manager.save_turn(
