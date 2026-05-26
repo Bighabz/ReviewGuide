@@ -99,11 +99,19 @@ async def test_node_passes_through_none_when_no_follow_up():
 @pytest.mark.asyncio
 async def test_fallback_on_timeout_clears_follow_up_question():
     """On hard timeout, the fallback dict replaces results — verify it
-    explicitly clears follow_up_question rather than leaking stale state."""
-    from app.services.langgraph import workflow as workflow_module
+    explicitly clears follow_up_question rather than leaking stale state.
+
+    Raises ``asyncio.TimeoutError`` rather than the builtin so this test
+    exercises the ``except asyncio.TimeoutError`` branch of
+    ``run_stage_with_budget`` (classified ``transient``), which is the
+    path the production budget timeout actually takes. The two are
+    aliased on Python 3.11+ but distinguishing matters for the error
+    classification asserted upstream.
+    """
+    import asyncio as _asyncio
 
     async def _timeout(*_args, **_kwargs):
-        raise TimeoutError("simulated stage timeout")
+        raise _asyncio.TimeoutError("simulated stage timeout")
 
     with patch(
         "app.services.langgraph.workflow.PlanExecutor"
