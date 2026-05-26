@@ -9,11 +9,13 @@ name: Deploy backend
 #
 # Activation requirements:
 #   1. RAILWAY_TOKEN secret added to the GitHub repo (Settings →
-#      Secrets and variables → Actions). Generate via:
-#         railway login --browserless    # produces a long-lived token
-#      or via the Railway dashboard → Account → Tokens.
-#   2. The Railway CLI on this runner uses the token to authenticate
-#      and deploys whatever's currently on `main`.
+#      Secrets and variables → Actions). Must be a PROJECT-SCOPED token,
+#      not an account/personal token. Generate via:
+#         Railway dashboard → reviewguide-backend → Settings → Tokens → New Token
+#      Select environment "production" when prompted.
+#      Account-level tokens are rejected by Railway for project-deploy actions.
+#   2. The Railway CLI on this runner uses the token to authenticate,
+#      uploads the checked-out source, and triggers a fresh build on Railway.
 #
 # If RAILWAY_TOKEN is missing, the step fails cleanly (one log line
 # saying so) rather than ghosting. That's by design — better to see
@@ -46,7 +48,7 @@ jobs:
           if [ -z "$RAILWAY_TOKEN" ]; then
             echo "::error::RAILWAY_TOKEN secret is not configured."
             echo "::error::Add it via Settings → Secrets and variables → Actions."
-            echo "::error::Generate the token via 'railway login --browserless' or the Railway dashboard."
+            echo "::error::Generate a project-scoped token: Railway dashboard → reviewguide-backend → Settings → Tokens → New Token"
             exit 1
           fi
           echo "RAILWAY_TOKEN present (len: ${#RAILWAY_TOKEN})"
@@ -57,22 +59,29 @@ jobs:
       - name: Deploy
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-        # `--from-source` deploys the latest commit from the Railway-
-        # configured GitHub source — same path the dashboard webhook
-        # uses. Avoids the local-tarball-upload path that OOM'd on the
-        # 2026-05-25 manual deploy (the working tree, including
-        # frontend/node_modules, exceeded the indexer's memory budget).
+        # `railway up` uploads the checked-out source and triggers a fresh
+        # build+deploy on Railway — this deploys the current commit, which
+        # is exactly what we need when the primary Railway webhook missed a push.
+        #
+        # `railway redeploy` was used previously but is wrong for this purpose:
+        # it only redeploys the last successful deployment (same old SHA) and
+        # does not accept --project, --environment, or --from-source flags.
+        #
+        # `railway up` respects .gitignore and auto-excludes node_modules, so
+        # the uploaded archive stays small. The .railwayignore at the repo root
+        # additionally excludes frontend/ and other non-backend paths to keep
+        # the tarball lean (the OOM on the 2026-05-25 manual deploy was caused
+        # by node_modules being included; that can't happen here).
+        #
+        # `--ci` streams build logs and exits when the build completes;
+        # the runner timeout (15 min) is the backstop for hung builds.
         #
         # Project / environment / service IDs are non-secret identifiers
-        # for the reviewguide-backend project. Hardcoded so the workflow
-        # is self-contained — the alternative is `railway link` in a
-        # prior step which requires `--yes` patches that vary by CLI
-        # version. If these IDs ever change (project rename, env clone,
-        # service migration), update them here.
+        # for the reviewguide-backend project. If these ever change
+        # (project rename, env clone, service migration), update them here.
         run: |
-          railway redeploy \
+          railway up \
             --project 0827e58a-47ff-4199-8fae-4f634a8384e8 \
             --environment 9db39bf6-45d6-40ca-acbe-c627b43b710e \
             --service backend \
-            --from-source \
-            --yes
+            --ci
