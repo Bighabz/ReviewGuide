@@ -375,6 +375,27 @@ class ClarifierAgent(BaseAgent):
                     logger.info(f"[Clarifier Agent] Detected ambiguous brand-only query: {detected_ambiguous} — requesting category clarification")
                     missing_required_slots.append("category")
 
+        # Blueprint §8: budget is the default first question on a non-trivial
+        # product purchase. `budget` is an OPTIONAL slot on product_search, so the
+        # clarifier would never ask it on its own. When the user hasn't given a
+        # budget (and none is in prior context) on a substantive product query,
+        # ask it — and ask it FIRST. NOTE: behavioral change; verify in staging
+        # (local backend test env is currently blocked by a Settings config error).
+        if intent == "product":
+            _ctx = state.get("last_search_context", {}) or {}
+            has_budget = bool(current_slots.get("budget")) or bool(_ctx.get("budget"))
+            substantive = bool(
+                current_slots.get("category")
+                or current_slots.get("product_name")
+                or current_slots.get("product_type")
+            )
+            if not has_budget and substantive and "budget" not in missing_required_slots:
+                missing_required_slots.append("budget")
+                logger.info("[Clarifier Agent] Budget missing on substantive product query — asking budget first (blueprint §8)")
+            # Whenever budget is being asked, lead with it.
+            if "budget" in missing_required_slots:
+                missing_required_slots = ["budget"] + [s for s in missing_required_slots if s != "budget"]
+
         # Check if all slots are now filled after extraction
         if not missing_required_slots:
             logger.info(f"[Clarifier Agent] All required slots extracted from initial message, proceeding to execution")

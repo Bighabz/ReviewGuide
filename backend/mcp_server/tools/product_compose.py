@@ -859,10 +859,11 @@ Products to describe:
 
         blog_role = """Write a buying guide for ReviewGuide.ai.
 
-OUTPUT FORMAT — return a JSON object with exactly two string fields:
+OUTPUT FORMAT — return a JSON object with these string fields:
 {
   "body": "<3-5 paragraphs of markdown, no per-product headings>",
-  "follow_up_question": "<exactly one contextual curious question that references something specific from the body — a product name, a tradeoff just mentioned, or the user's stated situation>"
+  "follow_up_question": "<exactly one contextual curious question that references something specific from the body — a product name, a tradeoff just mentioned, or the user's stated situation>",
+  "transitional_reasoning": "<OPTIONAL — exactly one short sentence, OR an empty string. See TRANSITIONAL RULES.>"
 }
 
 RANK AND COMMIT (load-bearing — read first):
@@ -902,7 +903,17 @@ FOLLOW-UP RULES:
 - Exactly one question, returned in the follow_up_question field
 - Must reference something specific from the body (a product, a tradeoff, the user's situation)
 - Must NOT be a generic offer ("Anything else?", "Want to dig deeper?", "How can I help?")
-- Must NOT be a bulleted list of multiple questions — just one single question"""
+- Must NOT be a bulleted list of multiple questions — just one single question
+
+TRANSITIONAL RULES (transitional_reasoning field):
+- This is a single, compressed-consensus sentence shown BEFORE the guide, as a brief
+  aside, ONLY when the user's most recent message added a constraint (a budget, a use
+  case, a must-have) that MEANINGFULLY changed which products lead the ranking.
+- Voice: "$X puts the [tier] on the table — that changes the pick for [situation]." or
+  "Once comfort matters more than ANC, the order flips." One sentence, no preamble.
+- Return an EMPTY STRING "" on routine confirmations, greetings, or first-turn queries
+  where no prior shortlist existed to change. When in doubt, return "".
+- Never restate the question back; never list options; never exceed one sentence."""
 
         llm_tasks['blog_article'] = model_service.generate_compose(
             messages=[
@@ -1309,11 +1320,15 @@ FOLLOW-UP RULES:
         # chat.py emits the follow-up as a dedicated SSE event after the
         # content stream completes.
         follow_up_text: str = ""
+        transitional_text: str = ""
         if blog_article:
             try:
                 parsed = json.loads(blog_article)
                 body = (parsed.get("body") or "").strip()
                 follow_up_text = (parsed.get("follow_up_question") or "").strip()
+                # Quiz-path transitional reasoning — emitted only when the latest
+                # constraint changed the shortlist (LLM-judged; empty otherwise).
+                transitional_text = (parsed.get("transitional_reasoning") or "").strip()
                 assistant_text = body
                 logger.info(
                     f"[product_compose] LLM blog article: body={len(body)} chars, "
@@ -1459,6 +1474,9 @@ FOLLOW-UP RULES:
             # chat.py emits a dedicated SSE `follow_up_question` event
             # after the content stream finishes.
             "follow_up_question": follow_up_text or None,
+            # Quiz-path transitional reasoning — chat.py emits a dedicated SSE
+            # event before the body; frontend renders it as a TransitionalBubble.
+            "transitional_reasoning": transitional_text or None,
             "ui_blocks": ui_blocks,
             "citations": citations,
             "last_search_context": new_context,

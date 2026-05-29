@@ -491,7 +491,7 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
 
           setMessages((prev) => [...prev, followupMessage])
           currentMessageIdRef.current = followupMessageId
-        } else if (data.ui_blocks || data.itinerary || data.followups || data.follow_up_question) {
+        } else if (data.ui_blocks || data.itinerary || data.followups || data.follow_up_question || data.transitional_reasoning) {
           setMessages((prev) =>
             prev.map((msg) =>
               msg.id === currentMessageIdRef.current
@@ -503,6 +503,8 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
                   // B.3 — wire-format is snake_case; map to camelCase on
                   // the Message interface so React state stays idiomatic.
                   ...(data.follow_up_question ? { followUpQuestion: data.follow_up_question } : {}),
+                  // Quiz-path transitional reasoning — same snake→camel mapping.
+                  ...(data.transitional_reasoning ? { transitionalReasoning: data.transitional_reasoning } : {}),
                 }
                 : msg
             )

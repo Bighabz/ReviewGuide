@@ -84,6 +84,9 @@ export interface StreamChunk {
   // Frontend renders it distinctly (own line, italic) below the message body
   // per spec §11 / §13 #3. snake_case to match the wire format.
   follow_up_question?: string
+  // Quiz-path transitional reasoning — emitted as its own SSE event; frontend
+  // renders it as a TransitionalBubble before the AI bubble. snake_case = wire format.
+  transitional_reasoning?: string
   placeholder?: boolean
   clear?: boolean
   status_update?: string  // Agent status messages (e.g., "writing itinerary...")
@@ -350,6 +353,15 @@ export async function streamChat({
               if (currentEventType === 'follow_up_question') {
                 if (chunk.text) {
                   onComplete({ follow_up_question: chunk.text })
+                }
+                continue
+              }
+
+              // Quiz-path transitional reasoning — routed through onComplete like
+              // the follow-up (attaches to the current message without finalizing).
+              if (currentEventType === 'transitional_reasoning') {
+                if (chunk.text) {
+                  onComplete({ transitional_reasoning: chunk.text })
                 }
                 continue
               }

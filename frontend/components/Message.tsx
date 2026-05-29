@@ -68,6 +68,9 @@ export default function Message({ message, isLast = false }: MessageProps) {
   const isUser = message.role === 'user'
   const [copied, setCopied] = useState(false)
   const [relativeTime, setRelativeTime] = useState(() => formatTimestamp(message.timestamp))
+  // Blueprint §7 — prior blogs collapse to a short lede on a later turn; only the
+  // live (last) blog stays full-size. Tap to re-expand.
+  const [blogExpanded, setBlogExpanded] = useState(false)
 
   // RFC §2.4 — Memoize suggestion sort to avoid re-sorting on every render during streaming
   const sortedSuggestions = useMemo(
@@ -206,22 +209,56 @@ export default function Message({ message, isLast = false }: MessageProps) {
                   </div>
                 )}
 
-                {/* 1. Render text content FIRST (brief summary) */}
-                {message.content && (
-                  <div className="w-full rg-blog-in">
-                    <div className="prose prose-sm sm:prose-base max-w-none
-                        text-[var(--text)]
-                        prose-headings:font-serif prose-headings:tracking-tight prose-headings:text-[var(--text)]
-                        prose-p:text-[var(--text)] prose-p:leading-relaxed prose-p:text-[15px]
-                        prose-strong:text-[var(--text)] prose-strong:font-semibold
-                        prose-li:text-[var(--text)] prose-li:marker:text-[var(--text-muted)]
-                        prose-pre:bg-[var(--surface)] prose-pre:border prose-pre:border-[var(--border)] prose-pre:rounded-xl
-                        prose-a:text-[var(--primary)] prose-a:no-underline hover:prose-a:underline"
-                    >
-                      <ReactMarkdown>{message.content}</ReactMarkdown>
+                {/* 1. Render text content FIRST. For product-results turns, render
+                    as the blueprint editorial blog card: "THE PICK" terra eyebrow +
+                    Newsreader (font-serif) body. Ordinary chat answers stay plain. */}
+                {message.content && (() => {
+                  const isBlogResult =
+                    Array.isArray(message.ui_blocks) &&
+                    message.ui_blocks.some(
+                      (b: any) => typeof b?.type === 'string' && b.type.toLowerCase().includes('product')
+                    )
+                  // Prior blogs (not the live/last one) collapse to a short lede.
+                  const collapsed = isBlogResult && !isLast && !blogExpanded
+                  return (
+                    <div className="w-full rg-blog-in">
+                      {isBlogResult && (
+                        <>
+                          <div className="rg-eyebrow rg-eyebrow--terra mb-2">The pick</div>
+                          <div className="rg-hairline mb-3" />
+                        </>
+                      )}
+                      <div className={
+                        (collapsed ? 'line-clamp-2 ' : '') +
+                        (isBlogResult
+                          ? `prose prose-sm sm:prose-base max-w-none
+                            prose-headings:font-display prose-headings:not-italic prose-headings:text-[var(--ink)]
+                            prose-p:font-serif prose-p:text-[var(--ink)] prose-p:text-[16px] prose-p:leading-[26px]
+                            prose-strong:text-[var(--ink)] prose-strong:font-semibold
+                            prose-li:font-serif prose-li:text-[var(--ink)] prose-li:leading-[26px]
+                            prose-a:text-[var(--ink)] prose-a:decoration-dotted prose-a:decoration-[var(--terra)] prose-a:underline-offset-4`
+                          : `prose prose-sm sm:prose-base max-w-none
+                            text-[var(--text)]
+                            prose-headings:font-serif prose-headings:tracking-tight prose-headings:text-[var(--text)]
+                            prose-p:text-[var(--text)] prose-p:leading-relaxed prose-p:text-[15px]
+                            prose-strong:text-[var(--text)] prose-strong:font-semibold
+                            prose-li:text-[var(--text)] prose-li:marker:text-[var(--text-muted)]
+                            prose-pre:bg-[var(--surface)] prose-pre:border prose-pre:border-[var(--border)] prose-pre:rounded-xl
+                            prose-a:text-[var(--primary)] prose-a:no-underline hover:prose-a:underline`)
+                      }>
+                        <ReactMarkdown>{message.content}</ReactMarkdown>
+                      </div>
+                      {isBlogResult && !isLast && (
+                        <button
+                          onClick={() => setBlogExpanded((v) => !v)}
+                          className="rg-eyebrow rg-eyebrow--terra mt-2 cursor-pointer"
+                        >
+                          {blogExpanded ? 'Show less ↑' : 'Show the full take ↓'}
+                        </button>
+                      )}
                     </div>
-                  </div>
-                )}
+                  )
+                })()}
 
                 {/* B.3 — Curious follow-up question. Lives between the body
                     and the UI blocks (carousel) so it's still inside the
