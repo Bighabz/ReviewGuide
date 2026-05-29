@@ -24,12 +24,11 @@ FROM python:3.11-slim AS production
 
 WORKDIR /app
 
-# Build arg threading the running git SHA into the container so the
-# /health endpoint can expose it. railway.json passes
-# $RAILWAY_GIT_COMMIT_SHA at build time; local builds can override
-# with --build-arg GIT_SHA=... or fall back to "unknown".
-ARG GIT_SHA=unknown
-ENV GIT_SHA=${GIT_SHA}
+# Railway injects RAILWAY_GIT_COMMIT_SHA automatically as a Docker build
+# arg. Declare it here so Docker exposes it; local builds fall back to
+# "unknown". Pass --build-arg RAILWAY_GIT_COMMIT_SHA=<sha> to override.
+ARG RAILWAY_GIT_COMMIT_SHA=unknown
+ENV GIT_SHA=${RAILWAY_GIT_COMMIT_SHA}
 
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
