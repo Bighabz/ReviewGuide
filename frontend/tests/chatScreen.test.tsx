@@ -427,3 +427,58 @@ describe('CHAT-06 — Chip restyle', () => {
     }
   })
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// In-chat conversational Results flow — TransitionalBubble, blog card, collapse
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('In-chat Results flow', () => {
+  it('renders the TransitionalBubble when transitionalReasoning is present', () => {
+    render(
+      <Message
+        message={makeAssistantMessage({
+          transitionalReasoning: '$200 puts the mid-tier on the table — that changes the pick.',
+        })}
+        isLast
+      />
+    )
+    expect(
+      screen.getByText('$200 puts the mid-tier on the table — that changes the pick.')
+    ).toBeTruthy()
+  })
+
+  it('renders the editorial blog card (THE PICK eyebrow) for product-results turns', () => {
+    render(
+      <Message
+        message={makeAssistantMessage({ ui_blocks: [{ type: 'products', products: [{ name: 'Sony' }] }] })}
+        isLast
+      />
+    )
+    expect(screen.getByText('The pick')).toBeTruthy()
+  })
+
+  it('does NOT render the blog eyebrow for ordinary (non-product) answers', () => {
+    render(<Message message={makeAssistantMessage()} isLast />)
+    expect(screen.queryByText('The pick')).toBeNull()
+  })
+
+  it('collapses a PRIOR blog (not last) with a "Show the full take" toggle', () => {
+    render(
+      <Message
+        message={makeAssistantMessage({ ui_blocks: [{ type: 'products', products: [{ name: 'Sony' }] }] })}
+        isLast={false}
+      />
+    )
+    expect(screen.getByText('Show the full take ↓')).toBeTruthy()
+  })
+
+  it('does NOT collapse the live (last) blog', () => {
+    render(
+      <Message
+        message={makeAssistantMessage({ ui_blocks: [{ type: 'products', products: [{ name: 'Sony' }] }] })}
+        isLast
+      />
+    )
+    expect(screen.queryByText('Show the full take ↓')).toBeNull()
+  })
+})

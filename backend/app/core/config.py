@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     DEBUG: bool = Field(default=True, description="Enable debug mode")
     SECRET_KEY: str = Field(..., min_length=32, description="Secret key for JWT and encryption")
     API_V1_PREFIX: str = Field(default="/v1", description="API version prefix")
+    # Infra/deploy token sometimes present in the environment (Railway CLI/MCP).
+    # Declared but unused so it doesn't trip extra=forbid and crash startup/tests.
+    RAILWAY_TOKEN: str = Field(default="", description="Railway deploy token (infra only; unused by the app)")
     TIMEZONE: str = Field(default="Asia/Bangkok", description="Application timezone (UTC+7)")
 
     # CORS - stored as str to avoid pydantic-settings JSON parsing issues with env vars
