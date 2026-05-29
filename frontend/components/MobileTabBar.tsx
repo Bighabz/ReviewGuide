@@ -120,6 +120,9 @@ export default function MobileTabBar() {
     if (tabId === 'ask') {
       return pathname?.startsWith('/chat') || pathname?.startsWith('/results')
     }
+    if (tabId === 'profile') {
+      return pathname?.startsWith('/profile')
+    }
     if (href) {
       return pathname?.startsWith(href)
     }
@@ -155,9 +158,9 @@ export default function MobileTabBar() {
                 <div
                   className="flex items-center justify-center w-12 h-12 rounded-full"
                   style={{
-                    background: 'var(--primary, #1B4DFF)',
+                    background: 'var(--primary, #B8543A)',
                     transform: 'translateY(-8px)',
-                    boxShadow: '0 4px 16px rgba(27,77,255,0.35)',
+                    boxShadow: '0 4px 16px rgba(184,84,58,0.35)',
                   }}
                 >
                   <Plus size={22} strokeWidth={2.5} color="white" />
@@ -165,7 +168,7 @@ export default function MobileTabBar() {
                 <span
                   style={{
                     fontSize: '10px',
-                    color: isActive ? '#1B4DFF' : '#9B9B9B',
+                    color: isActive ? '#B8543A' : '#9B9B9B',
                     fontFamily: 'var(--font-dm-sans, system-ui)',
                     fontWeight: 500,
                     marginTop: '-6px',
@@ -186,6 +189,7 @@ export default function MobileTabBar() {
                   className="flex flex-col items-center gap-0.5 min-w-[56px] py-1"
                   aria-label="Profile"
                   data-active={isActive ? 'true' : undefined}
+                  onClick={() => router.push('/profile')}
                   onMouseDown={startLongPress}
                   onMouseUp={cancelLongPress}
                   onMouseLeave={cancelLongPress}
@@ -195,12 +199,12 @@ export default function MobileTabBar() {
                   <Icon
                     size={22}
                     strokeWidth={isActive ? 2 : 1.5}
-                    color={isActive ? '#1B4DFF' : '#9B9B9B'}
+                    color={isActive ? '#B8543A' : '#9B9B9B'}
                   />
                   <span
                     style={{
                       fontSize: '10px',
-                      color: isActive ? '#1B4DFF' : '#9B9B9B',
+                      color: isActive ? '#B8543A' : '#9B9B9B',
                       fontFamily: 'var(--font-dm-sans, system-ui)',
                       fontWeight: 500,
                     }}
@@ -283,12 +287,12 @@ export default function MobileTabBar() {
               <Icon
                 size={22}
                 strokeWidth={isActive ? 2 : 1.5}
-                color={isActive ? '#1B4DFF' : '#9B9B9B'}
+                color={isActive ? '#B8543A' : '#9B9B9B'}
               />
               <span
                 style={{
                   fontSize: '10px',
-                  color: isActive ? '#1B4DFF' : '#9B9B9B',
+                  color: isActive ? '#B8543A' : '#9B9B9B',
                   fontFamily: 'var(--font-dm-sans, system-ui)',
                   fontWeight: 500,
                 }}

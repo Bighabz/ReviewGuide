@@ -5,6 +5,7 @@ import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
+import { Wordmark } from './Brand'
 
 const ACCENT_COLORS = [
   { id: 'indigo', label: 'Indigo', color: '#1B4DFF' },
@@ -124,16 +125,9 @@ export default function UnifiedTopbar({
             <Menu size={22} strokeWidth={1.5} />
           </button>
 
-          {/* Logo — Editorial serif wordmark */}
-          <Link href="/" className="flex items-center shrink-0 group">
-            <img
-              src={theme === 'dark'
-                ? '/images/1815e5dc-c4db-4248-9aeb-0a815fd87a4b.png'
-                : '/images/8f4c1971-a5b0-474e-9fb1-698e76324f0b.png'
-              }
-              alt="ReviewGuide.Ai"
-              className="h-12 sm:h-14 w-auto object-contain group-hover:opacity-80 transition-opacity"
-            />
+          {/* Logo — blueprint 3-piece wordmark (Review 700 terra / Guide 500 ink / .Ai 700 terra) */}
+          <Link href="/" className="flex items-center shrink-0 group" aria-label="ReviewGuide.Ai home">
+            <Wordmark size={24} className="group-hover:opacity-80 transition-opacity" />
           </Link>
 
           {/* Navigation — Refined text links */}

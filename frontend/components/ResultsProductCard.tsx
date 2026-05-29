@@ -1,162 +1,149 @@
 'use client'
 
-import { useState } from 'react'
-import { ShoppingCart } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import { ShoppingCart, Bookmark } from 'lucide-react'
 import { lookupCuratedProduct } from '@/lib/curatedProductLookup'
 import type { ExtractedProduct } from '@/lib/extractResultsData'
+import { toggleSaved, isSaved, slugifyProduct, type SavedItem } from '@/lib/savedItems'
 
 interface ResultsProductCardProps {
   product: ExtractedProduct
   index: number
 }
 
-const POSITION_SCORES = [95, 88, 82, 76, 70]
-
-function getCategoryBadge(index: number): { label: string; color: string; bg: string } {
-  if (index === 0) {
-    return { label: 'Top Pick', color: '#B8860B', bg: 'rgba(184,134,11,0.1)' }
-  }
-  if (index === 1) {
-    return { label: 'Best Value', color: 'var(--primary)', bg: 'var(--primary-light, rgba(27,77,255,0.08))' }
-  }
-  if (index === 2) {
-    return { label: 'Premium', color: '#7C3AED', bg: 'rgba(124,58,237,0.1)' }
-  }
-  return { label: `#${index + 1}`, color: 'var(--text-secondary)', bg: 'var(--surface-hover)' }
+function roleLabel(index: number): string {
+  if (index === 0) return 'Top pick · for you'
+  if (index === 1) return 'Best value'
+  if (index === 2) return 'Premium pick'
+  return `Pick #${index + 1}`
 }
 
 function ProductImage({ name, imageUrl }: { name: string; imageUrl: string | null }) {
   const [errored, setErrored] = useState(false)
-
   if (!imageUrl || errored) {
     return (
-      <div
-        data-testid="product-image-placeholder"
-        className="w-16 h-16 flex items-center justify-center rounded-lg flex-shrink-0"
-        style={{ backgroundColor: 'var(--surface-hover)' }}
-      >
-        <ShoppingCart size={20} style={{ color: 'var(--text-secondary)' }} />
+      <div data-testid="product-image-placeholder" className="w-full h-full flex items-center justify-center">
+        <ShoppingCart size={28} style={{ color: 'var(--ink-3)' }} />
       </div>
     )
   }
-
   return (
-    <img
-      src={imageUrl}
-      alt={name}
-      className="w-16 h-16 object-contain"
-      onError={() => setErrored(true)}
-    />
+    <img src={imageUrl} alt={name} className="w-full h-full object-contain p-4" onError={() => setErrored(true)} />
+  )
+}
+
+// Bookmark toggle — fill terra when saved, icon pop + expanding terra ring on tap (no toast).
+function SaveToggle({ item }: { item: Omit<SavedItem, 'savedAt'> }) {
+  const [saved, setSaved] = useState(false)
+  const [pulse, setPulse] = useState(0)
+  // Sync initial + cross-component saved state from the store
+  useEffect(() => {
+    setSaved(isSaved(item.id))
+    const sync = () => setSaved(isSaved(item.id))
+    window.addEventListener('saveditems:changed', sync)
+    return () => window.removeEventListener('saveditems:changed', sync)
+  }, [item.id])
+  return (
+    <button
+      onClick={(e) => { e.preventDefault(); e.stopPropagation(); setSaved(toggleSaved(item)); setPulse((p) => p + 1) }}
+      aria-label={saved ? 'Remove bookmark' : 'Save'}
+      className="absolute top-2 right-2 w-8 h-8 rounded-full flex items-center justify-center"
+      style={{ background: 'var(--paper-hi)', border: '1px solid var(--line)' }}
+    >
+      {pulse > 0 && (
+        <span
+          key={pulse}
+          className="rg-ring absolute inset-0 rounded-full"
+          style={{ border: '1px solid var(--terra)' }}
+        />
+      )}
+      <Bookmark
+        key={`${saved}-${pulse}`}
+        size={15}
+        strokeWidth={1.8}
+        className={pulse > 0 ? 'rg-bookmark-pop' : ''}
+        style={{ color: 'var(--terra)', fill: saved ? 'var(--terra)' : 'transparent' }}
+      />
+    </button>
   )
 }
 
 export default function ResultsProductCard({ product, index }: ResultsProductCardProps) {
+  const router = useRouter()
   const { imageUrl: curatedImage, affiliateUrl: curatedUrl } = lookupCuratedProduct(product.name)
   const imageUrl = curatedImage || product.image_url || null
   const affiliateUrl = curatedUrl || product.url || null
-
-  const score = POSITION_SCORES[index] ?? 60
-  const accentIndex = (index % 4) + 1
-  const badge = getCategoryBadge(index)
+  const isTop = index === 0
+  const slug = slugifyProduct(product.name)
 
   const ctaHref =
     affiliateUrl ||
     `https://www.amazon.com/s?k=${encodeURIComponent(product.name)}&tag=revguide-20`
 
+  function openDetail() {
+    try {
+      sessionStorage.setItem('active_product', JSON.stringify({
+        id: slug, name: product.name, price: product.price,
+        imageUrl: imageUrl ?? undefined, url: ctaHref, role: roleLabel(index),
+      }))
+    } catch { /* ignore */ }
+    router.push(`/product/${slug}`)
+  }
+
   return (
     <div
-      className="rounded-2xl border w-full overflow-hidden product-card-hover"
-      style={{
-        borderColor: 'var(--border)',
-        backgroundColor: 'var(--surface-elevated)',
-        padding: '12px',
-      }}
+      className="rounded-[14px] overflow-hidden product-card-hover flex flex-col"
+      style={{ background: 'var(--paper-hi)', border: '1px solid var(--line)' }}
     >
-      {/* Top section: pastel background with rank badge and product image */}
-      <div
-        className="rounded-xl h-[100px] relative flex items-center justify-center mb-3"
-        style={{ background: `var(--card-accent-${accentIndex})` }}
-      >
-        {/* Rank badge */}
-        <div className="absolute top-2 left-2 w-6 h-6 rounded-full bg-black text-white text-xs font-bold flex items-center justify-center">
-          #{index + 1}
-        </div>
-
-        {/* Product image */}
+      {/* Image — top, ~75% of width tall, full bleed */}
+      <div className="relative w-full" style={{ height: 180, background: 'var(--paper-alt)' }}>
         <ProductImage name={product.name} imageUrl={imageUrl} />
+        <SaveToggle
+          item={{
+            id: slugifyProduct(product.name),
+            name: product.name,
+            price: product.price,
+            imageUrl: imageUrl ?? undefined,
+            url: ctaHref,
+            role: roleLabel(index),
+          }}
+        />
       </div>
 
-      {/* Middle section: category badge, name, description, score bar */}
-      <div className="mb-3">
-        {/* Category badge pill */}
-        <span
-          className="px-2 py-0.5 rounded-full text-[11px] font-medium inline-block mb-1"
-          style={{ color: badge.color, backgroundColor: badge.bg }}
+      {/* Body */}
+      <div className="px-3.5 pt-3 pb-3.5 flex flex-col gap-1.5 flex-1">
+        <div
+          className="uppercase"
+          style={{
+            fontSize: 10, fontWeight: 600, letterSpacing: '0.08em',
+            color: isTop ? 'var(--terra)' : 'var(--ink-2)',
+          }}
         >
-          {badge.label}
-        </span>
-
-        {/* Product name */}
-        <p
-          className="font-semibold text-sm line-clamp-2"
-          style={{ color: 'var(--text)' }}
-        >
-          {product.name}
-        </p>
-
-        {/* Description */}
-        {product.description && (
-          <p
-            className="text-[11px] line-clamp-2 mt-0.5"
-            style={{ color: 'var(--text-secondary)' }}
-          >
-            {product.description}
-          </p>
-        )}
-
-        {/* Score bar */}
-        <div className="mt-2">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>Score</span>
-            <span className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>
-              {score}
-            </span>
-          </div>
-          <div
-            className="h-1 rounded-full w-full"
-            style={{ backgroundColor: 'var(--surface-hover)' }}
-            role="progressbar"
-            aria-valuenow={score}
-            aria-valuemin={0}
-            aria-valuemax={100}
-          >
-            <div
-              className="h-1 rounded-full"
-              style={{ width: `${score}%`, backgroundColor: 'var(--primary)' }}
-            />
-          </div>
+          {roleLabel(index)}
         </div>
-      </div>
 
-      {/* Bottom section: price + CTA */}
-      <div className="flex items-center justify-between">
-        {product.price != null ? (
-          <span className="font-bold text-lg" style={{ color: 'var(--text)' }}>
-            ${product.price}
-          </span>
-        ) : (
-          <span />
-        )}
+        <button onClick={openDetail} className="text-left">
+          <p className="rg-serif line-clamp-2 hover:underline" style={{ fontSize: 17, lineHeight: '22px', fontWeight: 500, color: 'var(--ink)' }}>
+            {product.name}
+          </p>
+        </button>
 
-        <a
-          href={ctaHref}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="h-9 px-4 text-sm font-medium rounded-lg flex items-center text-white"
-          style={{ backgroundColor: 'var(--primary)' }}
-        >
-          Buy on Amazon
-        </a>
+        <div className="flex items-baseline justify-between mt-auto pt-1">
+          {product.price != null ? (
+            <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--ink)' }}>${product.price}</span>
+          ) : <span />}
+          <a
+            href={ctaHref}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="text-[12px] font-medium px-3 py-1.5 rounded-pill"
+            style={{ background: 'var(--ink)', color: 'var(--paper)' }}
+          >
+            Buy
+          </a>
+        </div>
       </div>
     </div>
   )

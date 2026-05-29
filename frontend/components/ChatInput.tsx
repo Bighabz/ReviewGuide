@@ -47,11 +47,11 @@ export default function ChatInput({
   return (
     <div className="w-full relative">
       <div
-        className={`relative rounded-2xl border transition-all duration-200 ${isFocused
-          ? 'border-[var(--primary)]/30 shadow-[0_0_0_3px_var(--primary-light)]'
-          : 'border-[var(--border)] shadow-sm'
+        className={`relative rounded-[28px] border transition-all duration-200 shadow-rg-card ${isFocused
+          ? 'border-[var(--terra)]/40'
+          : 'border-[var(--line-2)]'
           }`}
-        style={{ background: 'var(--surface-elevated)' }}
+        style={{ background: 'var(--paper-hi)' }}
       >
         <textarea
           ref={textareaRef}
@@ -66,7 +66,7 @@ export default function ChatInput({
           placeholder={placeholder}
           disabled={disabled}
           rows={1}
-          className="w-full resize-none rounded-2xl pl-5 pr-14 py-4 bg-transparent focus:outline-none disabled:cursor-not-allowed text-[15px] text-[var(--text)] placeholder:text-[var(--text-muted)]"
+          className="w-full resize-none rounded-[28px] pl-5 pr-14 py-4 bg-transparent focus:outline-none disabled:cursor-not-allowed text-[15px] leading-[22px] text-[var(--ink)] placeholder:text-[var(--ink-3)]"
           style={{
             minHeight: '52px',
             maxHeight: '240px',
@@ -75,14 +75,14 @@ export default function ChatInput({
           }}
         />
 
-        {/* Send Button */}
+        {/* Send Button — 36px ink circle, paper arrow */}
         <motion.button
           onClick={() => onSend()}
           disabled={disabled || !hasValue}
-          className="absolute right-3 bottom-3 rounded-xl w-9 h-9 flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed"
+          className="absolute right-2.5 bottom-2.5 rounded-full w-9 h-9 flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed"
           style={{
-            background: hasValue && !disabled ? 'var(--primary)' : 'var(--surface)',
-            color: hasValue && !disabled ? 'white' : 'var(--text-muted)',
+            background: hasValue && !disabled ? 'var(--ink)' : 'var(--paper-alt)',
+            color: hasValue && !disabled ? 'var(--paper)' : 'var(--ink-3)',
           }}
           whileHover={hasValue && !disabled ? { scale: 1.05 } : {}}
           whileTap={hasValue && !disabled ? { scale: 0.92 } : {}}

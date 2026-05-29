@@ -2,13 +2,11 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import Link from 'next/link'
-import { ArrowLeft } from 'lucide-react'
 import extractResultsData from '@/lib/extractResultsData'
 import type { ResultsData } from '@/lib/extractResultsData'
 import ResultsProductCard from '@/components/ResultsProductCard'
 import ResultsQuickActions from '@/components/ResultsQuickActions'
-import ResultsHeader from '@/components/ResultsHeader'
+import { HeaderBrand } from '@/components/Brand'
 
 interface ResultsPageProps {
   params: { id: string }
@@ -57,97 +55,78 @@ export default function ResultsPage({ params }: ResultsPageProps) {
   }
 
   const { sessionTitle, summaryText, products, sources } = resultsData
+  const contextLine = `${sessionTitle}${sources.length ? ` · ${sources.length} source${sources.length === 1 ? '' : 's'}` : ''}`
 
   return (
-    <div
-      className="min-h-screen"
-      style={{ backgroundColor: 'var(--background)' }}
-    >
-      {/* Max-width content wrapper */}
-      <div className="max-w-[1200px] mx-auto px-4 py-6">
+    <div className="min-h-screen" style={{ background: 'var(--paper)' }}>
+      <div className="max-w-[760px] mx-auto px-4 pt-2 pb-16">
+        {/* Header band */}
+        <HeaderBrand back onBack={() => router.push('/chat')} context={contextLine} />
 
-        {/* Back to Chat link */}
-        <Link
-          href="/chat"
-          className="inline-flex items-center gap-2 text-sm mb-4"
-          style={{ color: 'var(--text-secondary)' }}
+        {/* Editorial blog card — THE PICK */}
+        <div
+          className="rounded-[18px] px-5 py-6 mt-2 rg-blog-in"
+          style={{ background: 'var(--paper-hi)', border: '1px solid var(--line)' }}
         >
-          <ArrowLeft size={16} />
-          <span>Back to Chat</span>
-        </Link>
-
-        {/* Results Header */}
-        <ResultsHeader
-          title={sessionTitle}
-          summary={summaryText}
-          sourceCount={sources.length}
-          onToast={showToast}
-        />
-
-        {/* Quick Actions */}
-        <div className="mt-6">
-          <ResultsQuickActions onToast={showToast} shareUrl={resultsUrl} />
+          <div className="rg-eyebrow rg-eyebrow--terra">The pick</div>
+          <h1
+            className="rg-display mt-2"
+            style={{ fontSize: 30, lineHeight: '36px', color: 'var(--ink)' }}
+          >
+            {sessionTitle}
+          </h1>
+          <div className="rg-hairline my-4" />
+          {summaryText && (
+            <p className="rg-serif" style={{ fontSize: 16, lineHeight: '26px', color: 'var(--ink)' }}>
+              {summaryText}
+            </p>
+          )}
+          <div className="mt-5">
+            <ResultsQuickActions onToast={showToast} shareUrl={resultsUrl} />
+          </div>
         </div>
 
-        {/* Product grid — responsive: desktop 3-column grid, mobile horizontal scroll */}
+        {/* THE SHORTLIST — horizontal peek carousel */}
         {products.length > 0 && (
-          <div className="mt-6 overflow-x-auto snap-x snap-mandatory grid grid-cols-3 gap-4 pb-2">
-            {products.map((product, index) => (
-              <div
-                key={product.name + index}
-                className="snap-start min-w-[170px]"
-              >
-                <ResultsProductCard product={product} index={index} />
-              </div>
-            ))}
+          <div className="mt-8">
+            <div className="rg-eyebrow mb-3">
+              The shortlist · {products.length} pick{products.length === 1 ? '' : 's'}
+            </div>
+            <div className="flex gap-4 overflow-x-auto snap-x snap-mandatory scrollbar-hide pb-2 -mx-4 px-4">
+              {products.map((product, index) => (
+                <div key={product.name + index} className="snap-start shrink-0 w-[240px]">
+                  <ResultsProductCard product={product} index={index} />
+                </div>
+              ))}
+              {/* peek buffer */}
+              <div className="shrink-0 w-2" aria-hidden />
+            </div>
           </div>
         )}
 
-        {/* Sources section */}
+        {/* Sources — terra dots, editorial */}
         {sources.length > 0 && (
-          <div className="mt-8">
-            <p
-              className="text-[11px] font-medium uppercase tracking-[1.5px] mb-3"
-              style={{ color: 'var(--text-muted)' }}
-            >
-              SOURCES ANALYZED
-            </p>
+          <div className="mt-10">
+            <div className="rg-eyebrow mb-3">Sources analyzed</div>
             <div className="flex flex-col gap-2">
-              {sources.map((source, idx) => {
-                const DOT_COLORS = [
-                  '#4285F4',
-                  '#EA4335',
-                  '#FBBC05',
-                  '#34A853',
-                  '#9C27B0',
-                  '#FF5722',
-                ]
-                const dotColor = DOT_COLORS[idx % DOT_COLORS.length]
-                return (
-                  <a
-                    key={source.url}
-                    href={source.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-2 text-sm"
-                    style={{ color: 'var(--text)' }}
-                  >
-                    <span
-                      className="w-2 h-2 rounded-full flex-shrink-0"
-                      style={{ backgroundColor: dotColor }}
-                    />
-                    <span className="font-medium">{source.site_name}</span>
-                    {source.title && (
-                      <span
-                        className="text-xs truncate"
-                        style={{ color: 'var(--text-secondary)' }}
-                      >
-                        — {source.title}
-                      </span>
-                    )}
-                  </a>
-                )
-              })}
+              {sources.map((source) => (
+                <a
+                  key={source.url}
+                  href={source.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-2 text-sm"
+                  style={{ color: 'var(--ink)' }}
+                >
+                  <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: 'var(--terra)' }} />
+                  <span className="font-medium">{source.site_name}</span>
+                  {source.title && (
+                    <span className="text-xs truncate" style={{ color: 'var(--ink-2)' }}>
+                      — {source.title}
+                    </span>
+                  )}
+                </a>
+              ))}
             </div>
           </div>
         )}
@@ -156,8 +135,8 @@ export default function ResultsPage({ params }: ResultsPageProps) {
       {/* Toast */}
       {toast && (
         <div
-          className="fixed bottom-6 left-1/2 -translate-x-1/2 px-4 py-2 rounded-lg text-sm font-medium text-white shadow-lg z-50"
-          style={{ backgroundColor: 'var(--text)' }}
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 px-4 py-2 rounded-[10px] text-sm font-medium shadow-lg z-50"
+          style={{ background: 'var(--ink)', color: 'var(--paper)' }}
         >
           {toast}
         </div>

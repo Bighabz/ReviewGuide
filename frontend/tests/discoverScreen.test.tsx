@@ -44,22 +44,17 @@ describe('DiscoverPage — hero section (DISC-01)', () => {
     mockPush.mockClear()
   })
 
-  it('renders a heading that contains "researching" in an italic span', () => {
+  it('renders the blueprint greeting in the display (Instrument Serif Italic) face', () => {
     render(<DiscoverPage />)
-    // The hero heading must contain the word "researching" inside an <em> or <i>
-    // or a span with italic styling.
-    const italicEl =
-      document.querySelector('em') ||
-      document.querySelector('i') ||
-      document.querySelector('[class*="italic"]') ||
-      document.querySelector('span[style*="italic"]')
-    expect(italicEl).toBeTruthy()
-    expect(italicEl!.textContent?.toLowerCase()).toContain('researching')
+    // Blueprint Discover greeting: "What are you researching?" in the rg-display face
+    const heading = screen.getByRole('heading', { name: /what are you researching\?/i })
+    expect(heading).toBeTruthy()
+    expect(heading.className).toContain('rg-display')
   })
 
-  it('renders the subline "Expert reviews, real data, zero fluff."', () => {
+  it('renders the blueprint subline', () => {
     render(<DiscoverPage />)
-    expect(screen.getByText('Expert reviews, real data, zero fluff.')).toBeTruthy()
+    expect(screen.getByText('A category, a budget, a vibe — anything works.')).toBeTruthy()
   })
 })
 

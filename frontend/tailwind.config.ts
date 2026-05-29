@@ -9,9 +9,11 @@ const config: Config = {
   theme: {
     extend: {
       fontFamily: {
+        // Three blueprint faces: DM Sans (UI), Newsreader (editorial body), Instrument Serif (display)
         sans: ['var(--font-dm-sans)', 'system-ui', 'sans-serif'],
+        serif: ['var(--font-newsreader)', 'Georgia', 'serif'],
+        display: ['var(--font-instrument)', 'Georgia', 'serif'],
         heading: ['var(--font-instrument)', 'Georgia', 'serif'],
-        serif: ['var(--font-instrument)', 'Georgia', 'serif'],
       },
       colors: {
         primary: {
@@ -33,19 +35,47 @@ const config: Config = {
           DEFAULT: 'var(--border)',
           strong: 'var(--border-strong)',
         },
-        ink: 'var(--text)',
+        // ── Blueprint palette (frontend/design/lib/tokens.js) ──
+        paper: {
+          DEFAULT: 'var(--paper)',
+          hi: 'var(--paper-hi)',
+          alt: 'var(--paper-alt)',
+        },
+        terra: {
+          DEFAULT: 'var(--terra)',
+          soft: 'var(--terra-soft)',
+          ink: 'var(--terra-ink)',
+        },
+        line: {
+          DEFAULT: 'var(--line)',
+          2: 'var(--line-2)',
+        },
+        ink: {
+          DEFAULT: 'var(--ink)',
+          2: 'var(--ink-2)',
+          3: 'var(--ink-3)',
+        },
         'ink-secondary': 'var(--text-secondary)',
         'ink-muted': 'var(--text-muted)',
       },
       boxShadow: {
         'float': 'var(--shadow-float)',
         'premium': 'var(--gpt-shadow-premium)',
-        'card': '0 1px 3px rgba(0,0,0,0.04), 0 6px 16px rgba(0,0,0,0.04)',
-        'card-hover': '0 4px 12px rgba(0,0,0,0.08), 0 12px 28px rgba(0,0,0,0.06)',
-        'editorial': '0 2px 8px rgba(28,25,23,0.06)',
+        'card': 'var(--shadow-card)',
+        'card-hover': '0 4px 12px rgba(26,24,22,0.08), 0 12px 28px rgba(26,24,22,0.06)',
+        'editorial': '0 2px 8px rgba(26,24,22,0.06)',
+        // Blueprint component shadows
+        'rg-card': 'var(--shadow-card)',
+        'rg-sheet': 'var(--shadow-sheet)',
       },
       borderRadius: {
         'editorial': '0.625rem',
+        // Blueprint radius scale: sm 6 / md 10 / lg 14 / xl 20 / pill 999
+        '6': '6px',
+        '10': '10px',
+        '14': '14px',
+        '20': '20px',
+        'pill': '999px',
       },
       animation: {
         'fade-up': 'fadeUp 0.5s ease-out forwards',

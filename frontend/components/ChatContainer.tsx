@@ -43,6 +43,11 @@ export interface Message {
   // (own line, italic) below the body, per spec §11 / §13 #3 — instead
   // of relying on the model to slap it on the end of message.content.
   followUpQuestion?: string
+  // Blueprint quiz-path: one-sentence compressed-consensus reasoning shown as a
+  // TransitionalBubble between the user's reply and the next AI turn, only when the
+  // answer meaningfully changed the shortlist. Backend must emit this (clarifier node);
+  // until then the field is absent and nothing renders.
+  transitionalReasoning?: string
   next_suggestions?: NextSuggestion[]  // Follow-up questions from next_step_suggestion tool
   isSuggestionClick?: boolean  // True when message was triggered by clicking a suggestion button
   isThinking?: boolean  // True while waiting for real tokens (status updates hidden)
@@ -867,11 +872,11 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
 
           <div
             id="chat-input-wrapper"
-            className="sticky bottom-0 p-3 sm:p-4 z-40"
+            className="sticky bottom-0 z-40"
             style={{
-              borderTop: '1px solid var(--border)',
-              background: 'var(--surface)',
-              backdropFilter: 'blur(12px)'
+              // Blueprint §8.6: cream gradient mask (paper 65% -> transparent), no hard border
+              padding: '28px 18px 22px',
+              background: 'linear-gradient(to top, var(--paper) 65%, transparent)',
             }}
           >
             <div id="chat-input-container" className="mx-auto px-2 sm:px-0 max-w-full" style={{ maxWidth: '780px' }}>
