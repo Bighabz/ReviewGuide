@@ -33,10 +33,15 @@ export default function DiscoverHeroLogo({ width = 360 }: { width?: number }) {
     if (!v || reduced) return;
     // Ensure muted (React attr can be unreliable) then autoplay from the start.
     v.muted = true;
-    v.currentTime = 0;
-    v.play().catch(() => {
-      /* autoplay blocked — the first frame still shows the logo */
-    });
+    try {
+      v.currentTime = 0;
+      // play() can throw synchronously (jsdom has no media impl) or reject
+      // (autoplay blocked) — swallow both; the first frame still shows the logo.
+      const p = v.play();
+      if (p && typeof p.catch === 'function') p.catch(() => {});
+    } catch {
+      /* no-op */
+    }
   }, [reduced, mounted]);
 
   // Reduced-motion or pre-hydration: static recolored wordmark.
