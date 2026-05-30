@@ -5,7 +5,7 @@ import { getRecentSearches } from '@/lib/recentSearches'
 import DiscoverSearchBar from '@/components/discover/DiscoverSearchBar'
 import CategoryChipRow from '@/components/discover/CategoryChipRow'
 import TrendingCards from '@/components/discover/TrendingCards'
-import { LogoHero } from '@/components/Brand'
+import DiscoverHeroLogo from '@/components/DiscoverHeroLogo'
 
 export default function DiscoverPage() {
   const [hasHistory, setHasHistory] = useState(false)
@@ -16,9 +16,9 @@ export default function DiscoverPage() {
 
   return (
     <div className="flex flex-col pb-20 px-4 sm:px-6 md:px-8">
-      {/* Hero section — blueprint Discover: LogoHero bubble, then italic-display greeting */}
+      {/* Hero section — animated intro video (recolored terracotta), then italic-display greeting */}
       <div className="flex flex-col items-center pt-8 sm:pt-12 pb-8">
-        <LogoHero width={300} />
+        <DiscoverHeroLogo width={340} />
         <h1
           className="rg-display text-center"
           style={{ fontSize: 28, lineHeight: '32px', color: 'var(--ink)', marginTop: 28 }}
