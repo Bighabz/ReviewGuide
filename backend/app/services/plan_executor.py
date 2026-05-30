@@ -900,6 +900,13 @@ class PlanExecutor:
                 if value.get("transitional_reasoning"):
                     results["transitional_reasoning"] = value.get("transitional_reasoning")
 
+        # Lift affiliate_products from self.state — product_affiliate writes it
+        # there via _write_tool_outputs_to_state (in-place mutation) but never
+        # returns it through the compose tool result that _extract_results scans.
+        # Without this, chat.py always reads {} and marks amazon/ebay unavailable.
+        if self.state.get("affiliate_products"):
+            results["affiliate_products"] = self.state["affiliate_products"]
+
         # Look for next_step_suggestion results
         for key, value in self.context.items():
             if "next_step_suggestion" in key and isinstance(value, dict):

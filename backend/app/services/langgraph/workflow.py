@@ -430,6 +430,11 @@ async def plan_executor_node(state: GraphState) -> Dict[str, Any]:
             # (same reason as follow_up_question: LangGraph only merges what the
             # node returns).
             "transitional_reasoning": results.get("transitional_reasoning"),
+            # affiliate_products is written to self.state by product_affiliate
+            # via _write_tool_outputs_to_state, then lifted into results by
+            # _extract_results. Without this entry, chat.py never sees it and
+            # always reports amazon/ebay as "unavailable".
+            "affiliate_products": results.get("affiliate_products", {}),
             "current_agent": "plan_executor",
             "status": "halted" if results.get("halt") else "completed",
             "next_agent": None,
@@ -448,6 +453,7 @@ async def plan_executor_node(state: GraphState) -> Dict[str, Any]:
         "tool_citations": [],
         "follow_up_question": None,
         "transitional_reasoning": None,
+        "affiliate_products": {},
         "current_agent": "plan_executor",
         "status": "completed",
         "next_agent": None,

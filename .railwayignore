@@ -1,0 +1,8 @@
+# Railway upload ignore list — used by `railway up` in CI.
+# The CLI already auto-excludes node_modules and respects .gitignore.
+# These entries exclude large non-backend paths so the tarball stays lean.
+
+frontend/
+.claude/
+.next/
+*.log

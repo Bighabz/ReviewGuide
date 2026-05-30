@@ -2,14 +2,17 @@
 Tests for plan_executor_node in app/services/langgraph/workflow.py.
 
 Locks in the contract that fields plan_executor.execute() returns in its
-results dict — specifically follow_up_question — propagate into the
-LangGraph state update returned by plan_executor_node. The node builds
-inner_update field-by-field; any new GraphState field that needs to flow
-back from plan_executor must be wired here.
+results dict — specifically follow_up_question and affiliate_products —
+propagate into the LangGraph state update returned by plan_executor_node.
+The node builds inner_update field-by-field; any new GraphState field that
+needs to flow back from plan_executor must be wired here.
 
-Regression coverage for the 2026-05-25 bug where PR #13 fixed
-_extract_results but the node wrapper dropped the field before it reached
-GraphState, so chat.py's SSE emission never fired.
+Regression coverage:
+  - 2026-05-25: PR #13 fixed _extract_results for follow_up_question but the
+    node wrapper dropped the field before it reached GraphState.
+  - 2026-05-26: affiliate_products written to self.state by product_affiliate
+    was never lifted into results nor included in inner_update, so chat.py
+    always read {} and reported amazon/ebay as "unavailable".
 """
 from __future__ import annotations
 
@@ -126,6 +129,63 @@ async def test_node_passes_through_none_when_no_follow_up():
 
 
 @pytest.mark.asyncio
+async def test_node_propagates_affiliate_products_from_results():
+    """When plan_executor.execute returns affiliate_products, the node's
+    update dict must include it so LangGraph merges it into GraphState.
+    Without this, chat.py reads {} and reports amazon/ebay as unavailable."""
+    fake_affiliate = {
+        "amazon": [{"product_name": "Sony WH-1000XM5", "offers": []}],
+        "ebay": [{"product_name": "Sony WH-1000XM5 Used", "offers": []}],
+    }
+    fake_results = {
+        "assistant_text": "Here are the best earbuds.",
+        "ui_blocks": [],
+        "citations": [],
+        "next_suggestions": [],
+        "tool_citations": [],
+        "affiliate_products": fake_affiliate,
+    }
+
+    with patch(
+        "app.services.langgraph.workflow.PlanExecutor"
+    ) as mock_executor_cls:
+        mock_executor = mock_executor_cls.return_value
+        mock_executor.execute = AsyncMock(return_value=fake_results)
+
+        update = await plan_executor_node(_minimal_state())
+
+    assert "affiliate_products" in update, (
+        "plan_executor_node must include affiliate_products in its returned "
+        "update dict. Missing it means chat.py always reads {} and reports "
+        "amazon/ebay as unavailable even when the tool produced real results."
+    )
+    assert update["affiliate_products"] == fake_affiliate
+
+
+@pytest.mark.asyncio
+async def test_node_passes_empty_dict_when_no_affiliate_products():
+    """When product_affiliate didn't run or returned nothing, node should
+    surface {} (not omit the key) so chat.py's .get() always has a key."""
+    fake_results = {
+        "assistant_text": "Body.",
+        "ui_blocks": [],
+        "citations": [],
+        "next_suggestions": [],
+        "tool_citations": [],
+    }
+
+    with patch(
+        "app.services.langgraph.workflow.PlanExecutor"
+    ) as mock_executor_cls:
+        mock_executor = mock_executor_cls.return_value
+        mock_executor.execute = AsyncMock(return_value=fake_results)
+
+        update = await plan_executor_node(_minimal_state())
+
+    assert update.get("affiliate_products") == {}
+
+
+@pytest.mark.asyncio
 async def test_fallback_on_timeout_clears_follow_up_question():
     """On hard timeout, the fallback dict replaces results — verify it
     explicitly clears follow_up_question rather than leaking stale state.
@@ -155,3 +215,24 @@ async def test_fallback_on_timeout_clears_follow_up_question():
     # cleanly on the timeout path too.
     assert "follow_up_question" in update
     assert update["follow_up_question"] is None
+
+
+@pytest.mark.asyncio
+async def test_fallback_on_timeout_passes_empty_affiliate_products():
+    """On hard timeout the fallback dict must include affiliate_products: {}
+    so chat.py's result_state.get('affiliate_products', {}) stays stable."""
+    import asyncio as _asyncio
+
+    async def _timeout(*_args, **_kwargs):
+        raise _asyncio.TimeoutError("simulated stage timeout")
+
+    with patch(
+        "app.services.langgraph.workflow.PlanExecutor"
+    ) as mock_executor_cls:
+        mock_executor = mock_executor_cls.return_value
+        mock_executor.execute = AsyncMock(side_effect=_timeout)
+
+        update = await plan_executor_node(_minimal_state())
+
+    assert "affiliate_products" in update
+    assert update["affiliate_products"] == {}
