@@ -103,19 +103,17 @@ describe('CHAT-05 — Bubble alignment and label', () => {
     expect(hasRightAlignment).toBe(true)
   })
 
-  it('user bubble has primary background color (bg-[var(--primary)])', () => {
+  it('user bubble has ink background color (bg-[var(--ink)]) per blueprint §4', () => {
     const { container } = render(<Message message={makeUserMessage()} />)
-    const bubbleWithPrimary = container.querySelector('[class*="bg-[var(--primary)]"]')
-    expect(bubbleWithPrimary).toBeTruthy()
+    const bubbleWithInk = container.querySelector('[class*="bg-[var(--ink)]"]')
+    expect(bubbleWithInk).toBeTruthy()
   })
 
-  it('user bubble has iMessage-style asymmetric corners (rounded-tl-[20px] or rounded-2xl)', () => {
+  it('user bubble has blueprint asymmetric corners (rounded-tl-[14px])', () => {
     const { container } = render(<Message message={makeUserMessage()} />)
-    // iMessage tail: rounded-tl large, rounded-br small — or rounded-2xl with one corner overridden
+    // Blueprint user bubble: 14/14/4/14 — top corners 14px, bottom-right squared
     const hasAsymmetricCorners =
-      container.querySelector('[class*="rounded-tl-[20px]"]') !== null ||
-      container.querySelector('[class*="rounded-2xl"]') !== null ||
-      container.querySelector('[class*="rounded-tl-2xl"]') !== null
+      container.querySelector('[class*="rounded-tl-[14px]"]') !== null
     expect(hasAsymmetricCorners).toBe(true)
   })
 
@@ -154,19 +152,18 @@ describe('CHAT-05 — Bubble alignment and label', () => {
     expect(reviewGuideLabel).toBeTruthy()
   })
 
-  it('AI bubble has a border (border-[var(--border)])', () => {
+  it('AI bubble has a hairline border (border-[var(--line)])', () => {
     const { container } = render(<Message message={makeAssistantMessage()} />)
-    const borderEl = container.querySelector('[class*="border-[var(--border)]"]')
+    const borderEl = container.querySelector('[class*="border-[var(--line)]"]')
     expect(borderEl).toBeTruthy()
   })
 
-  it('AI bubble has asymmetric tl corner (rounded-tl-[4px] or flat top-left)', () => {
+  it('AI bubble squares the bottom-left corner (rounded-bl-[4px]) per blueprint 14/14/14/4', () => {
     const { container } = render(<Message message={makeAssistantMessage()} />)
-    const hasFlatTL =
-      container.querySelector('[class*="rounded-tl-[4px]"]') !== null ||
-      container.querySelector('[class*="rounded-tl-sm"]') !== null ||
-      container.querySelector('[class*="rounded-tl-none"]') !== null
-    expect(hasFlatTL).toBe(true)
+    // Blueprint AI bubble squares the BOTTOM-left (not top-left, which was the pre-blueprint bug)
+    const hasFlatBL =
+      container.querySelector('[class*="rounded-bl-[4px]"]') !== null
+    expect(hasFlatBL).toBe(true)
   })
 
   it('AI bubble max-width is 85% (via style attribute or max-w class)', () => {
@@ -364,32 +361,33 @@ describe('CHAT-06 — Chip restyle', () => {
     return render(<Message message={message} />)
   }
 
-  it('suggestion chips have pill styling (rounded-[20px] or rounded-full)', () => {
+  it('suggestion chips are rounded-rect 12px (NOT pill) per blueprint §4/#4', () => {
     const { container } = renderWithChips()
     const chip0 = container.querySelector('[data-testid="suggestion-chip-0"]')
     expect(chip0).toBeTruthy()
     const classes = chip0!.className
-    const hasPillShape =
-      classes.includes('rounded-[20px]') ||
-      classes.includes('rounded-full') ||
-      classes.includes('rounded-3xl')
-    expect(hasPillShape).toBe(true)
+    // Blueprint: rounded-rect radius 12, explicitly NOT a pill/capsule
+    expect(classes).toContain('rounded-[12px]')
+    expect(classes.includes('rounded-full')).toBe(false)
   })
 
-  it('chips have primary-colored border (border-[var(--primary)])', () => {
+  it('chips have a line2 border (border-[var(--line-2)])', () => {
     const { container } = renderWithChips()
     const chip0 = container.querySelector('[data-testid="suggestion-chip-0"]')
     expect(chip0).toBeTruthy()
     const classes = chip0!.className
-    expect(classes).toContain('border-[var(--primary)]')
+    expect(classes).toContain('border-[var(--line-2)]')
   })
 
-  it('chips have primary-colored text (text-[var(--primary)])', () => {
+  it('chips have ink-colored text and a terra leading dot', () => {
     const { container } = renderWithChips()
     const chip0 = container.querySelector('[data-testid="suggestion-chip-0"]')
     expect(chip0).toBeTruthy()
     const classes = chip0!.className
-    expect(classes).toContain('text-[var(--primary)]')
+    expect(classes).toContain('text-[var(--ink)]')
+    // 4px terracotta leading dot present
+    const dot = chip0!.querySelector('[class*="rounded-full"]')
+    expect(dot).toBeTruthy()
   })
 
   it('chips container is a horizontal scrollable row (flex + overflow-x-auto or flex-row)', () => {
@@ -427,5 +425,60 @@ describe('CHAT-06 — Chip restyle', () => {
       const chipsInsideBubble = bubbleEl.querySelector('[data-testid="next-suggestions-container"]')
       expect(chipsInsideBubble).toBeNull()
     }
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// In-chat conversational Results flow — TransitionalBubble, blog card, collapse
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('In-chat Results flow', () => {
+  it('renders the TransitionalBubble when transitionalReasoning is present', () => {
+    render(
+      <Message
+        message={makeAssistantMessage({
+          transitionalReasoning: '$200 puts the mid-tier on the table — that changes the pick.',
+        })}
+        isLast
+      />
+    )
+    expect(
+      screen.getByText('$200 puts the mid-tier on the table — that changes the pick.')
+    ).toBeTruthy()
+  })
+
+  it('renders the editorial blog card (THE PICK eyebrow) for product-results turns', () => {
+    render(
+      <Message
+        message={makeAssistantMessage({ ui_blocks: [{ type: 'products', products: [{ name: 'Sony' }] }] })}
+        isLast
+      />
+    )
+    expect(screen.getByText('The pick')).toBeTruthy()
+  })
+
+  it('does NOT render the blog eyebrow for ordinary (non-product) answers', () => {
+    render(<Message message={makeAssistantMessage()} isLast />)
+    expect(screen.queryByText('The pick')).toBeNull()
+  })
+
+  it('collapses a PRIOR blog (not last) with a "Show the full take" toggle', () => {
+    render(
+      <Message
+        message={makeAssistantMessage({ ui_blocks: [{ type: 'products', products: [{ name: 'Sony' }] }] })}
+        isLast={false}
+      />
+    )
+    expect(screen.getByText('Show the full take ↓')).toBeTruthy()
+  })
+
+  it('does NOT collapse the live (last) blog', () => {
+    render(
+      <Message
+        message={makeAssistantMessage({ ui_blocks: [{ type: 'products', products: [{ name: 'Sony' }] }] })}
+        isLast
+      />
+    )
+    expect(screen.queryByText('Show the full take ↓')).toBeNull()
   })
 })

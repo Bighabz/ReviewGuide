@@ -70,6 +70,9 @@ class ProductComposeOutput(BaseModel):
     """
     assistant_text: Optional[str] = ""
     follow_up_question: Optional[str] = None
+    # Quiz-path transitional reasoning — declared here or model_dump() silently
+    # drops it (same trap that hid follow_up_question pre-PR #15). See graph_state.py.
+    transitional_reasoning: Optional[str] = None
     ui_blocks: Optional[List[Any]] = []
     citations: Optional[List[Any]] = []
     last_search_context: Optional[Dict[str, Any]] = {}

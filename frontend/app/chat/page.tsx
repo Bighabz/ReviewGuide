@@ -26,6 +26,9 @@ function ChatPageContent() {
   const [currentSessionId, setCurrentSessionId] = useState<string>('')
   const [switchToSessionId, setSwitchToSessionId] = useState<string | undefined>(undefined)
   const [initialQuery, setInitialQuery] = useState<string | undefined>(undefined)
+  // initialDraft: pre-fills the composer WITHOUT sending (editable starting point).
+  // Used by Discover category chips / "popular" rows so the user can refine before asking.
+  const [initialDraft, setInitialDraft] = useState<string | undefined>(undefined)
 
   // Track which query we've processed to avoid re-processing after router.replace
   const processedQueryRef = useRef<string | null>(null)
@@ -33,12 +36,29 @@ function ChatPageContent() {
   useEffect(() => {
     // Check for query parameters (from sticky chat bar on browse page)
     const query = searchParams.get('q')
+    const draft = searchParams.get('draft')
     const isNewSession = searchParams.get('new') === '1'
 
-    console.log('[ChatPage] URL params:', { query, isNewSession, alreadyProcessed: processedQueryRef.current })
+    console.log('[ChatPage] URL params:', { query, draft, isNewSession, alreadyProcessed: processedQueryRef.current })
 
+    // Draft: start a fresh session and seed the composer with editable text (no auto-send).
+    if (isNewSession && draft && processedQueryRef.current !== `draft:${draft}`) {
+      processedQueryRef.current = `draft:${draft}`
+      const newSessionId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+        const r = Math.random() * 16 | 0
+        const v = c === 'x' ? r : (r & 0x3 | 0x8)
+        return v.toString(16)
+      })
+      localStorage.removeItem(CHAT_CONFIG.MESSAGES_STORAGE_KEY)
+      localStorage.setItem(CHAT_CONFIG.SESSION_STORAGE_KEY, newSessionId)
+      setSwitchToSessionId(newSessionId)
+      setCurrentSessionId(newSessionId)
+      setInitialDraft(draft)
+      setInitialQuery(undefined)
+      setTimeout(() => router.replace('/chat', { scroll: false }), 100)
+    }
     // Only process if this is a new session request AND we haven't processed this exact query
-    if (isNewSession && query && processedQueryRef.current !== query) {
+    else if (isNewSession && query && processedQueryRef.current !== query) {
       console.log('[ChatPage] Processing new session with query:', query)
       processedQueryRef.current = query
 
@@ -150,6 +170,7 @@ function ChatPageContent() {
               externalSessionId={switchToSessionId}
               onSessionChange={handleSessionChange}
               initialQuery={initialQuery}
+              initialDraft={initialDraft}
             />
           </ErrorBoundary>
         </main>

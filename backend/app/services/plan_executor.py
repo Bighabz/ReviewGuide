@@ -895,6 +895,10 @@ class PlanExecutor:
                 # it, chat.py read empty, no SSE event fired.
                 if value.get("follow_up_question"):
                     results["follow_up_question"] = value.get("follow_up_question")
+                # Quiz-path transitional reasoning — same extraction as the
+                # follow-up; without this the composer's value is dropped here.
+                if value.get("transitional_reasoning"):
+                    results["transitional_reasoning"] = value.get("transitional_reasoning")
 
         # Lift affiliate_products from self.state — product_affiliate writes it
         # there via _write_tool_outputs_to_state (in-place mutation) but never

@@ -76,6 +76,35 @@ async def test_node_propagates_follow_up_question_from_results():
 
 
 @pytest.mark.asyncio
+async def test_node_propagates_transitional_reasoning_from_results():
+    """Same node-boundary trap as follow_up_question: the quiz-path transitional
+    reasoning must appear in the node's update dict or LangGraph drops it before
+    chat.py can emit the SSE event / render the TransitionalBubble."""
+    transitional_text = "$200 puts the mid-tier on the table — that changes the pick."
+    fake_results = {
+        "assistant_text": "Body of the response.",
+        "ui_blocks": [],
+        "citations": [],
+        "next_suggestions": [],
+        "tool_citations": [],
+        "transitional_reasoning": transitional_text,
+    }
+
+    with patch(
+        "app.services.langgraph.workflow.PlanExecutor"
+    ) as mock_executor_cls:
+        mock_executor = mock_executor_cls.return_value
+        mock_executor.execute = AsyncMock(return_value=fake_results)
+
+        update = await plan_executor_node(_minimal_state())
+
+    assert "transitional_reasoning" in update, (
+        "plan_executor_node must include transitional_reasoning in its update dict."
+    )
+    assert update["transitional_reasoning"] == transitional_text
+
+
+@pytest.mark.asyncio
 async def test_node_passes_through_none_when_no_follow_up():
     """Composer didn't emit a follow-up — node should surface None (not omit
     the key entirely) so downstream `.get('follow_up_question')` sees the

@@ -1,10 +1,12 @@
 import NavLayout from '@/components/NavLayout'
 import type { Metadata, Viewport } from 'next'
-import { DM_Sans, Instrument_Serif } from 'next/font/google'
+import { DM_Sans, Instrument_Serif, Newsreader } from 'next/font/google'
 import './globals.css'
 
 const dmSans = DM_Sans({ subsets: ['latin'], variable: '--font-dm-sans', weight: ['400', '500', '600', '700'] })
 const instrumentSerif = Instrument_Serif({ subsets: ['latin'], variable: '--font-instrument', weight: '400', style: ['normal', 'italic'] })
+// Newsreader — blueprint editorial body face (blog prose, spec rows, product names)
+const newsreader = Newsreader({ subsets: ['latin'], variable: '--font-newsreader', weight: ['400', '500', '600'], style: ['normal', 'italic'] })
 
 export const metadata: Metadata = {
   title: 'ReviewGuide.ai - Ask Before You Buy',
@@ -42,7 +44,7 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body className={`${dmSans.variable} ${instrumentSerif.variable} font-sans`} suppressHydrationWarning>
+      <body className={`${dmSans.variable} ${instrumentSerif.variable} ${newsreader.variable} font-sans`} suppressHydrationWarning>
         <NavLayout>{children}</NavLayout>
       </body>
     </html>

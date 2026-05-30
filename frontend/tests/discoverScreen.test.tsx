@@ -44,22 +44,17 @@ describe('DiscoverPage — hero section (DISC-01)', () => {
     mockPush.mockClear()
   })
 
-  it('renders a heading that contains "researching" in an italic span', () => {
+  it('renders the blueprint greeting in the display (Instrument Serif Italic) face', () => {
     render(<DiscoverPage />)
-    // The hero heading must contain the word "researching" inside an <em> or <i>
-    // or a span with italic styling.
-    const italicEl =
-      document.querySelector('em') ||
-      document.querySelector('i') ||
-      document.querySelector('[class*="italic"]') ||
-      document.querySelector('span[style*="italic"]')
-    expect(italicEl).toBeTruthy()
-    expect(italicEl!.textContent?.toLowerCase()).toContain('researching')
+    // Blueprint Discover greeting: "What are you researching?" in the rg-display face
+    const heading = screen.getByRole('heading', { name: /what are you researching\?/i })
+    expect(heading).toBeTruthy()
+    expect(heading.className).toContain('rg-display')
   })
 
-  it('renders the subline "Expert reviews, real data, zero fluff."', () => {
+  it('renders the blueprint subline', () => {
     render(<DiscoverPage />)
-    expect(screen.getByText('Expert reviews, real data, zero fluff.')).toBeTruthy()
+    expect(screen.getByText('A category, a budget, a vibe — anything works.')).toBeTruthy()
   })
 })
 
@@ -83,7 +78,7 @@ describe('DiscoverPage — category chip row (DISC-02)', () => {
     expect(found.length).toBeGreaterThanOrEqual(8)
   })
 
-  it('tapping a category chip calls router.push with /chat?q=...&new=1', () => {
+  it('tapping a category chip calls router.push with /chat?draft=...&new=1 (editable, not auto-sent)', () => {
     render(<DiscoverPage />)
     // Find ANY chip that is a button (or has a click handler).
     // We use "Popular" or the first available chip from the expected list.
@@ -100,7 +95,7 @@ describe('DiscoverPage — category chip row (DISC-02)', () => {
     fireEvent.click(chipButton!)
     expect(mockPush).toHaveBeenCalledTimes(1)
     const calledUrl: string = mockPush.mock.calls[0][0]
-    expect(calledUrl).toMatch(/^\/chat\?q=.+&new=1$/)
+    expect(calledUrl).toMatch(/^\/chat\?draft=.+&new=1$/)
   })
 })
 
@@ -145,8 +140,8 @@ describe('DiscoverPage — trending cards (DISC-03)', () => {
     fireEvent.click(clickable)
     expect(mockPush).toHaveBeenCalledTimes(1)
     const calledUrl: string = mockPush.mock.calls[0][0]
-    // URL must contain a query parameter (q=...).
-    expect(calledUrl).toContain('q=')
+    // URL must seed an editable draft (draft=...), not auto-send (q=...).
+    expect(calledUrl).toContain('draft=')
   })
 })
 

@@ -144,6 +144,25 @@ class TestProductComposeValidator:
         assert "follow_up_question" in result
         assert result["follow_up_question"] is None
 
+    def test_transitional_reasoning_preserved(self):
+        """Same trap as follow_up_question: the quiz-path transitional reasoning
+        must be declared on ProductComposeOutput or model_dump() strips it and the
+        TransitionalBubble never reaches the frontend. Lock in survival."""
+        output = {
+            **self.VALID,
+            "transitional_reasoning": "$200 puts the mid-tier on the table — that changes the pick.",
+        }
+        result = ToolOutputValidator.validate(self.TOOL, output)
+        assert result.get("transitional_reasoning") == (
+            "$200 puts the mid-tier on the table — that changes the pick."
+        )
+
+    def test_transitional_reasoning_defaults_to_none(self):
+        """No transitional reasoning emitted — key still present for downstream .get()."""
+        result = ToolOutputValidator.validate(self.TOOL, self.VALID)
+        assert "transitional_reasoning" in result
+        assert result["transitional_reasoning"] is None
+
 
 # ---------------------------------------------------------------------------
 # travel_search_hotels

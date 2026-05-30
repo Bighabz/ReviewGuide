@@ -97,6 +97,11 @@ class GraphState(TypedDict):
     # JSON shape (product_compose today). Sanitized by sanitize_voice at the
     # SSE-exit gate (chat.py) alongside assistant_text.
     follow_up_question: Optional[str]
+    # Quiz-path transitional reasoning — one compressed-consensus sentence shown
+    # as a TransitionalBubble before the blog, only when the latest constraint
+    # changed the shortlist. Emitted by product_compose, threaded through the same
+    # five layers as follow_up_question, sanitized at the SSE-exit gate (chat.py).
+    transitional_reasoning: Optional[str]
     ui_blocks: List[Dict[str, Any]]
     citations: Annotated[List[str], operator.add]
     next_suggestions: List[Dict[str, Any]]  # Follow-up questions from next_step_suggestion tool

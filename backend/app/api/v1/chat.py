@@ -346,6 +346,9 @@ async def generate_chat_stream(
             # to write it. See CONCERNS.md "GraphState ↔ initial_state
             # Coupling" for the recurring pattern.
             "follow_up_question": None,
+            # Quiz-path transitional reasoning — init so the TypedDict channel
+            # accepts product_compose's write (same pattern as follow_up_question).
+            "transitional_reasoning": None,
             "ui_blocks": [],
             "citations": [],
             "next_suggestions": [],  # Follow-up questions from next_step_suggestion tool
@@ -600,6 +603,20 @@ async def generate_chat_stream(
                 follow_up_question_text = cleaned_fu
                 result_state['follow_up_question'] = cleaned_fu
 
+        # Quiz-path transitional reasoning — sanitize the same way (it's AI voice
+        # and emits via its own SSE event, bypassing the assistant_text gate).
+        transitional_reasoning_text = result_state.get("transitional_reasoning") or ""
+        if transitional_reasoning_text:
+            from app.services.prompts import sanitize_voice as _sanitize_voice
+            cleaned_tr, tr_violations = _sanitize_voice(transitional_reasoning_text)
+            if tr_violations:
+                logger.warning(
+                    f"[voice_compliance] Stripped {len(tr_violations)} violation(s) "
+                    f"from transitional_reasoning (session={session_id}, intent={detected_intent})."
+                )
+                transitional_reasoning_text = cleaned_tr
+                result_state['transitional_reasoning'] = cleaned_tr
+
         # Get CallbackHandler trace data
         langfuse_trace_url = None
         if langfuse_handler:
@@ -695,6 +712,15 @@ async def generate_chat_stream(
             yield _sse_event("follow_up_question", {"text": follow_up_question_text})
             logger.info(
                 f"🔍 Emitted follow_up_question SSE event ({len(follow_up_question_text)} chars)"
+            )
+
+        # Quiz-path transitional reasoning — its own SSE event; frontend renders it
+        # as a TransitionalBubble before the AI bubble (field on the message, so
+        # arrival order vs the body stream doesn't matter).
+        if transitional_reasoning_text and not is_halted:
+            yield _sse_event("transitional_reasoning", {"text": transitional_reasoning_text})
+            logger.info(
+                f"🔍 Emitted transitional_reasoning SSE event ({len(transitional_reasoning_text)} chars)"
             )
 
         # Only include followup questions if the workflow is HALTED (not completed)
@@ -859,6 +885,9 @@ async def generate_chat_stream(
         # the stored value is voice-clean.
         if follow_up_question_text and not is_halted:
             assistant_metadata["followUpQuestion"] = follow_up_question_text
+        # Persist transitional reasoning camelCase for the history-load path
+        if transitional_reasoning_text and not is_halted:
+            assistant_metadata["transitionalReasoning"] = transitional_reasoning_text
 
         _save_task = asyncio.create_task(
             chat_history_manager.save_turn(

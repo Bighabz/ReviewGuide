@@ -279,12 +279,13 @@ describe('RES-01: Route and data loading', () => {
   it('renders results page with session title from first user message', () => {
     render(<ResultsPage params={{ id: 'test-session-id' }} />)
     // The session title should be rendered as a heading with font-serif class
-    const heading = screen.getByText('Best noise cancelling headphones')
+    // Blueprint: verdict lede renders in the rg-display (Instrument Serif Italic) face
+    const heading = screen.getByRole('heading', { name: 'Best noise cancelling headphones' })
     expect(heading).toBeTruthy()
-    const hasSerifClass =
-      heading.className?.includes('font-serif') ||
-      heading.closest('[class*="font-serif"]') !== null
-    expect(hasSerifClass).toBe(true)
+    const hasDisplayClass =
+      heading.className?.includes('rg-display') ||
+      heading.closest('[class*="rg-display"]') !== null
+    expect(hasDisplayClass).toBe(true)
   })
 
   it('redirects to / when session not found in localStorage', () => {
@@ -306,12 +307,14 @@ describe('RES-02: Responsive layout', () => {
     setupLocalStorageMock()
   })
 
-  it('renders 3-column grid container on desktop', () => {
+  it('renders THE SHORTLIST as a horizontal peek carousel (blueprint §5.5)', () => {
     const { container } = render(<ResultsPage params={{ id: 'test-session-id' }} />)
-    const hasGridCols3 =
-      container.querySelector('.grid-cols-3') !== null ||
-      container.querySelector('[class*="grid-cols-3"]') !== null
-    expect(hasGridCols3).toBe(true)
+    // Blueprint replaces the 3-col grid with a peek carousel: flex + overflow-x + snap
+    const carousel =
+      container.querySelector('[class*="overflow-x-auto"][class*="snap-x"]') !== null ||
+      (container.querySelector('[class*="overflow-x-auto"]') !== null &&
+        container.querySelector('[class*="snap"]') !== null)
+    expect(carousel).toBe(true)
   })
 
   it('renders horizontal scroll container on mobile', () => {
@@ -322,10 +325,13 @@ describe('RES-02: Responsive layout', () => {
     expect(hasOverflowX).toBe(true)
   })
 
-  it('renders sidebar on desktop with session title and Back to Chat link', () => {
+  it('renders a HeaderBrand band with a back control and the context line', () => {
     render(<ResultsPage params={{ id: 'test-session-id' }} />)
-    const backLink = screen.getByText('Back to Chat')
-    expect(backLink).toBeTruthy()
+    // Blueprint: back is a 28px icon button (aria-label "Back"), title shown in the context line
+    const backBtn = screen.getByLabelText('Back')
+    expect(backBtn).toBeTruthy()
+    // Title appears in the HeaderBrand context line (and the blog lede)
+    expect(screen.getAllByText(/Best noise cancelling headphones/).length).toBeGreaterThan(0)
   })
 
   it('content area has max-width 1200px constraint', () => {
@@ -364,12 +370,10 @@ describe('RESP-02: Desktop grid layout', () => {
     setupLocalStorageMock()
   })
 
-  it('desktop product grid has grid layout with column classes', () => {
+  it('product list is laid out as a flex carousel row', () => {
     const { container } = render(<ResultsPage params={{ id: 'test-session-id' }} />)
-    const hasGrid =
-      container.querySelector('.grid') !== null ||
-      container.querySelector('[class*="grid"]') !== null
-    expect(hasGrid).toBe(true)
+    const hasFlexRow = container.querySelector('[class*="flex"][class*="overflow-x-auto"]') !== null
+    expect(hasFlexRow).toBe(true)
   })
 })
 
@@ -387,26 +391,18 @@ describe('RES-03: Product cards render', () => {
     expect(screen.getByText('Sony WH-1000XM5')).toBeTruthy()
   })
 
-  it('product card shows score bar (progressbar or width-percentage div)', () => {
-    const { container } = render(<ResultsPage params={{ id: 'test-session-id' }} />)
-    const hasScoreBar =
-      container.querySelector('[role="progressbar"]') !== null ||
-      (() => {
-        const allEls = Array.from(container.querySelectorAll('*'))
-        return allEls.some((el) => {
-          const style = (el as HTMLElement).style
-          return style?.width && style.width.includes('%')
-        })
-      })()
-    expect(hasScoreBar).toBe(true)
+  it('product card shows a role label (blueprint replaces the score bar)', () => {
+    render(<ResultsPage params={{ id: 'test-session-id' }} />)
+    // Blueprint card has no score bar; the top pick carries a "Top pick · for you" role label
+    expect(screen.getByText('Top pick · for you')).toBeTruthy()
   })
 
-  it('product card shows Buy on Amazon CTA', () => {
+  it('product card shows a Buy CTA linking out', () => {
     render(<ResultsPage params={{ id: 'test-session-id' }} />)
-    const ctaLinks = screen.getAllByText('Buy on Amazon')
+    const ctaLinks = screen.getAllByText('Buy')
     expect(ctaLinks.length).toBeGreaterThan(0)
-    const link = ctaLinks[0] as HTMLAnchorElement
-    const href = link.href || link.getAttribute('href') || ''
+    const link = ctaLinks[0].closest('a') as HTMLAnchorElement
+    const href = link?.href || link?.getAttribute('href') || ''
     expect(href).toContain('amazon')
   })
 
@@ -422,11 +418,11 @@ describe('RES-04: Product card rank badges', () => {
     setupLocalStorageMock()
   })
 
-  it('product card shows rank badge "#1 Top Pick"', () => {
+  it('top product card carries the "Top pick" role label', () => {
     const { container } = render(<ResultsPage params={{ id: 'test-session-id' }} />)
     const allText = container.textContent ?? ''
-    expect(allText).toContain('#1')
-    expect(allText).toContain('Top Pick')
+    // Blueprint role label (small-caps), not a numeric rank badge
+    expect(allText.toLowerCase()).toContain('top pick')
   })
 })
 

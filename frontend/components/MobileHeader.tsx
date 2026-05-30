@@ -6,6 +6,7 @@ import { useState, useEffect } from 'react'
 import { useChatStatus } from '@/lib/chatStatusContext'
 import { CHAT_CONFIG } from '@/lib/constants'
 import LoadingStatusText from './LoadingStatusText'
+import { Wordmark } from './Brand'
 
 export default function MobileHeader() {
   const pathname = usePathname()
@@ -86,17 +87,9 @@ export default function MobileHeader() {
         </>
       ) : (
         <>
-          {/* Logo */}
-          <a href="/" className="flex items-center shrink-0">
-            <img
-              src={
-                theme === 'dark'
-                  ? '/images/1815e5dc-c4db-4248-9aeb-0a815fd87a4b.png'
-                  : '/images/8f4c1971-a5b0-474e-9fb1-698e76324f0b.png'
-              }
-              alt="ReviewGuide.Ai"
-              className="h-9 w-auto object-contain"
-            />
+          {/* Logo — blueprint 3-piece wordmark */}
+          <a href="/" className="flex items-center shrink-0" aria-label="ReviewGuide.Ai home">
+            <Wordmark size={19} />
           </a>
 
           {/* Spacer */}

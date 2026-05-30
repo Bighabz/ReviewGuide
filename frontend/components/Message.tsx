@@ -9,6 +9,7 @@ import { normalizeBlocks } from '@/lib/normalizeBlocks'
 import { UIBlocks } from '@/components/blocks/BlockRegistry'
 import MessageRecoveryUI from './MessageRecoveryUI'
 import LoadingStatusText from './LoadingStatusText'
+import { TransitionalBubble } from './Brand'
 
 import { useState, useEffect, useMemo } from 'react'
 import { formatTimestamp, formatFullTimestamp, SUGGESTION_CLICK_PREFIX } from '@/lib/utils'
@@ -67,6 +68,9 @@ export default function Message({ message, isLast = false }: MessageProps) {
   const isUser = message.role === 'user'
   const [copied, setCopied] = useState(false)
   const [relativeTime, setRelativeTime] = useState(() => formatTimestamp(message.timestamp))
+  // Blueprint §7 — prior blogs collapse to a short lede on a later turn; only the
+  // live (last) blog stays full-size. Tap to re-expand.
+  const [blogExpanded, setBlogExpanded] = useState(false)
 
   // RFC §2.4 — Memoize suggestion sort to avoid re-sorting on every render during streaming
   const sortedSuggestions = useMemo(
@@ -150,8 +154,9 @@ export default function Message({ message, isLast = false }: MessageProps) {
               // Regular user message: editorial bubble
               <>
                 <div className="relative group flex items-start justify-end max-w-full gap-2.5">
-                  <div className="px-4 py-3 rounded-tl-[20px] rounded-tr-[20px] rounded-br-[4px] rounded-bl-[20px] bg-[var(--primary)] text-white shadow-card max-w-[80%]">
-                    <p className="whitespace-pre-wrap text-[15px] leading-relaxed">
+                  {/* Blueprint user bubble: ink bg, paper text, asymmetric 14/14/4/14 (bottom-right squared) */}
+                  <div className="px-4 py-3 rounded-tl-[14px] rounded-tr-[14px] rounded-br-[4px] rounded-bl-[14px] bg-[var(--ink)] text-[var(--paper)] shadow-card max-w-[80%]">
+                    <p className="whitespace-pre-wrap text-[15px] leading-[22px]">
                       {message.content}
                     </p>
                   </div>
@@ -171,10 +176,16 @@ export default function Message({ message, isLast = false }: MessageProps) {
             )
           ) : (
             <div className="w-full">
+              {/* Blueprint quiz-path: transitional reasoning beat before the AI turn */}
+              {message.transitionalReasoning && (
+                <div className="mb-3">
+                  <TransitionalBubble>{message.transitionalReasoning}</TransitionalBubble>
+                </div>
+              )}
               {/* AI bubble wrapper */}
               <div
-                className="rounded-tl-[4px] rounded-tr-[20px] rounded-br-[20px] rounded-bl-[20px] border border-[var(--border)] p-4"
-                style={{ background: 'var(--surface-elevated)', maxWidth: '85%' }}
+                className="rounded-tl-[14px] rounded-tr-[14px] rounded-br-[14px] rounded-bl-[4px] border border-[var(--line)] px-4 py-3.5"
+                style={{ background: 'var(--paper-hi)', maxWidth: '85%' }}
               >
                 {/* ReviewGuide byline */}
                 <div className="text-[12px] font-semibold mb-2" style={{ color: 'var(--primary)' }}>
@@ -188,31 +199,66 @@ export default function Message({ message, isLast = false }: MessageProps) {
                     "Thinking..." — that fallback was the most visible
                     voice violation on the chat screen pre-B.1. */}
                 {!message.content && message.isThinking && (
-                  <div className="flex items-center gap-2 py-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-[var(--primary)] animate-pulse" />
+                  <div className="flex items-center gap-2.5 py-1.5">
+                    {/* Blueprint loading: single 8px terra dot, breathing 1.6s */}
+                    <span className="w-2 h-2 rounded-full bg-[var(--terra)] rg-breath flex-shrink-0" />
                     <LoadingStatusText
                       statusText={message.statusText}
-                      className="stream-status-text tracking-tight"
+                      className="rg-display text-[18px] leading-[24px] text-[var(--ink-2)]"
                     />
                   </div>
                 )}
 
-                {/* 1. Render text content FIRST (brief summary) */}
-                {message.content && (
-                  <div className="w-full">
-                    <div className="prose prose-sm sm:prose-base max-w-none
-                        text-[var(--text)]
-                        prose-headings:font-serif prose-headings:tracking-tight prose-headings:text-[var(--text)]
-                        prose-p:text-[var(--text)] prose-p:leading-relaxed prose-p:text-[15px]
-                        prose-strong:text-[var(--text)] prose-strong:font-semibold
-                        prose-li:text-[var(--text)] prose-li:marker:text-[var(--text-muted)]
-                        prose-pre:bg-[var(--surface)] prose-pre:border prose-pre:border-[var(--border)] prose-pre:rounded-xl
-                        prose-a:text-[var(--primary)] prose-a:no-underline hover:prose-a:underline"
-                    >
-                      <ReactMarkdown>{message.content}</ReactMarkdown>
+                {/* 1. Render text content FIRST. For product-results turns, render
+                    as the blueprint editorial blog card: "THE PICK" terra eyebrow +
+                    Newsreader (font-serif) body. Ordinary chat answers stay plain. */}
+                {message.content && (() => {
+                  const isBlogResult =
+                    Array.isArray(message.ui_blocks) &&
+                    message.ui_blocks.some(
+                      (b: any) => typeof b?.type === 'string' && b.type.toLowerCase().includes('product')
+                    )
+                  // Prior blogs (not the live/last one) collapse to a short lede.
+                  const collapsed = isBlogResult && !isLast && !blogExpanded
+                  return (
+                    <div className="w-full rg-blog-in">
+                      {isBlogResult && (
+                        <>
+                          <div className="rg-eyebrow rg-eyebrow--terra mb-2">The pick</div>
+                          <div className="rg-hairline mb-3" />
+                        </>
+                      )}
+                      <div className={
+                        (collapsed ? 'line-clamp-2 ' : '') +
+                        (isBlogResult
+                          ? `prose prose-sm sm:prose-base max-w-none
+                            prose-headings:font-display prose-headings:not-italic prose-headings:text-[var(--ink)]
+                            prose-p:font-serif prose-p:text-[var(--ink)] prose-p:text-[16px] prose-p:leading-[26px]
+                            prose-strong:text-[var(--ink)] prose-strong:font-semibold
+                            prose-li:font-serif prose-li:text-[var(--ink)] prose-li:leading-[26px]
+                            prose-a:text-[var(--ink)] prose-a:decoration-dotted prose-a:decoration-[var(--terra)] prose-a:underline-offset-4`
+                          : `prose prose-sm sm:prose-base max-w-none
+                            text-[var(--text)]
+                            prose-headings:font-serif prose-headings:tracking-tight prose-headings:text-[var(--text)]
+                            prose-p:text-[var(--text)] prose-p:leading-relaxed prose-p:text-[15px]
+                            prose-strong:text-[var(--text)] prose-strong:font-semibold
+                            prose-li:text-[var(--text)] prose-li:marker:text-[var(--text-muted)]
+                            prose-pre:bg-[var(--surface)] prose-pre:border prose-pre:border-[var(--border)] prose-pre:rounded-xl
+                            prose-a:text-[var(--primary)] prose-a:no-underline hover:prose-a:underline`)
+                      }>
+                        <ReactMarkdown>{message.content}</ReactMarkdown>
+                      </div>
+                      {isBlogResult && !isLast && (
+                        <button
+                          onClick={() => setBlogExpanded((v) => !v)}
+                          className="rg-eyebrow rg-eyebrow--terra mt-2 cursor-pointer"
+                        >
+                          {blogExpanded ? 'Show less ↑' : 'Show the full take ↓'}
+                        </button>
+                      )}
                     </div>
-                  </div>
-                )}
+                  )
+                })()}
 
                 {/* B.3 — Curious follow-up question. Lives between the body
                     and the UI blocks (carousel) so it's still inside the
@@ -221,8 +267,10 @@ export default function Message({ message, isLast = false }: MessageProps) {
                     color + small top margin + thin hairline above. Design
                     review (§13 #3 open question) may iterate on this. */}
                 {message.followUpQuestion && (
-                  <div className="mt-4 pt-3 border-t border-[var(--border)]/60">
-                    <p className="italic font-medium text-[15px] leading-snug text-[var(--text-secondary)]">
+                  <div className="mt-4">
+                    {/* Blueprint §13 #3: 24px terra hairline above, then the question on its own line */}
+                    <div className="rg-hairline-short mb-3" />
+                    <p className="rg-display text-[19px] leading-[26px] text-[var(--ink)]">
                       {message.followUpQuestion}
                     </p>
                   </div>
@@ -237,17 +285,17 @@ export default function Message({ message, isLast = false }: MessageProps) {
                 {/* 3. Render clarifier follow-up questions (structured slot-filling) */}
                 {message.followups && typeof message.followups === 'object' && !Array.isArray(message.followups) && (
                   <div className="w-full mt-5">
-                    <div className="border border-[var(--border)] rounded-xl p-4 bg-[var(--surface)]">
+                    <div className="rounded-[14px] p-4">
                       {message.followups.intro && (
-                        <p className="text-sm font-medium text-[var(--text)] mb-3">
+                        <p className="text-[15px] font-medium text-[var(--ink)] mb-3">
                           {message.followups.intro}
                         </p>
                       )}
-                      <div className="space-y-1.5">
+                      <div className="space-y-2">
                         {message.followups.questions && message.followups.questions.map((q: { slot: string; question: string }, idx: number) => (
                           <button
                             key={idx}
-                            className="w-full text-left px-3.5 py-2.5 rounded-lg border border-[var(--border)] bg-[var(--background)] hover:border-[var(--primary)] hover:bg-[var(--primary-light)] transition-all text-sm text-[var(--text)] flex items-center justify-between group"
+                            className="w-full text-left px-3.5 py-2.5 rounded-[12px] border border-[var(--line-2)] bg-[var(--paper-hi)] hover:border-[var(--terra)] hover:bg-[var(--terra-soft)] transition-all text-[14px] leading-[20px] font-medium text-[var(--ink)] flex items-center gap-2.5 group"
                             onClick={() => {
                               const event = new CustomEvent('sendSuggestion', {
                                 detail: { question: q.question }
@@ -255,13 +303,15 @@ export default function Message({ message, isLast = false }: MessageProps) {
                               window.dispatchEvent(event)
                             }}
                           >
-                            <span>{q.question}</span>
-                            <ArrowRight size={14} strokeWidth={1.5} className="opacity-0 group-hover:opacity-100 transition-opacity text-[var(--primary)]" />
+                            {/* 4px terracotta leading dot — reads as "tap to reply" */}
+                            <span className="w-1 h-1 rounded-full flex-shrink-0" style={{ background: 'var(--terra)' }} />
+                            <span className="flex-1">{q.question}</span>
+                            <ArrowRight size={14} strokeWidth={1.5} className="opacity-0 group-hover:opacity-100 transition-opacity text-[var(--terra)]" />
                           </button>
                         ))}
                       </div>
                       {message.followups.closing && (
-                        <p className="mt-3 text-xs italic text-[var(--text-muted)]">
+                        <p className="mt-3 text-[12px] italic text-[var(--ink-3)]">
                           {message.followups.closing}
                         </p>
                       )}
@@ -296,7 +346,7 @@ export default function Message({ message, isLast = false }: MessageProps) {
                       key={suggestion.id}
                       data-testid={`suggestion-chip-${idx}`}
                       data-category={suggestion.category}
-                      className="rounded-[20px] border border-[var(--primary)] text-[var(--primary)] bg-transparent px-4 py-2 text-[13px] font-medium transition-all hover:bg-[var(--primary-light)]"
+                      className="inline-flex items-center gap-2 rounded-[12px] border border-[var(--line-2)] bg-[var(--paper-hi)] text-[var(--ink)] px-3.5 py-2.5 text-[14px] leading-[20px] font-medium text-left transition-all hover:border-[var(--terra)] hover:bg-[var(--terra-soft)]"
                       onClick={() => {
                         trackSuggestionClick(suggestion, message.id, idx)
                         const event = new CustomEvent('sendSuggestion', {
@@ -305,6 +355,8 @@ export default function Message({ message, isLast = false }: MessageProps) {
                         window.dispatchEvent(event)
                       }}
                     >
+                      {/* quiz-path 4px terracotta leading dot */}
+                      <span className="w-1 h-1 rounded-full flex-shrink-0" style={{ background: 'var(--terra)' }} />
                       {suggestion.question}
                     </button>
                   ))}

@@ -43,6 +43,11 @@ export interface Message {
   // (own line, italic) below the body, per spec §11 / §13 #3 — instead
   // of relying on the model to slap it on the end of message.content.
   followUpQuestion?: string
+  // Blueprint quiz-path: one-sentence compressed-consensus reasoning shown as a
+  // TransitionalBubble between the user's reply and the next AI turn, only when the
+  // answer meaningfully changed the shortlist. Backend must emit this (clarifier node);
+  // until then the field is absent and nothing renders.
+  transitionalReasoning?: string
   next_suggestions?: NextSuggestion[]  // Follow-up questions from next_step_suggestion tool
   isSuggestionClick?: boolean  // True when message was triggered by clicking a suggestion button
   isThinking?: boolean  // True while waiting for real tokens (status updates hidden)
@@ -60,12 +65,13 @@ interface ChatContainerProps {
   clearHistoryTrigger?: number
   externalSessionId?: string  // Allow parent to set session ID
   onSessionChange?: (sessionId: string) => void  // Notify parent of session changes
-  initialQuery?: string  // Initial query from URL params (for sticky chat bar)
+  initialQuery?: string  // Initial query from URL params (for sticky chat bar) — AUTO-SENDS
+  initialDraft?: string  // Pre-fills the composer WITHOUT sending (editable starting point)
 }
 
 const CYCLING_VERBS = ['simplified.', 'effortless.', 'smarter.', 'reimagined.', 'personalized.', 'instant.']
 
-export default function ChatContainer({ clearHistoryTrigger, externalSessionId, onSessionChange, initialQuery }: ChatContainerProps) {
+export default function ChatContainer({ clearHistoryTrigger, externalSessionId, onSessionChange, initialQuery, initialDraft }: ChatContainerProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const { streamState, dispatch: dispatchStream, isStreaming } = useStreamReducer()
@@ -236,7 +242,17 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
 
   // Track processed queries and sessions to avoid duplicate processing
   const initialQueryProcessedRef = useRef<string | null>(null)
+  const initialDraftProcessedRef = useRef<string | null>(null)
   const lastExternalSessionIdRef = useRef<string | null>(null)
+
+  // initialDraft: pre-fill the composer with editable text — do NOT send.
+  // Lets Discover category chips / popular rows seed a starting point the user refines.
+  useEffect(() => {
+    if (initialDraft && initialDraftProcessedRef.current !== initialDraft) {
+      initialDraftProcessedRef.current = initialDraft
+      setInput(initialDraft)
+    }
+  }, [initialDraft])
 
   // Single unified effect to handle initial query from URL params (sticky chat bar)
   // This runs when we have BOTH an externalSessionId AND initialQuery (new session with query)
@@ -486,7 +502,7 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
 
           setMessages((prev) => [...prev, followupMessage])
           currentMessageIdRef.current = followupMessageId
-        } else if (data.ui_blocks || data.itinerary || data.followups || data.follow_up_question) {
+        } else if (data.ui_blocks || data.itinerary || data.followups || data.follow_up_question || data.transitional_reasoning) {
           setMessages((prev) =>
             prev.map((msg) =>
               msg.id === currentMessageIdRef.current
@@ -498,6 +514,8 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
                   // B.3 — wire-format is snake_case; map to camelCase on
                   // the Message interface so React state stays idiomatic.
                   ...(data.follow_up_question ? { followUpQuestion: data.follow_up_question } : {}),
+                  // Quiz-path transitional reasoning — same snake→camel mapping.
+                  ...(data.transitional_reasoning ? { transitionalReasoning: data.transitional_reasoning } : {}),
                 }
                 : msg
             )
@@ -749,27 +767,12 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
       {messages.length === 0 && (
         <div id="welcome-screen" className="flex-1 overflow-y-auto">
           <div className="flex flex-col items-center justify-center px-4 lg:pr-28 pt-14 sm:pt-16 pb-10 sm:pb-16">
-              <video
-                src="/images/animated_logo.mp4"
-                autoPlay
-                loop
-                muted
-                playsInline
-                className="h-32 sm:h-44 md:h-56 w-auto mb-4"
-                style={{ mixBlendMode: 'multiply' }}
-                aria-label="ReviewGuide.Ai"
-              />
-              <h1 className="font-serif text-2xl sm:text-3xl md:text-4xl text-center text-[var(--text)] leading-tight tracking-tight">
-                Smart shopping,{' '}
-                <span
-                  className="italic text-[var(--primary)] transition-opacity duration-300"
-                  style={{ opacity: verbVisible ? 1 : 0 }}
-                >
-                  {CYCLING_VERBS[verbIndex]}
-                </span>
+              {/* Blueprint chat-empty (§7.2): italic-serif greeting, no logo video */}
+              <h1 className="rg-display text-center" style={{ fontSize: 30, lineHeight: '34px', color: 'var(--ink)' }}>
+                What are you trying to figure out?
               </h1>
-              <p className="text-sm sm:text-base text-[var(--text-secondary)] text-center mt-3 max-w-md">
-                AI-powered product reviews, travel planning, and price comparison — all in one conversation.
+              <p className="text-center mt-3 max-w-md" style={{ fontSize: 15, color: 'var(--ink-2)' }}>
+                A category, a budget, a vibe — anything works.
               </p>
 
               <div className="w-full max-w-xl mx-auto mt-8">
@@ -867,11 +870,11 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
 
           <div
             id="chat-input-wrapper"
-            className="sticky bottom-0 p-3 sm:p-4 z-40"
+            className="sticky bottom-0 z-40"
             style={{
-              borderTop: '1px solid var(--border)',
-              background: 'var(--surface)',
-              backdropFilter: 'blur(12px)'
+              // Blueprint §8.6: cream gradient mask (paper 65% -> transparent), no hard border
+              padding: '28px 18px 22px',
+              background: 'linear-gradient(to top, var(--paper) 65%, transparent)',
             }}
           >
             <div id="chat-input-container" className="mx-auto px-2 sm:px-0 max-w-full" style={{ maxWidth: '780px' }}>

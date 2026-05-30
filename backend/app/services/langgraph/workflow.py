@@ -426,6 +426,10 @@ async def plan_executor_node(state: GraphState) -> Dict[str, Any]:
             # result_state.get("follow_up_question") as None and skips the
             # SSE event. Detected 2026-05-25 post-PR #13 prod verification.
             "follow_up_question": results.get("follow_up_question"),
+            # Quiz-path transitional reasoning — propagate at the node boundary
+            # (same reason as follow_up_question: LangGraph only merges what the
+            # node returns).
+            "transitional_reasoning": results.get("transitional_reasoning"),
             # affiliate_products is written to self.state by product_affiliate
             # via _write_tool_outputs_to_state, then lifted into results by
             # _extract_results. Without this entry, chat.py never sees it and
@@ -448,6 +452,7 @@ async def plan_executor_node(state: GraphState) -> Dict[str, Any]:
         "next_suggestions": [],
         "tool_citations": [],
         "follow_up_question": None,
+        "transitional_reasoning": None,
         "affiliate_products": {},
         "current_agent": "plan_executor",
         "status": "completed",

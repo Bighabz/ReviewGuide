@@ -8,22 +8,39 @@
      Warm ivory, deep ink, editorial precision
      ═══════════════════════════════════════════ */
 
-  /* Primary: Deep Indigo-Blue (Trusted, Editorial) */
-  --primary: #1B4DFF;
-  --primary-hover: #0F3AD4;
-  --primary-light: rgba(27, 77, 255, 0.06);
+  /* ── Blueprint design tokens (frontend/design/lib/tokens.js) ── */
+  /* Paper / surface */
+  --paper:      #FAFAF7;   /* primary background — warm off-white */
+  --paper-hi:   #FFFFFF;   /* raised surface (bubble fill, sheet) */
+  --paper-alt:  #F5F4F0;   /* sunken surface (cards, chips inactive) */
+  /* Ink */
+  --ink:        #1A1816;   /* primary text — warm near-black */
+  --ink-2:      #6B6560;   /* secondary text */
+  --ink-3:      #9B9590;   /* tertiary / muted */
+  /* Hairlines */
+  --line:       #E8E6E1;   /* 1px ruled lines, dividers */
+  --line-2:     #D4D1CC;   /* slightly stronger borders */
+  /* Accent — muted terracotta (replaces the old #1B4DFF AI-blue per spec §11.6) */
+  --terra:      #B8543A;
+  --terra-soft: #F4E2D7;   /* 12% tint — save fill, verdict cards */
+  --terra-ink:  #7A3624;   /* hover / pressed */
 
-  /* Accent: Warm Terracotta (Action & Warmth) */
-  --accent: #E85D3A;
-  --accent-hover: #D14A28;
-  --accent-light: rgba(232, 93, 58, 0.08);
-  --success: #1A8754;
-  --success-light: rgba(26, 135, 84, 0.08);
+  /* Primary == terracotta. There is no blue in the blueprint. */
+  --primary: #B8543A;
+  --primary-hover: #7A3624;
+  --primary-light: rgba(184, 84, 58, 0.06);
+
+  /* Accent: same terracotta family (single-accent system) */
+  --accent: #B8543A;
+  --accent-hover: #7A3624;
+  --accent-light: #F4E2D7;
+  --success: #2B5337;
+  --success-light: rgba(43, 83, 55, 0.08);
 
   /* Semantic */
-  --error: #D93025;
-  --warning: #E5A100;
-  --info: #1A73E8;
+  --error: #9B3A2D;
+  --warning: #C08A2E;
+  --info: #6B6560;
 
   /* Backgrounds: Warm Ivory & Paper */
   --background: #FAFAF7;
@@ -32,27 +49,30 @@
   --surface-elevated: #FFFFFF;
   --surface-float: rgba(250, 250, 247, 0.92);
 
-  /* Text: Deep Ink Scale */
-  --text: #1C1917;
-  --text-secondary: #57534E;
-  --text-muted: #A8A29E;
+  /* Text: Deep Ink Scale (blueprint ink/ink2/ink3) */
+  --text: #1A1816;
+  --text-secondary: #6B6560;
+  --text-muted: #9B9590;
 
-  /* Borders: Warm Stone */
-  --border: #E7E5E0;
-  --border-strong: #D6D3CD;
+  /* Borders: Warm Stone (blueprint line/line2) */
+  --border: #E8E6E1;
+  --border-strong: #D4D1CC;
 
   /* Shadows: Warm & Soft */
-  --shadow-sm: 0 1px 2px rgba(28, 25, 23, 0.04);
-  --shadow-md: 0 4px 12px rgba(28, 25, 23, 0.06);
-  --shadow-lg: 0 8px 24px rgba(28, 25, 23, 0.08);
-  --shadow-xl: 0 16px 40px rgba(28, 25, 23, 0.10);
-  --shadow-float: 0 12px 32px rgba(27, 77, 255, 0.08);
+  --shadow-sm: 0 1px 2px rgba(26, 24, 22, 0.04);
+  --shadow-md: 0 4px 12px rgba(26, 24, 22, 0.06);
+  --shadow-lg: 0 8px 24px rgba(26, 24, 22, 0.08);
+  --shadow-xl: 0 16px 40px rgba(26, 24, 22, 0.10);
+  --shadow-float: 0 12px 32px rgba(26, 24, 22, 0.10);
+  /* Blueprint component shadows */
+  --shadow-card:  0 1px 0 rgba(26,24,22,.04), 0 8px 24px -12px rgba(26,24,22,.10);
+  --shadow-sheet: 0 -2px 0 rgba(26,24,22,.03), 0 -10px 30px -16px rgba(26,24,22,.12);
 
-  /* Card accent tints for Results page */
+  /* Card accent tints — neutralized to paper/terra (no stray blue/green/purple) */
   --card-accent-1: #FFF8F0;
-  --card-accent-2: #F0F4FF;
-  --card-accent-3: #F0FFF4;
-  --card-accent-4: #FDF0FF;
+  --card-accent-2: #FAFAF7;
+  --card-accent-3: #F5F4F0;
+  --card-accent-4: #F4E2D7;
 
   /* Legacy Mappings */
   --gpt-accent: var(--primary);
@@ -105,17 +125,30 @@
      Deep warm charcoal, soft ivory text
      ═══════════════════════════════════════════ */
 
-  /* Primary */
-  --primary: #6B8AFF;
-  --primary-hover: #8DA5FF;
-  --primary-light: rgba(107, 138, 255, 0.12);
+  /* Primary == terracotta (lifted for contrast on charcoal) */
+  --primary: #D98E76;
+  --primary-hover: #E4A992;
+  --primary-light: rgba(217, 142, 118, 0.12);
 
   /* Accent */
-  --accent: #FF7F5C;
-  --accent-hover: #FF9B7D;
-  --accent-light: rgba(255, 127, 92, 0.12);
-  --success: #34D399;
-  --success-light: rgba(52, 211, 153, 0.12);
+  --accent: #D98E76;
+  --accent-hover: #E4A992;
+  --accent-light: rgba(217, 142, 118, 0.12);
+  --success: #6FAE84;
+  --success-light: rgba(111, 174, 132, 0.12);
+
+  /* Blueprint tokens — dark */
+  --paper:      #1A1816;
+  --paper-hi:   #2E2C29;
+  --paper-alt:  #242220;
+  --ink:        #F5F0EB;
+  --ink-2:      #A8A29E;
+  --ink-3:      #78716C;
+  --line:       #3D3A36;
+  --line-2:     #524F4A;
+  --terra:      #D98E76;
+  --terra-soft: #3A2A22;
+  --terra-ink:  #E4A992;
 
   /* Backgrounds: Deep Warm Charcoal */
   --background: #1A1816;
@@ -432,6 +465,78 @@ a, button, input, textarea, select {
   .animate-pulse,
   .stream-status-text {
     transition: none !important;
+    animation: none !important;
+  }
+}
+
+/* ═══════════════════════════════════════════
+   BLUEPRINT MOTION + UTILITIES (frontend/design/lib/tokens.js)
+   ═══════════════════════════════════════════ */
+
+/* Breathing dot used in the loading bubble */
+@keyframes rg-breath {
+  0%, 100% { transform: scale(1);    opacity: .6; }
+  50%      { transform: scale(1.35); opacity: 1; }
+}
+.rg-breath { animation: rg-breath 1.6s ease-in-out infinite; }
+
+/* Expanding ring on bookmark tap */
+@keyframes rg-ring {
+  0%   { transform: scale(.6); opacity: .6; }
+  100% { transform: scale(1.6); opacity: 0; }
+}
+.rg-ring { animation: rg-ring 140ms ease-out forwards; }
+
+/* Bookmark icon pop */
+@keyframes rg-bookmark-pop {
+  0%   { transform: scale(.9); }
+  55%  { transform: scale(1.05); }
+  100% { transform: scale(1); }
+}
+.rg-bookmark-pop { animation: rg-bookmark-pop 200ms ease-out; }
+
+/* Rotating display word — single cycle, JS advances the word at animationend.
+   Crossfade + 4px translateY, ease-in-out. iOS low-power pauses keyframes. */
+@keyframes rg-word-fade {
+  0%   { opacity: 0; transform: translateY(4px); }
+  14%  { opacity: 1; transform: translateY(0); }
+  86%  { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; transform: translateY(-4px); }
+}
+.rg-word-fade { animation: rg-word-fade 2.4s ease-in-out 1; }
+
+/* Loading→blog staggered reveal (3 × 100ms steps, opacity only) */
+@keyframes rg-blog-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.rg-blog-in { animation: rg-blog-in 300ms ease-out both; }
+
+/* Eyebrow label — DM Sans 10px, 0.13em, uppercase */
+.rg-eyebrow {
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-weight: 600;
+  font-size: 10px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+.rg-eyebrow--terra { color: var(--terra); }
+
+/* 24px terracotta hairline above the curious follow-up question */
+.rg-hairline-short {
+  width: 24px; height: 1px;
+  background: var(--terra);
+  opacity: .55;
+}
+
+/* Font-family helpers mapping to the three blueprint faces */
+.rg-display { font-family: var(--font-instrument), Georgia, serif; font-style: italic; }
+.rg-serif   { font-family: var(--font-newsreader), Georgia, serif; }
+.rg-sans    { font-family: var(--font-dm-sans), system-ui, sans-serif; }
+
+@media (prefers-reduced-motion: reduce) {
+  .rg-breath, .rg-ring, .rg-bookmark-pop, .rg-word-fade, .rg-blog-in {
     animation: none !important;
   }
 }

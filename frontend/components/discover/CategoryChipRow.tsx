@@ -31,35 +31,43 @@ export default function CategoryChipRow({ hasHistory }: Props) {
 
   function handleChipClick(chip: ChipConfig) {
     if (chip.query) {
-      router.push(`/chat?q=${encodeURIComponent(chip.query)}&new=1`)
+      // Seed the composer with editable text (draft) — do NOT auto-send.
+      // Lets the user add budget/constraints before asking ("ask, don't assume").
+      router.push(`/chat?draft=${encodeURIComponent(chip.query)}&new=1`)
     } else {
       router.push('/chat?new=1')
     }
   }
 
   return (
-    <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-1">
-      {chips.map((chip) => (
-        <button
-          key={chip.label}
-          onClick={() => handleChipClick(chip)}
-          className="flex-shrink-0"
-          style={{
-            height: '36px',
-            padding: '0 16px',
-            borderRadius: '20px',
-            background: 'transparent',
-            border: '1px solid var(--border)',
-            color: 'var(--text)',
-            fontSize: '13px',
-            fontWeight: 600,
-            cursor: 'pointer',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {chip.label}
-        </button>
-      ))}
+    <div>
+      <div className="rg-eyebrow mb-3">Trending right now</div>
+      <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-1">
+        {chips.map((chip) => {
+          const isForYou = chip.label === 'For You'
+          return (
+            <button
+              key={chip.label}
+              onClick={() => handleChipClick(chip)}
+              className="flex-shrink-0 transition-colors"
+              style={{
+                height: '34px',
+                padding: '0 14px',
+                borderRadius: '12px',
+                background: isForYou ? 'var(--terra-soft)' : 'var(--paper-hi)',
+                border: `1px solid ${isForYou ? 'var(--terra)' : 'var(--line-2)'}`,
+                color: isForYou ? 'var(--terra-ink)' : 'var(--ink)',
+                fontSize: '14px',
+                fontWeight: 500,
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {chip.label}
+            </button>
+          )
+        })}
+      </div>
     </div>
   )
 }
