@@ -89,7 +89,7 @@ export default function ProductDetailPage({ params }: Props) {
 
       {/* Price + buy */}
       <div className="flex items-center justify-between mt-4">
-        {product.price != null ? (
+        {product.price != null && product.price > 0 ? (
           <span className="rg-serif" style={{ fontSize: 24, fontWeight: 600, color: 'var(--ink)' }}>${product.price}</span>
         ) : <span />}
         <a

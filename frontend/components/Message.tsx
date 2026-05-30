@@ -291,24 +291,47 @@ export default function Message({ message, isLast = false }: MessageProps) {
                           {message.followups.intro}
                         </p>
                       )}
-                      <div className="space-y-2">
-                        {message.followups.questions && message.followups.questions.map((q: { slot: string; question: string }, idx: number) => (
-                          <button
-                            key={idx}
-                            className="w-full text-left px-3.5 py-2.5 rounded-[12px] border border-[var(--line-2)] bg-[var(--paper-hi)] hover:border-[var(--terra)] hover:bg-[var(--terra-soft)] transition-all text-[14px] leading-[20px] font-medium text-[var(--ink)] flex items-center gap-2.5 group"
-                            onClick={() => {
-                              const event = new CustomEvent('sendSuggestion', {
-                                detail: { question: q.question }
-                              })
-                              window.dispatchEvent(event)
-                            }}
-                          >
-                            {/* 4px terracotta leading dot — reads as "tap to reply" */}
-                            <span className="w-1 h-1 rounded-full flex-shrink-0" style={{ background: 'var(--terra)' }} />
-                            <span className="flex-1">{q.question}</span>
-                            <ArrowRight size={14} strokeWidth={1.5} className="opacity-0 group-hover:opacity-100 transition-opacity text-[var(--terra)]" />
-                          </button>
-                        ))}
+                      <div className="space-y-3">
+                        {message.followups.questions && message.followups.questions.map((q: { slot: string; question: string }, idx: number) => {
+                          const send = (text: string) =>
+                            window.dispatchEvent(new CustomEvent('sendSuggestion', { detail: { question: text } }))
+                          // Budget slot → show the question as a prompt + tappable budget-tier
+                          // answer chips (blueprint quiz-path), instead of re-sending the question.
+                          const isBudget = q.slot === 'budget' || /budget|price range|how much|spend/i.test(q.question)
+                          if (isBudget) {
+                            const TIERS = ['Under $50', '$50–$100', '$100–$250', '$250–$500', '$500+']
+                            return (
+                              <div key={idx} className="space-y-2">
+                                <p className="text-[14px] leading-[20px] text-[var(--ink)]">{q.question}</p>
+                                <div className="flex flex-wrap gap-2">
+                                  {TIERS.map((tier) => (
+                                    <button
+                                      key={tier}
+                                      onClick={() => send(tier)}
+                                      className="inline-flex items-center gap-2 rounded-[12px] border border-[var(--line-2)] bg-[var(--paper-hi)] hover:border-[var(--terra)] hover:bg-[var(--terra-soft)] transition-all px-3.5 py-2 text-[14px] font-medium text-[var(--ink)]"
+                                    >
+                                      <span className="w-1 h-1 rounded-full flex-shrink-0" style={{ background: 'var(--terra)' }} />
+                                      {tier}
+                                    </button>
+                                  ))}
+                                </div>
+                                <p className="text-[12px] italic text-[var(--ink-3)]">or just type a number</p>
+                              </div>
+                            )
+                          }
+                          return (
+                            <button
+                              key={idx}
+                              className="w-full text-left px-3.5 py-2.5 rounded-[12px] border border-[var(--line-2)] bg-[var(--paper-hi)] hover:border-[var(--terra)] hover:bg-[var(--terra-soft)] transition-all text-[14px] leading-[20px] font-medium text-[var(--ink)] flex items-center gap-2.5 group"
+                              onClick={() => send(q.question)}
+                            >
+                              {/* 4px terracotta leading dot — reads as "tap to reply" */}
+                              <span className="w-1 h-1 rounded-full flex-shrink-0" style={{ background: 'var(--terra)' }} />
+                              <span className="flex-1">{q.question}</span>
+                              <ArrowRight size={14} strokeWidth={1.5} className="opacity-0 group-hover:opacity-100 transition-opacity text-[var(--terra)]" />
+                            </button>
+                          )
+                        })}
                       </div>
                       {message.followups.closing && (
                         <p className="mt-3 text-[12px] italic text-[var(--ink-3)]">

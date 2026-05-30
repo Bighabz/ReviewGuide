@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>ReviewGuide — print</title>
+  <style>
+    :root { color-scheme: light; }
+    html, body { margin: 0; padding: 0; background: #FAFAF7; color: #1A1816; }
+    body { font-family: "DM Sans", -apple-system, BlinkMacSystemFont, system-ui, sans-serif; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    #root { width: 100%; }
+
+    .print-root { padding: 32px 32px 64px; max-width: 1360px; margin: 0 auto; }
+
+    .print-section-head {
+      padding: 40px 0 14px;
+      border-bottom: 1px solid #E8E6E1;
+      margin-bottom: 28px;
+      break-before: page;
+      break-inside: avoid;
+    }
+    .print-section-head:first-child { break-before: auto; }
+
+    .print-eyebrow {
+      font-family: "DM Sans", sans-serif;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: #B8543A;
+      margin-bottom: 10px;
+    }
+    .print-section-title {
+      margin: 0;
+      font-family: "Instrument Serif", serif;
+      font-style: italic;
+      font-size: 44px;
+      line-height: 48px;
+      letter-spacing: -0.025em;
+      font-weight: 400;
+      color: #1A1816;
+    }
+    .print-section-sub {
+      margin-top: 8px;
+      font-family: "DM Sans", sans-serif;
+      font-size: 13px;
+      color: #6B6560;
+    }
+
+    .print-artboard {
+      margin-bottom: 36px;
+      break-inside: avoid;
+    }
+    .print-artboard-label {
+      font-family: "DM Sans", sans-serif;
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: #6B6560;
+      margin-bottom: 12px;
+    }
+
+    /* Phone artboards: center, add a soft device shell */
+    .print-artboard.is-mobile .print-artboard-body {
+      display: flex;
+      justify-content: center;
+    }
+    .print-artboard.is-mobile .print-artboard-body > .rg-frame {
+      box-shadow: 0 1px 0 rgba(26,24,22,.04), 0 12px 36px -18px rgba(26,24,22,.18);
+      border-radius: 28px;
+      overflow: hidden;
+    }
+
+    /* Foundation cards: full-width, capped */
+    .print-artboard:not(.is-mobile) .print-artboard-body > * {
+      width: 100% !important;
+      max-width: 1280px;
+      margin: 0 auto;
+      box-shadow: none !important;
+    }
+
+    /* Force break before each artboard EXCEPT the first inside a section.
+       This puts large artboards on their own page; small adjacent ones can still
+       share if the second one fits. We err toward "always page-break per artboard"
+       because pages with multi-artboards crowded together print badly. */
+    .print-artboard { break-before: page; }
+    .print-section-head + .print-artboard { break-before: auto; }
+
+    @page {
+      size: 1360px auto;
+      margin: 16mm 10mm;
+    }
+
+    @media print {
+      html, body { background: #FAFAF7 !important; }
+      .print-root { padding: 0; }
+    }
+  </style>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+  <script src="lib/tokens.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel" data-presets="react" src="lib/atoms.jsx"></script>
+  <script type="text/babel" data-presets="react" src="lib/logo.jsx"></script>
+  <script type="text/babel" data-presets="react" src="lib/foundation.jsx"></script>
+  <script type="text/babel" data-presets="react" src="lib/screens-flow.jsx"></script>
+  <script type="text/babel" data-presets="react" src="lib/screens-results.jsx"></script>
+  <script type="text/babel" data-presets="react" src="lib/screens-meta.jsx"></script>
+  <script type="text/babel" data-presets="react" src="lib/v2-delta.jsx"></script>
+
+  <script type="text/babel" data-presets="react" src="app-print.jsx"></script>
+</body>
+</html>

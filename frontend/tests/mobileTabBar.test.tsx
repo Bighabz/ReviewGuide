@@ -61,9 +61,9 @@ describe('MobileTabBar — tab count and labels (NAV-01)', () => {
     expect(screen.getByText('Compare')).toBeTruthy()
   })
 
-  it('renders Profile label', () => {
+  it('renders You label', () => {
     render(<MobileTabBar />)
-    expect(screen.getByText('Profile')).toBeTruthy()
+    expect(screen.getByText('You')).toBeTruthy()
   })
 })
 

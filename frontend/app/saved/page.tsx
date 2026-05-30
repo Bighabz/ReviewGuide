@@ -106,7 +106,7 @@ export default function SavedPage() {
                 <p className="rg-serif line-clamp-2" style={{ fontSize: 15, lineHeight: '20px', fontWeight: 500, color: 'var(--ink)' }}>
                   {item.name}
                 </p>
-                {item.price != null && (
+                {item.price != null && item.price > 0 && (
                   <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--ink)' }}>${item.price}</span>
                 )}
               </div>

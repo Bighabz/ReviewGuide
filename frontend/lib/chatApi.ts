@@ -521,6 +521,11 @@ export async function fetchConversationHistory(sessionId: string): Promise<any> 
     })
 
     if (!response.ok) {
+      // Anonymous / unauthenticated sessions legitimately have no server-side
+      // history — that's a 401, not an error worth shouting about. Return empty.
+      if (response.status === 401 || response.status === 403) {
+        return { messages: [] }
+      }
       throw new Error(`HTTP error! status: ${response.status}`)
     }
 
