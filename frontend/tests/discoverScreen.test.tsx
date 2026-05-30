@@ -35,6 +35,7 @@ vi.mock('@/lib/recentSearches', () => ({
 
 import { getRecentSearches } from '@/lib/recentSearches'
 import DiscoverPage from '@/app/page'
+import { HERO_SUBLINES } from '@/components/HeroSubline'
 
 // ────────────────────────────────────────────────────────────────
 // DISC-01 — Hero section
@@ -52,9 +53,11 @@ describe('DiscoverPage — hero section (DISC-01)', () => {
     expect(heading.className).toContain('rg-display')
   })
 
-  it('renders the blueprint subline', () => {
+  it('renders a rotating hero subline', () => {
     render(<DiscoverPage />)
-    expect(screen.getByText('A category, a budget, a vibe — anything works.')).toBeTruthy()
+    // HeroSubline picks one of HERO_SUBLINES (random on mount; SSR/initial = index 0)
+    const found = HERO_SUBLINES.some((l) => screen.queryByText(l))
+    expect(found).toBe(true)
   })
 })
 
