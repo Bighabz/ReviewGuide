@@ -1,20 +1,11 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { getRecentSearches } from '@/lib/recentSearches'
 import DiscoverSearchBar from '@/components/discover/DiscoverSearchBar'
-import CategoryChipRow from '@/components/discover/CategoryChipRow'
 import TrendingCards from '@/components/discover/TrendingCards'
 import DiscoverHeroLogo from '@/components/DiscoverHeroLogo'
 import HeroSubline from '@/components/HeroSubline'
 
 export default function DiscoverPage() {
-  const [hasHistory, setHasHistory] = useState(false)
-
-  useEffect(() => {
-    setHasHistory(getRecentSearches().length > 0)
-  }, [])
-
   return (
     <div className="flex flex-col pb-20 px-4 sm:px-6 md:px-8">
       {/* Hero section — animated intro video (recolored terracotta), then italic-display greeting */}
@@ -32,12 +23,7 @@ export default function DiscoverPage() {
         </div>
       </div>
 
-      {/* Category chips */}
-      <div className="mt-8">
-        <CategoryChipRow hasHistory={hasHistory} />
-      </div>
-
-      {/* Trending cards */}
+      {/* Popular this week */}
       <div className="mt-10">
         <TrendingCards />
       </div>
