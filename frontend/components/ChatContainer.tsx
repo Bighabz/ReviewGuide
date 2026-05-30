@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import MessageList from './MessageList'
 import ChatInput from './ChatInput'
+import HeroSubline from './HeroSubline'
 import ErrorBanner from './ErrorBanner'
 import BlockSkeleton from './BlockSkeleton'
 import MessageRecoveryUI from './MessageRecoveryUI'
@@ -776,9 +777,7 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
               <h1 className="rg-display text-center" style={{ fontSize: 30, lineHeight: '34px', color: 'var(--ink)' }}>
                 What are you trying to figure out?
               </h1>
-              <p className="text-center mt-3 max-w-md" style={{ fontSize: 15, color: 'var(--ink-2)' }}>
-                A category, a budget, a vibe — anything works.
-              </p>
+              <HeroSubline className="text-center mt-3 max-w-md" style={{ fontSize: 15, color: 'var(--ink-2)' }} />
 
               <div className="w-full max-w-xl mx-auto mt-8">
                 <ChatInput

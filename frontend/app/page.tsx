@@ -6,6 +6,7 @@ import DiscoverSearchBar from '@/components/discover/DiscoverSearchBar'
 import CategoryChipRow from '@/components/discover/CategoryChipRow'
 import TrendingCards from '@/components/discover/TrendingCards'
 import DiscoverHeroLogo from '@/components/DiscoverHeroLogo'
+import HeroSubline from '@/components/HeroSubline'
 
 export default function DiscoverPage() {
   const [hasHistory, setHasHistory] = useState(false)
@@ -25,12 +26,7 @@ export default function DiscoverPage() {
         >
           What are you researching?
         </h1>
-        <p
-          className="text-sm text-center mt-3 max-w-md"
-          style={{ color: 'var(--ink-2)' }}
-        >
-          A category, a budget, a vibe — anything works.
-        </p>
+        <HeroSubline className="text-sm text-center mt-3 max-w-md" style={{ color: 'var(--ink-2)' }} />
         <div className="w-full max-w-xl mx-auto mt-8">
           <DiscoverSearchBar />
         </div>
