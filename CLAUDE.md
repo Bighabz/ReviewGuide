@@ -247,3 +247,33 @@ Use these slash commands for common workflows:
 | `/review` | Code review checklist |
 | `/test` | Run and analyze tests |
 | `/deploy` | Deployment checklist |
+
+## Component Map (read before editing UI — there are duplicates!)
+
+This codebase has **multiple components for the same concept**. Editing the wrong one is the #1 time-sink. Go to the right file:
+
+### Product cards (THREE of them, by render context)
+- **In chat results** → rendered by `components/blocks/BlockRegistry.tsx`:
+  - `products` / `carousel` blocks → **`components/ProductCarousel.tsx`** (the main shortlist carousel)
+  - `product_review` block → **`components/ProductReview.tsx`** (rich review card: image-left, pros/cons, "Where to buy")
+  - `inline_product_card` → `components/InlineProductCard.tsx`
+- **`/results/[id]` summary page only** → **`components/ResultsProductCard.tsx`** (NOT used in chat — don't confuse with the above)
+- Saved/Compare cards are inline in `app/saved/page.tsx` / `app/compare/page.tsx`.
+- The shared bookmark store is `lib/savedItems.ts` (`SaveToggle` is duplicated inline in ProductCarousel + ProductReview + ResultsProductCard).
+
+### Logos (THREE)
+- **`components/Brand.tsx`** — `Wordmark`/`WordmarkStatic`/`LogoHero`/`HeaderBrand`/`TransitionalBubble` (code-based terracotta; `Wordmark` is in the topbar/header). `LogoHero` is now unused on Discover but still exported.
+- **`components/AnimatedLogo.tsx`** — plays the recolored `/images/animated_logo.mp4`; used on **`/login` only**.
+- **`components/DiscoverHeroLogo.tsx`** — autoplays the recolored video on the Discover hero (`app/page.tsx`), with a static-PNG reduced-motion fallback.
+
+### Routes / screens
+- **Discover = `app/page.tsx`** (served at `/`). `/discover` and `/browse` just **redirect to `/`**.
+- Chat = `app/chat/page.tsx` → `components/ChatContainer.tsx` (welcome/empty state lives here) → `components/Message.tsx` (bubbles, blog card, clarifier chips, follow-up Q).
+- Headers: desktop `components/UnifiedTopbar.tsx`, mobile `components/MobileHeader.tsx` + `components/MobileTabBar.tsx` (bottom tabs; 5th tab labelled "You").
+
+### Design tokens (terracotta-on-cream, NO blue)
+- `app/globals.css` `:root` CSS vars + `app/tailwind.config.ts`. Key: `--terra #B8543A` (primary, replaced old `#1B4DFF`), `--ink #1A1816`, `--paper #FAFAF7`, `--line #E8E6E1`. Fonts: DM Sans (UI), Newsreader (`font-serif`, body), Instrument Serif (`.rg-display`, italic display). `rg-*` utility classes (eyebrow, hairline, breath, etc.) live in globals.css.
+- The blueprint spec is `frontend/design/DESIGN.md`; gap analysis `frontend/design/GAP_ANALYSIS.md`.
+
+### Backend field passthrough (the silent-drop trap)
+- A new field from a composer tool must be wired through **all 5 layers** or it's silently dropped: composer (`mcp_server/tools/*`) → validator (`app/services/tool_validator.py`, the Pydantic schema) → `_extract_results` (`app/services/plan_executor.py`) → `plan_executor_node` (`app/services/langgraph/workflow.py`) → SSE (`app/api/v1/chat.py`). Mirror `follow_up_question` / `transitional_reasoning` / `affiliate_products` as the template.
