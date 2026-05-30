@@ -8,18 +8,39 @@
 // whitespace around the logo, so we scale it up and clip with overflow-hidden
 // to land the logo at roughly the same footprint as the old <LogoHero>.
 //
+// Mobile autoplay: browsers only allow muted autoplay, and they evaluate the
+// `muted` state at mount — but React sets the `muted` *property* a tick late,
+// so the browser sees an unmuted video and shows a tap-to-play button. We fix
+// that by setting muted synchronously in a ref callback (before the autoplay
+// decision), retrying play() on canplay/loadedmetadata, and — as a last resort
+// for iOS Low Power Mode — kicking playback on the first scroll/tap.
+//
 // Respects prefers-reduced-motion: falls back to the static recolored wordmark
 // PNG instead of autoplaying.
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 const STATIC_LOGO = '/images/8f4c1971-a5b0-474e-9fb1-698e76324f0b.png';
 const VIDEO_SRC = '/images/animated_logo.mp4';
 
-export default function DiscoverHeroLogo({ width = 360 }: { width?: number }) {
-  const videoRef = useRef<HTMLVideoElement>(null);
+export default function DiscoverHeroLogo({ width = 340 }: { width?: number }) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
   const [reduced, setReduced] = useState(false);
   const [mounted, setMounted] = useState(false);
+
+  // Set muted synchronously at mount so the browser's own autoplay attempt
+  // (mobile requires muted) sees it *before* deciding — React's `muted` prop
+  // is applied too late on its own.
+  const setVideoRef = useCallback((el: HTMLVideoElement | null) => {
+    videoRef.current = el;
+    if (el) {
+      el.muted = true;
+      el.defaultMuted = true;
+      el.setAttribute('muted', '');
+      el.setAttribute('playsinline', '');
+      el.setAttribute('webkit-playsinline', '');
+    }
+  }, []);
 
   useEffect(() => {
     setMounted(true);
@@ -31,17 +52,42 @@ export default function DiscoverHeroLogo({ width = 360 }: { width?: number }) {
   useEffect(() => {
     const v = videoRef.current;
     if (!v || reduced) return;
-    // Ensure muted (React attr can be unreliable) then autoplay from the start.
     v.muted = true;
-    try {
-      v.currentTime = 0;
-      // play() can throw synchronously (jsdom has no media impl) or reject
-      // (autoplay blocked) — swallow both; the first frame still shows the logo.
-      const p = v.play();
-      if (p && typeof p.catch === 'function') p.catch(() => {});
-    } catch {
-      /* no-op */
-    }
+
+    const tryPlay = () => {
+      try {
+        // play() can throw synchronously (jsdom) or reject (autoplay blocked).
+        const p = v.play();
+        if (p && typeof p.catch === 'function') p.catch(() => {});
+      } catch {
+        /* no-op */
+      }
+    };
+
+    tryPlay();
+    v.addEventListener('loadedmetadata', tryPlay);
+    v.addEventListener('canplay', tryPlay);
+
+    // Last-resort fallback (e.g. iOS Low Power Mode blocks even muted autoplay):
+    // start playback on the first user interaction, then detach.
+    const onGesture = () => {
+      tryPlay();
+      detachGestures();
+    };
+    const detachGestures = () => {
+      document.removeEventListener('touchstart', onGesture);
+      document.removeEventListener('pointerdown', onGesture);
+      document.removeEventListener('scroll', onGesture);
+    };
+    document.addEventListener('touchstart', onGesture, { passive: true });
+    document.addEventListener('pointerdown', onGesture, { passive: true });
+    document.addEventListener('scroll', onGesture, { passive: true });
+
+    return () => {
+      v.removeEventListener('loadedmetadata', tryPlay);
+      v.removeEventListener('canplay', tryPlay);
+      detachGestures();
+    };
   }, [reduced, mounted]);
 
   // Reduced-motion or pre-hydration: static recolored wordmark.
@@ -59,10 +105,11 @@ export default function DiscoverHeroLogo({ width = 360 }: { width?: number }) {
     <div style={{ width: '100%', maxWidth: width, margin: '0 auto' }}>
       <div style={{ position: 'relative', width: '100%', aspectRatio: '16 / 7', overflow: 'hidden' }}>
         <video
-          ref={videoRef}
+          ref={setVideoRef}
           autoPlay
           muted
           playsInline
+          preload="auto"
           aria-label="ReviewGuide.ai"
           style={{
             position: 'absolute',
