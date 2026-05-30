@@ -756,27 +756,12 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
       {messages.length === 0 && (
         <div id="welcome-screen" className="flex-1 overflow-y-auto">
           <div className="flex flex-col items-center justify-center px-4 lg:pr-28 pt-14 sm:pt-16 pb-10 sm:pb-16">
-              <video
-                src="/images/animated_logo.mp4"
-                autoPlay
-                loop
-                muted
-                playsInline
-                className="h-32 sm:h-44 md:h-56 w-auto mb-4"
-                style={{ mixBlendMode: 'multiply' }}
-                aria-label="ReviewGuide.Ai"
-              />
-              <h1 className="font-serif text-2xl sm:text-3xl md:text-4xl text-center text-[var(--text)] leading-tight tracking-tight">
-                Smart shopping,{' '}
-                <span
-                  className="italic text-[var(--primary)] transition-opacity duration-300"
-                  style={{ opacity: verbVisible ? 1 : 0 }}
-                >
-                  {CYCLING_VERBS[verbIndex]}
-                </span>
+              {/* Blueprint chat-empty (§7.2): italic-serif greeting, no logo video */}
+              <h1 className="rg-display text-center" style={{ fontSize: 30, lineHeight: '34px', color: 'var(--ink)' }}>
+                What are you trying to figure out?
               </h1>
-              <p className="text-sm sm:text-base text-[var(--text-secondary)] text-center mt-3 max-w-md">
-                AI-powered product reviews, travel planning, and price comparison — all in one conversation.
+              <p className="text-center mt-3 max-w-md" style={{ fontSize: 15, color: 'var(--ink-2)' }}>
+                A category, a budget, a vibe — anything works.
               </p>
 
               <div className="w-full max-w-xl mx-auto mt-8">
