@@ -78,7 +78,7 @@ describe('DiscoverPage — category chip row (DISC-02)', () => {
     expect(found.length).toBeGreaterThanOrEqual(8)
   })
 
-  it('tapping a category chip calls router.push with /chat?q=...&new=1', () => {
+  it('tapping a category chip calls router.push with /chat?draft=...&new=1 (editable, not auto-sent)', () => {
     render(<DiscoverPage />)
     // Find ANY chip that is a button (or has a click handler).
     // We use "Popular" or the first available chip from the expected list.
@@ -95,7 +95,7 @@ describe('DiscoverPage — category chip row (DISC-02)', () => {
     fireEvent.click(chipButton!)
     expect(mockPush).toHaveBeenCalledTimes(1)
     const calledUrl: string = mockPush.mock.calls[0][0]
-    expect(calledUrl).toMatch(/^\/chat\?q=.+&new=1$/)
+    expect(calledUrl).toMatch(/^\/chat\?draft=.+&new=1$/)
   })
 })
 
@@ -140,8 +140,8 @@ describe('DiscoverPage — trending cards (DISC-03)', () => {
     fireEvent.click(clickable)
     expect(mockPush).toHaveBeenCalledTimes(1)
     const calledUrl: string = mockPush.mock.calls[0][0]
-    // URL must contain a query parameter (q=...).
-    expect(calledUrl).toContain('q=')
+    // URL must seed an editable draft (draft=...), not auto-send (q=...).
+    expect(calledUrl).toContain('draft=')
   })
 })
 

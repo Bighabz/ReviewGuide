@@ -65,12 +65,13 @@ interface ChatContainerProps {
   clearHistoryTrigger?: number
   externalSessionId?: string  // Allow parent to set session ID
   onSessionChange?: (sessionId: string) => void  // Notify parent of session changes
-  initialQuery?: string  // Initial query from URL params (for sticky chat bar)
+  initialQuery?: string  // Initial query from URL params (for sticky chat bar) — AUTO-SENDS
+  initialDraft?: string  // Pre-fills the composer WITHOUT sending (editable starting point)
 }
 
 const CYCLING_VERBS = ['simplified.', 'effortless.', 'smarter.', 'reimagined.', 'personalized.', 'instant.']
 
-export default function ChatContainer({ clearHistoryTrigger, externalSessionId, onSessionChange, initialQuery }: ChatContainerProps) {
+export default function ChatContainer({ clearHistoryTrigger, externalSessionId, onSessionChange, initialQuery, initialDraft }: ChatContainerProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const { streamState, dispatch: dispatchStream, isStreaming } = useStreamReducer()
@@ -241,7 +242,17 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
 
   // Track processed queries and sessions to avoid duplicate processing
   const initialQueryProcessedRef = useRef<string | null>(null)
+  const initialDraftProcessedRef = useRef<string | null>(null)
   const lastExternalSessionIdRef = useRef<string | null>(null)
+
+  // initialDraft: pre-fill the composer with editable text — do NOT send.
+  // Lets Discover category chips / popular rows seed a starting point the user refines.
+  useEffect(() => {
+    if (initialDraft && initialDraftProcessedRef.current !== initialDraft) {
+      initialDraftProcessedRef.current = initialDraft
+      setInput(initialDraft)
+    }
+  }, [initialDraft])
 
   // Single unified effect to handle initial query from URL params (sticky chat bar)
   // This runs when we have BOTH an externalSessionId AND initialQuery (new session with query)

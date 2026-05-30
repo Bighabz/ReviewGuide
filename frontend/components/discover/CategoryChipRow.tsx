@@ -31,7 +31,9 @@ export default function CategoryChipRow({ hasHistory }: Props) {
 
   function handleChipClick(chip: ChipConfig) {
     if (chip.query) {
-      router.push(`/chat?q=${encodeURIComponent(chip.query)}&new=1`)
+      // Seed the composer with editable text (draft) — do NOT auto-send.
+      // Lets the user add budget/constraints before asking ("ask, don't assume").
+      router.push(`/chat?draft=${encodeURIComponent(chip.query)}&new=1`)
     } else {
       router.push('/chat?new=1')
     }
