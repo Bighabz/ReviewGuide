@@ -18,117 +18,54 @@ export default function TrendingCards() {
 
   return (
     <div>
-      {/* Section header */}
-      <p
-        className="mb-4"
-        style={{
-          textTransform: 'uppercase',
-          fontSize: '11px',
-          fontWeight: 500,
-          color: 'var(--text-muted)',
-          letterSpacing: '1.5px',
-        }}
-      >
-        Trending Research
-      </p>
+      {/* Section header — blueprint eyebrow + see all */}
+      <div className="flex items-center justify-between mb-1">
+        <div className="rg-eyebrow">Popular this week</div>
+        <button
+          onClick={() => router.push('/chat?new=1')}
+          className="text-[12px]"
+          style={{ color: 'var(--ink-2)', background: 'none', border: 'none', cursor: 'pointer' }}
+        >
+          see all
+        </button>
+      </div>
 
-      {/* Cards grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+      {/* Editorial vertical list — thumb tile + Newsreader name + take, hairline rows */}
+      <div>
         {trendingTopics.map((topic) => {
           const IconComponent = iconMap[topic.icon]
-
           return (
             <button
               key={topic.id}
               data-testid="trending-card"
-              onClick={() =>
-                router.push(`/chat?q=${encodeURIComponent(topic.query)}&new=1`)
-              }
-              className="product-card-hover w-full text-left"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '12px',
-                padding: '16px',
-                borderRadius: '12px',
-                background: 'var(--surface)',
-                border: '1px solid var(--border)',
-                cursor: 'pointer',
-                minHeight: '72px',
-              }}
+              onClick={() => router.push(`/chat?q=${encodeURIComponent(topic.query)}&new=1`)}
+              className="w-full text-left flex items-center gap-3.5 py-3.5 group"
+              style={{ borderTop: '1px solid var(--line)', cursor: 'pointer' }}
             >
-              {/* Icon circle */}
+              {/* Thumb tile — neutral, terracotta icon (no pastel circles) */}
               <div
                 aria-hidden="true"
-                style={{
-                  width: '40px',
-                  height: '40px',
-                  borderRadius: '50%',
-                  background: topic.iconBg,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  flexShrink: 0,
-                }}
+                className="flex items-center justify-center flex-shrink-0"
+                style={{ width: 56, height: 56, borderRadius: 10, background: 'var(--paper-alt)' }}
               >
-                {IconComponent && (
-                  <IconComponent
-                    size={20}
-                    color={topic.iconColor}
-                    aria-hidden="true"
-                  />
-                )}
+                {IconComponent && <IconComponent size={22} color="var(--terra)" aria-hidden="true" />}
               </div>
 
               {/* Text */}
               <div className="flex-1 min-w-0">
-                <p
-                  style={{
-                    fontSize: '15px',
-                    fontWeight: 600,
-                    color: 'var(--text)',
-                    lineHeight: '1.3',
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                  }}
-                >
+                <p className="rg-serif" style={{ fontSize: 16, fontWeight: 500, color: 'var(--ink)', lineHeight: '20px' }}>
                   {topic.title}
                 </p>
-                <p
-                  style={{
-                    fontSize: '13px',
-                    fontWeight: 400,
-                    color: 'var(--text-secondary)',
-                    lineHeight: '1.4',
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                  }}
-                >
+                <p style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: '18px', marginTop: 2 }}>
                   {topic.subtitle}
                 </p>
               </div>
 
-              {/* Chevron */}
-              <ChevronRight
-                size={16}
-                aria-hidden="true"
-                style={{ color: 'var(--text-muted)', flexShrink: 0 }}
-              />
+              <ChevronRight size={16} aria-hidden="true" style={{ color: 'var(--ink-3)', flexShrink: 0 }} className="group-hover:text-[var(--terra)] transition-colors" />
             </button>
           )
         })}
       </div>
-
-      {/* See more */}
-      <button
-        onClick={() => router.push('/chat?new=1')}
-        className="mt-4 text-sm"
-        style={{ color: 'var(--text-secondary)', background: 'none', border: 'none', cursor: 'pointer' }}
-      >
-        See more topics &rarr;
-      </button>
     </div>
   )
 }
