@@ -1,12 +1,12 @@
 /**
- * Phase 13 — DISC-01 through DISC-05
+ * Phase 13 — DISC-01, DISC-03, DISC-05
  *
  * Behavioral contracts for the Discover screen.
  * Components expected at:
  *   - frontend/app/page.tsx  (DiscoverPage — default export)
  *
- * These tests are in the RED state — they will fail until Plan 02 creates
- * the production components. That is expected and correct.
+ * (DISC-02 category chips and DISC-04 "For You" chip were removed from the
+ * Discover hero — see app/page.tsx.)
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -28,12 +28,6 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(),
 }))
 
-// Mock recentSearches lib so DISC-04 tests can control the data.
-vi.mock('@/lib/recentSearches', () => ({
-  getRecentSearches: vi.fn(() => []),
-}))
-
-import { getRecentSearches } from '@/lib/recentSearches'
 import DiscoverPage from '@/app/page'
 import { HERO_SUBLINES } from '@/components/HeroSubline'
 
@@ -58,47 +52,6 @@ describe('DiscoverPage — hero section (DISC-01)', () => {
     // HeroSubline picks one of HERO_SUBLINES (random on mount; SSR/initial = index 0)
     const found = HERO_SUBLINES.some((l) => screen.queryByText(l))
     expect(found).toBe(true)
-  })
-})
-
-// ────────────────────────────────────────────────────────────────
-// DISC-02 — Category chip row
-// ────────────────────────────────────────────────────────────────
-describe('DiscoverPage — category chip row (DISC-02)', () => {
-  beforeEach(() => {
-    mockPush.mockClear()
-  })
-
-  it('renders at least 8 category chips (Popular, Tech, Travel, Kitchen, Fitness, Home, Fashion, Outdoor)', () => {
-    render(<DiscoverPage />)
-    // Chips are interactive — rendered as role="button" or role="option" or anchor/link.
-    // Count all chip-like interactive elements in the chip row region.
-    // Minimum 8 required by DISC-02.
-    const chipLabels = ['Popular', 'Tech', 'Travel', 'Kitchen', 'Fitness', 'Home', 'Fashion', 'Outdoor']
-    const found = chipLabels.filter(
-      (label) => screen.queryByText(label) !== null
-    )
-    expect(found.length).toBeGreaterThanOrEqual(8)
-  })
-
-  it('tapping a category chip calls router.push with /chat?draft=...&new=1 (editable, not auto-sent)', () => {
-    render(<DiscoverPage />)
-    // Find ANY chip that is a button (or has a click handler).
-    // We use "Popular" or the first available chip from the expected list.
-    const chipLabels = ['Popular', 'Tech', 'Travel', 'Kitchen', 'Fitness', 'Home', 'Fashion', 'Outdoor']
-    let chipButton: HTMLElement | null = null
-    for (const label of chipLabels) {
-      const el = screen.queryByText(label)
-      if (el) {
-        chipButton = el.closest('button') ?? el.closest('[role="button"]') ?? el as HTMLElement
-        break
-      }
-    }
-    expect(chipButton).toBeTruthy()
-    fireEvent.click(chipButton!)
-    expect(mockPush).toHaveBeenCalledTimes(1)
-    const calledUrl: string = mockPush.mock.calls[0][0]
-    expect(calledUrl).toMatch(/^\/chat\?draft=.+&new=1$/)
   })
 })
 
@@ -145,35 +98,6 @@ describe('DiscoverPage — trending cards (DISC-03)', () => {
     const calledUrl: string = mockPush.mock.calls[0][0]
     // URL must seed an editable draft (draft=...), not auto-send (q=...).
     expect(calledUrl).toContain('draft=')
-  })
-})
-
-// ────────────────────────────────────────────────────────────────
-// DISC-04 — "For You" personalisation chip
-// ────────────────────────────────────────────────────────────────
-describe('DiscoverPage — "For You" chip (DISC-04)', () => {
-  beforeEach(() => {
-    mockPush.mockClear()
-    vi.mocked(getRecentSearches).mockReturnValue([])
-  })
-
-  it('does NOT render "For You" chip when localStorage has no recent searches', () => {
-    vi.mocked(getRecentSearches).mockReturnValue([])
-    render(<DiscoverPage />)
-    expect(screen.queryByText('For You')).toBeNull()
-  })
-
-  it('renders "For You" chip when localStorage returns at least one recent search', () => {
-    vi.mocked(getRecentSearches).mockReturnValue([
-      {
-        query: 'best headphones',
-        productNames: ['Sony WH-1000XM5'],
-        category: 'electronics',
-        timestamp: Date.now(),
-      },
-    ])
-    render(<DiscoverPage />)
-    expect(screen.getByText('For You')).toBeTruthy()
   })
 })
 
