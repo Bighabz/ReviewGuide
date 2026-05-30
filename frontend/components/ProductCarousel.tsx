@@ -1,10 +1,43 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { ChevronLeft, ChevronRight, Star } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Star, Bookmark } from 'lucide-react'
 import FunPlaceholder from './ui/FunPlaceholder'
 import { motion } from 'framer-motion'
 import { trackAffiliateClick } from '@/lib/trackAffiliate'
+import { toggleSaved, isSaved, slugifyProduct, type SavedItem } from '@/lib/savedItems'
+
+// Bookmark toggle — fill terra when saved, icon pop + expanding terra ring on tap (no toast).
+// Lives inside the card's <a>, so it stops propagation to avoid following the affiliate link.
+function SaveToggle({ item }: { item: Omit<SavedItem, 'savedAt'> }) {
+  const [saved, setSaved] = useState(false)
+  const [pulse, setPulse] = useState(0)
+  useEffect(() => {
+    setSaved(isSaved(item.id))
+    const sync = () => setSaved(isSaved(item.id))
+    window.addEventListener('saveditems:changed', sync)
+    return () => window.removeEventListener('saveditems:changed', sync)
+  }, [item.id])
+  return (
+    <button
+      onClick={(e) => { e.preventDefault(); e.stopPropagation(); setSaved(toggleSaved(item)); setPulse((p) => p + 1) }}
+      aria-label={saved ? 'Remove bookmark' : 'Save'}
+      className="absolute top-2 right-2 z-10 w-8 h-8 rounded-full flex items-center justify-center"
+      style={{ background: 'var(--paper-hi)', border: '1px solid var(--line)' }}
+    >
+      {pulse > 0 && (
+        <span key={pulse} className="rg-ring absolute inset-0 rounded-full" style={{ border: '1px solid var(--terra)' }} />
+      )}
+      <Bookmark
+        key={`${saved}-${pulse}`}
+        size={15}
+        strokeWidth={1.8}
+        className={pulse > 0 ? 'rg-bookmark-pop' : ''}
+        style={{ color: 'var(--terra)', fill: saved ? 'var(--terra)' : 'transparent' }}
+      />
+    </button>
+  )
+}
 
 interface Product {
   product_id: string
@@ -168,26 +201,40 @@ export default function ProductCarousel({ items, title }: ProductCarouselProps) 
                   })
                 }}
               >
-                <div className="bg-[var(--surface-elevated)] border border-[var(--border)] rounded-xl overflow-hidden product-card-hover">
-                  {/* Image with fun loading/error placeholder */}
-                  <ProductImage item={item} />
+                <div
+                  className="rounded-[14px] overflow-hidden product-card-hover"
+                  style={{ background: 'var(--paper-hi)', border: '1px solid var(--line)' }}
+                >
+                  {/* Image (top) + floating terra save toggle */}
+                  <div className="relative">
+                    <ProductImage item={item} />
+                    <SaveToggle
+                      item={{
+                        id: slugifyProduct(item.title),
+                        name: item.title,
+                        price: item.price,
+                        imageUrl: item.image_url,
+                        url: item.affiliate_link,
+                        role: item.best_price ? 'Best price' : item.merchant,
+                      }}
+                    />
+                  </div>
 
                   {/* Content */}
-                  <div className="p-4 sm:p-5 space-y-2.5">
-                    {/* Merchant + Best Price badge */}
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
-                        {item.merchant}
-                      </span>
-                      {item.best_price && (
-                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-emerald-500/10 text-emerald-600 dark:bg-emerald-400/15 dark:text-emerald-400">
-                          Best Price
-                        </span>
-                      )}
-                    </div>
+                  <div className="px-3.5 pt-3 pb-3.5 flex flex-col gap-1.5">
+                    {/* Role label (small-caps) — terra for the best-price pick */}
+                    <span
+                      className="uppercase"
+                      style={{
+                        fontSize: 10, fontWeight: 600, letterSpacing: '0.08em',
+                        color: item.best_price ? 'var(--terra)' : 'var(--ink-2)',
+                      }}
+                    >
+                      {item.best_price ? 'Best price · ' : ''}{item.merchant}
+                    </span>
 
-                    {/* Title — serif */}
-                    <h4 className="font-serif text-base font-semibold text-[var(--text)] line-clamp-2 leading-snug group-hover:text-[var(--primary)] transition-colors">
+                    {/* Name — Newsreader */}
+                    <h4 className="rg-serif line-clamp-2" style={{ fontSize: 17, lineHeight: '22px', fontWeight: 500, color: 'var(--ink)' }}>
                       {item.title}
                     </h4>
 
@@ -195,7 +242,7 @@ export default function ProductCarousel({ items, title }: ProductCarouselProps) 
                     {item.rating && (
                       <div className="flex items-center gap-1.5">
                         <StarRatingInline value={item.rating} size={13} />
-                        <span className="text-xs text-[var(--text-muted)]">
+                        <span className="text-xs" style={{ color: 'var(--ink-3)' }}>
                           {item.rating}
                           {item.review_count && ` (${item.review_count.toLocaleString()})`}
                         </span>
@@ -203,20 +250,20 @@ export default function ProductCarousel({ items, title }: ProductCarouselProps) 
                     )}
 
                     {/* Price + CTA */}
-                    <div className="flex items-center justify-between pt-2.5 border-t border-[var(--border)]">
+                    <div className="flex items-center justify-between pt-2 mt-auto">
                       <div>
-                        <span className="text-lg font-bold font-serif text-[var(--text)]">
-                          {item.currency === 'USD' ? '$' : item.currency}{' '}
+                        <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--ink)' }}>
+                          {item.currency === 'USD' ? '$' : item.currency}
                           {item.price?.toFixed(2) ?? 'N/A'}
                         </span>
                         {item.best_price && item.savings != null && item.savings > 0 && (
-                          <p className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">
+                          <p className="text-[11px] font-medium" style={{ color: 'var(--terra)' }}>
                             Save ${item.savings.toFixed(2)}{item.compared_retailer ? ` vs ${item.compared_retailer}` : ''}
                           </p>
                         )}
                       </div>
-                      <span className="inline-flex items-center gap-1 text-xs font-medium text-[var(--primary)] group-hover:text-[var(--primary-hover)]">
-                        View on {item.merchant} &rarr;
+                      <span className="text-[12px] font-medium px-3 py-1.5 rounded-pill" style={{ background: 'var(--ink)', color: 'var(--paper)' }}>
+                        Buy
                       </span>
                     </div>
                   </div>
