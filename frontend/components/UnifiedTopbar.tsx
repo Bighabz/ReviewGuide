@@ -8,7 +8,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { Wordmark } from './Brand'
 
 const ACCENT_COLORS = [
-  { id: 'indigo', label: 'Indigo', color: '#1B4DFF' },
+  { id: 'indigo', label: 'Terracotta', color: '#B8543A' }, // default theme (no data-accent)
   { id: 'teal', label: 'Teal', color: '#0D9488' },
   { id: 'rose', label: 'Rose', color: '#E11D48' },
   { id: 'amber', label: 'Amber', color: '#D97706' },

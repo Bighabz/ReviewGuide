@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { Home, Bookmark, Plus, LayoutGrid, User, Sun, Moon } from 'lucide-react'
 
 const ACCENT_COLORS = [
-  { id: 'indigo', label: 'Indigo', color: '#1B4DFF' },
+  { id: 'indigo', label: 'Terracotta', color: '#B8543A' }, // default theme (no data-accent)
   { id: 'teal', label: 'Teal', color: '#0D9488' },
   { id: 'rose', label: 'Rose', color: '#E11D48' },
   { id: 'amber', label: 'Amber', color: '#D97706' },
@@ -18,7 +18,7 @@ const TABS = [
   { id: 'saved', label: 'Saved', icon: Bookmark, href: '/saved' },
   { id: 'ask', label: 'Ask', icon: Plus, href: null },
   { id: 'compare', label: 'Compare', icon: LayoutGrid, href: '/compare' },
-  { id: 'profile', label: 'Profile', icon: User, href: null },
+  { id: 'profile', label: 'You', icon: User, href: null },
 ] as const
 
 export default function MobileTabBar() {
@@ -209,7 +209,7 @@ export default function MobileTabBar() {
                       fontWeight: 500,
                     }}
                   >
-                    Profile
+                    You
                   </span>
                 </button>
 

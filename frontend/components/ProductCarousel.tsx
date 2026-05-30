@@ -252,9 +252,10 @@ export default function ProductCarousel({ items, title }: ProductCarouselProps) 
                     {/* Price + CTA */}
                     <div className="flex items-center justify-between pt-2 mt-auto">
                       <div>
-                        <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--ink)' }}>
-                          {item.currency === 'USD' ? '$' : item.currency}
-                          {item.price?.toFixed(2) ?? 'N/A'}
+                        <span style={{ fontSize: 14, fontWeight: 500, color: item.price && item.price > 0 ? 'var(--ink)' : 'var(--ink-3)' }}>
+                          {item.price && item.price > 0
+                            ? `${item.currency === 'USD' ? '$' : item.currency}${item.price.toFixed(2)}`
+                            : 'Check price'}
                         </span>
                         {item.best_price && item.savings != null && item.savings > 0 && (
                           <p className="text-[11px] font-medium" style={{ color: 'var(--terra)' }}>

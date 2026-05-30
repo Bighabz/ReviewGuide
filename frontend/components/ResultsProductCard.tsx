@@ -130,7 +130,7 @@ export default function ResultsProductCard({ product, index }: ResultsProductCar
         </button>
 
         <div className="flex items-baseline justify-between mt-auto pt-1">
-          {product.price != null ? (
+          {product.price != null && product.price > 0 ? (
             <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--ink)' }}>${product.price}</span>
           ) : <span />}
           <a

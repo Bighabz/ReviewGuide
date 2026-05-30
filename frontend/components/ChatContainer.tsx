@@ -226,7 +226,9 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
                 console.log('ℹ️ No messages found in database for this session')
               }
             } catch (e) {
-              console.error('❌ Failed to fetch conversation history from database:', e)
+              if (!String(e).includes('401') && !String(e).includes('403')) {
+                console.error('❌ Failed to fetch conversation history from database:', e)
+              }
             }
           }
         }
@@ -313,7 +315,10 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
             console.log(`Switched to session ${externalSessionId} with ${messagesWithDates.length} messages`)
           }
         } catch (error) {
-          console.error('Failed to load session:', error)
+          // 401/403 = anonymous session with no server history; not an error.
+          if (!String(error).includes('401') && !String(error).includes('403')) {
+            console.error('Failed to load session:', error)
+          }
         }
 
         setSessionId(externalSessionId)
