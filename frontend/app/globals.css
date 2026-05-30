@@ -456,10 +456,6 @@ a, button, input, textarea, select {
    prefer reduced motion.
    ═══════════════════════════════════════════ */
 
-[data-theme="dark"] video[src*="animated_logo"] {
-  mix-blend-mode: screen;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .animate-card-enter,
   .animate-pulse,
