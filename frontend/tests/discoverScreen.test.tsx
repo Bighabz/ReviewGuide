@@ -80,7 +80,7 @@ describe('DiscoverPage — trending cards (DISC-03)', () => {
     })
   })
 
-  it('tapping a trending card calls router.push with an encoded query parameter', () => {
+  it('tapping a trending card navigates to its /topic/[slug] landing page (Group C: no chat preload)', () => {
     render(<DiscoverPage />)
     const cards =
       document.querySelectorAll('[data-testid="trending-card"]').length > 0
@@ -96,8 +96,9 @@ describe('DiscoverPage — trending cards (DISC-03)', () => {
     fireEvent.click(clickable)
     expect(mockPush).toHaveBeenCalledTimes(1)
     const calledUrl: string = mockPush.mock.calls[0][0]
-    // URL must seed an editable draft (draft=...), not auto-send (q=...).
-    expect(calledUrl).toContain('draft=')
+    // Cards are browse-only now: they open a topic landing page. The "into
+    // research" CTA (draft=) lives on /topic/[slug], not the carousel.
+    expect(calledUrl).toMatch(/^\/topic\//)
   })
 })
 
