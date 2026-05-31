@@ -136,7 +136,7 @@ export default function UnifiedTopbar({
               href="/"
               className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all ${activeTab === 'discover'
                 ? 'text-[var(--text)] bg-[var(--surface)]'
-                : 'text-[var(--text-muted)] hover:text-[var(--text)]'
+                : 'text-[var(--text-secondary)] hover:text-[var(--text)]'
                 }`}
             >
               Discover
@@ -145,7 +145,7 @@ export default function UnifiedTopbar({
               href="/saved"
               className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all ${activeTab === 'saved'
                 ? 'text-[var(--text)] bg-[var(--surface)]'
-                : 'text-[var(--text-muted)] hover:text-[var(--text)]'
+                : 'text-[var(--text-secondary)] hover:text-[var(--text)]'
                 }`}
             >
               Saved
@@ -154,7 +154,7 @@ export default function UnifiedTopbar({
               href="/chat?new=1"
               className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all ${activeTab === 'ask'
                 ? 'text-[var(--text)] bg-[var(--surface)]'
-                : 'text-[var(--text-muted)] hover:text-[var(--text)]'
+                : 'text-[var(--text-secondary)] hover:text-[var(--text)]'
                 }`}
             >
               Ask
@@ -163,7 +163,7 @@ export default function UnifiedTopbar({
               href="/compare"
               className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all ${activeTab === 'compare'
                 ? 'text-[var(--text)] bg-[var(--surface)]'
-                : 'text-[var(--text-muted)] hover:text-[var(--text)]'
+                : 'text-[var(--text-secondary)] hover:text-[var(--text)]'
                 }`}
             >
               Compare

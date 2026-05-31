@@ -88,7 +88,7 @@ export default function MobileHeader() {
       ) : (
         <>
           {/* Logo — blueprint 3-piece wordmark */}
-          <a href="/" className="flex items-center shrink-0" aria-label="ReviewGuide.Ai home">
+          <a href="/" className="flex items-center shrink-0 min-h-[40px]" aria-label="ReviewGuide.Ai home">
             <Wordmark size={19} />
           </a>
 
@@ -97,11 +97,11 @@ export default function MobileHeader() {
 
           {/* User avatar */}
           <button
-            className="flex w-8 h-8 rounded-full items-center justify-center border transition-all"
+            className="flex w-10 h-10 rounded-full items-center justify-center border transition-all"
             style={{
               background: 'var(--surface)',
               borderColor: 'var(--border)',
-              color: 'var(--text-muted)',
+              color: 'var(--text-secondary)',
             }}
             aria-label="User menu"
           >
