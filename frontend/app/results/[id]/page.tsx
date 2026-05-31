@@ -32,6 +32,16 @@ export default function ResultsPage({ params }: ResultsPageProps) {
   const [resultsData] = useState<ResultsData | null>(() => loadResultsData())
   const [toast, setToast] = useState<string | null>(null)
 
+  // Gate rendering until after mount. resultsData is derived from localStorage —
+  // null during SSR (no localStorage on the server), populated on the client. Without
+  // this guard the server renders null while the client renders the full page → React
+  // hydration mismatch (#418/#423). Returning null until mounted makes the server and
+  // first client paint agree; content renders post-mount. (CLAUDE.md: SSR non-determinism.)
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => {
+    setMounted(true)
+  }, [])
+
   // Redirect to home if no data found
   useEffect(() => {
     if (resultsData === null) {
@@ -50,7 +60,7 @@ export default function ResultsPage({ params }: ResultsPageProps) {
       ? `${window.location.origin}/results/${sessionId}`
       : `/results/${sessionId}`
 
-  if (!resultsData) {
+  if (!mounted || !resultsData) {
     return null
   }
 
