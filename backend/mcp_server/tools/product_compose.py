@@ -522,16 +522,30 @@ async def product_compose(state: Dict[str, Any]) -> Dict[str, Any]:
                 # onto unpriced offers makes the card look as it would with PA-API,
                 # while preserving the Amazon affiliate buy-link. The serper_shopping
                 # offer also remains as its own (true-merchant) retailer line.
-                serper_offer = next(
+                # A "real" price comes from an offer that has both a price and a
+                # trustworthy (non-placeholder) image. Prefer Serper Google Shopping;
+                # otherwise fall back to any such offer — this picks up a live eBay
+                # Browse-API offer while still EXCLUDING eBay's mock placeholder-image
+                # offers, whose synthetic prices must never surface.
+                def _is_real_priced(o):
+                    return (
+                        _extract_price(o) is not None
+                        and "placehold.co" not in (o.get("image_url") or "")
+                    )
+
+                real_src = next(
                     (o for o in all_offers_for_product
-                     if o.get("source") == "serper_shopping" and _extract_price(o)),
+                     if o.get("source") == "serper_shopping" and _is_real_priced(o)),
+                    None,
+                ) or next(
+                    (o for o in all_offers_for_product if _is_real_priced(o)),
                     None,
                 )
-                if serper_offer:
-                    real_price = _extract_price(serper_offer)
-                    real_image = serper_offer.get("image_url", "")
+                if real_src:
+                    real_price = _extract_price(real_src)
+                    real_image = real_src.get("image_url", "")
                     for o in all_offers_for_product:
-                        if o.get("source") == "serper_shopping":
+                        if o is real_src:
                             continue
                         if _extract_price(o) is None:
                             o["price"] = real_price
