@@ -31,12 +31,12 @@ export default function DiscoverSearchBar() {
     >
       <Search
         size={18}
-        style={{ color: 'var(--text-muted)', flexShrink: 0 }}
+        style={{ color: 'var(--ink-2)', flexShrink: 0 }}
         aria-hidden="true"
       />
       <span
         className="text-sm truncate"
-        style={{ color: 'var(--text-muted)' }}
+        style={{ color: 'var(--ink-2)' }}
       >
         Ask anything — best headphones, Tokyo trip, laptop deals...
       </span>

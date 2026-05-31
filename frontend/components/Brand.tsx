@@ -31,7 +31,7 @@ export function WordmarkStatic({ size = 18, showTagline = true }: { size?: numbe
       {tagline && (
         <span
           className="font-sans uppercase"
-          style={{ fontSize: 9, fontWeight: 500, letterSpacing: '0.16em', color: 'var(--ink-3)' }}
+          style={{ fontSize: 9, fontWeight: 500, letterSpacing: '0.16em', color: 'var(--ink-2)' }}
         >
           Ask before you buy
         </span>
@@ -72,7 +72,7 @@ export function HeaderBrand({
             {context}
           </span>
         ) : (
-          <span className="font-sans uppercase" style={{ fontSize: 8, fontWeight: 500, letterSpacing: '0.2em', color: 'var(--ink-3)', marginTop: 2 }}>
+          <span className="font-sans uppercase" style={{ fontSize: 8, fontWeight: 500, letterSpacing: '0.2em', color: 'var(--ink-2)', marginTop: 2 }}>
             Ask before you buy
           </span>
         )}
