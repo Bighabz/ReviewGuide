@@ -10,13 +10,16 @@ import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import ChatContainer from '@/components/ChatContainer'
 import * as chatApi from '@/lib/chatApi'
 import { UI_TEXT } from '@/lib/constants'
+import { STARTER_SETS } from '@/lib/chatStarters'
 
 vi.mock('@/lib/chatApi', () => ({
   streamChat: vi.fn(),
   fetchConversationHistory: vi.fn(),
 }))
 
-const GREETING = 'What are you trying to figure out?'
+// Group B: the empty-state greeting is now drawn from a pool (set 0 on SSR,
+// random on mount). The heading must always be one of these.
+const GREETINGS = STARTER_SETS.map((s) => s.greeting)
 
 describe('ChatContainer (blueprint)', () => {
   beforeEach(() => {
@@ -26,10 +29,13 @@ describe('ChatContainer (blueprint)', () => {
     ;(chatApi.streamChat as Mock).mockResolvedValue(undefined)
   })
 
-  it('renders the blueprint empty-state greeting when there are no messages', async () => {
+  it('renders an empty-state greeting from the starter pool when there are no messages', async () => {
     render(<ChatContainer />)
+    // After mount, useChatStarter may swap set 0 → a random set; the heading
+    // must always be one of the curated greetings.
+    const heading = await screen.findByRole('heading', { level: 1 })
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: new RegExp(GREETING, 'i') })).toBeInTheDocument()
+      expect(GREETINGS).toContain(heading.textContent)
     })
   })
 
