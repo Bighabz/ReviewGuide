@@ -126,17 +126,17 @@ export default function ProductReview({ product }: ProductReviewProps) {
     <div className="rounded-[14px] p-5 shadow-rg-card" style={{ background: 'var(--paper-hi)', border: '1px solid var(--line)' }}>
       {/* Product Header with Image */}
       <div className="mb-4">
-        <div className="flex gap-4">
+        <div className="flex flex-col sm:flex-row gap-4">
           <div className="flex-shrink-0">
             <img
               src={image_url || getFallbackImage(product_name)}
               alt={product_name}
-              className="w-24 h-24 object-contain rounded-[10px]"
+              className="w-16 h-16 sm:w-24 sm:h-24 object-contain rounded-[10px]"
               style={{ background: 'var(--paper-alt)' }}
               loading="lazy"
             />
           </div>
-          <div className="flex-1 min-w-0">
+          <div className="w-full sm:flex-1 sm:min-w-0">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 {roleLabel && (

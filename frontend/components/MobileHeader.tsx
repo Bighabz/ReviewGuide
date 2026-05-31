@@ -53,7 +53,7 @@ export default function MobileHeader() {
           {/* Dynamic title + status */}
           <div className="flex-1 text-center px-2 min-w-0">
             <div
-              className="text-sm font-medium truncate"
+              className="text-sm font-medium line-clamp-2 sm:truncate"
               style={{ color: 'var(--text)' }}
             >
               {sessionTitle}
