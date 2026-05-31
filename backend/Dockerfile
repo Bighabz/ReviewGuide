@@ -24,9 +24,11 @@ FROM python:3.11-slim AS production
 
 WORKDIR /app
 
-# Railway injects RAILWAY_GIT_COMMIT_SHA automatically as a Docker build
-# arg. Declare it here so Docker exposes it; local builds fall back to
-# "unknown". Pass --build-arg RAILWAY_GIT_COMMIT_SHA=<sha> to override.
+# Build-time fallback for the version reported at /health. NOTE: Railway does
+# NOT auto-pass RAILWAY_GIT_COMMIT_SHA as a build arg — it provides the real SHA
+# as a *runtime* env var on GitHub-connected deploys, which the /health endpoint
+# reads first. This ARG only populates GIT_SHA when a build explicitly passes
+# --build-arg RAILWAY_GIT_COMMIT_SHA=<sha>; otherwise it stays "unknown".
 ARG RAILWAY_GIT_COMMIT_SHA=unknown
 ENV GIT_SHA=${RAILWAY_GIT_COMMIT_SHA}
 

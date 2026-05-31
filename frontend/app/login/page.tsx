@@ -3,7 +3,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Lock } from 'lucide-react'
-import Image from 'next/image'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -61,20 +60,18 @@ export default function LoginPage() {
       <div className="bg-white rounded-2xl shadow-2xl p-6 sm:p-8 w-full max-w-md" style={{ boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)' }}>
         {/* Logo and Branding */}
         <div className="text-center mb-6 sm:mb-8 overflow-hidden">
-          <video
-            autoPlay
-            muted
-            playsInline
-            loop
+          {/* Animated WebP (not <video>): always animates inline on mobile —
+              a muted <video> showed a tap-to-play button on iOS. */}
+          <img
+            src="/images/animated_logo.webp"
+            alt="ReviewGuide.ai"
             className="mx-auto w-full"
             style={{
               maxWidth: '100%',
               transform: 'scale(1.5)',
-              transformOrigin: 'center center'
+              transformOrigin: 'center center',
             }}
-          >
-            <source src="/images/animated_logo.mp4" type="video/mp4" />
-          </video>
+          />
           <audio ref={audioRef} src="/images/Animation_Logo_sound.mp3" loop></audio>
         </div>
 

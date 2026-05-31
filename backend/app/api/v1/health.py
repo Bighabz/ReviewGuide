@@ -21,18 +21,22 @@ router = APIRouter()
 def _running_version() -> str:
     """Return the git SHA of the currently-running build.
 
-    Sourced from the ``GIT_SHA`` env var, which is set at container
-    build time via ``Dockerfile`` ``ARG GIT_SHA`` from Railway's
-    ``RAILWAY_GIT_COMMIT_SHA`` build arg (see ``railway.json``).
+    Railway injects ``RAILWAY_GIT_COMMIT_SHA`` as a *runtime* environment
+    variable on GitHub-connected deploys (the primary deploy path) — NOT as
+    a Docker build arg, which is why the build-time ``GIT_SHA`` (Dockerfile
+    ``ARG``) stayed ``"unknown"`` in production. So we read the runtime var
+    first, then fall back to the build-time ``GIT_SHA`` (set when a build
+    passes ``--build-arg``), then ``"unknown"`` (local dev).
 
-    Falls back to ``"unknown"`` for local dev or when the build arg
-    wasn't threaded through. A single curl against ``/health`` can
-    then tell you what's running, which would have saved two cycles
-    of diagnosis on the 2026-05-25 voice incident (Railway hadn't
-    deployed any commit since May 20; the prior hardcoded
-    ``"1.0.0"`` made the SHA-vs-HEAD comparison invisible).
+    A single curl against ``/health`` then tells you the exact running
+    commit — the SHA-vs-HEAD check that was missing during the
+    2026-05-20→25 silent deploy gap.
     """
-    return os.environ.get("GIT_SHA", "unknown")
+    for var in ("RAILWAY_GIT_COMMIT_SHA", "GIT_SHA"):
+        val = os.environ.get(var, "").strip()
+        if val and val.lower() != "unknown":
+            return val
+    return "unknown"
 
 
 class LivenessResponse(BaseModel):
