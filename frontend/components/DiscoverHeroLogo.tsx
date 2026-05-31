@@ -6,10 +6,13 @@
 // (incl. Low Power Mode) blocked muted-video autoplay and showed a play button,
 // so an animated image is the bulletproof fix.
 //
-// The animation has a white background (matching the source video), so we use
-// `mix-blend-mode: multiply` to melt that white into the cream Discover page
-// while keeping the terracotta logo, and scale it up inside an overflow-clipped
-// box to drop the frame's dead whitespace and match the old <LogoHero> footprint.
+// The WebP has a TRANSPARENT background (the white/halo pixels are keyed out via
+// ffmpeg lumakey), so the page's paper color shows through exactly — no visible
+// rectangle, no blend mode. This replaced an earlier `mix-blend-mode: multiply`
+// on a white-background WebP, which rendered inconsistently (mobile Safari showed
+// the raw white as a cold box that didn't match the cream page). It's scaled up
+// inside an overflow-clipped box to drop the frame's dead margin and match the
+// old <LogoHero> footprint.
 //
 // Respects prefers-reduced-motion: swaps to the static recolored wordmark PNG.
 
@@ -54,7 +57,6 @@ export default function DiscoverHeroLogo({ width = 340 }: { width?: number }) {
             top: '50%',
             width: '150%',
             transform: 'translate(-50%, -50%)',
-            mixBlendMode: 'multiply',
           }}
         />
       </div>
