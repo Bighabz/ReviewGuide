@@ -23,7 +23,7 @@ os.environ.setdefault("OPENAI_API_KEY", "test-api-key")
 os.environ.setdefault("RATE_LIMIT_ENABLED", "false")
 os.environ.setdefault("LOG_ENABLED", "false")
 
-from mcp_server.tools.product_compose import product_compose
+from mcp_server.tools.product_compose import product_compose, _parse_budget
 
 
 # ---------------------------------------------------------------------------
@@ -204,6 +204,85 @@ _REVIEW_STATE_WITH_DATA = {
     "last_search_context": {},
     "search_history": [],
 }
+
+
+# ---------------------------------------------------------------------------
+# Budget-ceiling leak: the slot extractor returns budget as a NUMBER, so
+# _parse_budget must accept a numeric (or bare-number) budget as a hard max —
+# otherwise the offer filter is skipped and over-budget items leak through.
+# ---------------------------------------------------------------------------
+
+def test_parse_budget_accepts_numeric_as_ceiling():
+    assert _parse_budget(100) == (None, 100.0)        # the bug case: int from slot extractor
+    assert _parse_budget(249.99) == (None, 249.99)
+    assert _parse_budget(0) == (None, None)           # nonsense → no ceiling
+    assert _parse_budget(-5) == (None, None)
+    assert _parse_budget(True) == (None, None)        # bool must NOT be treated as 1
+
+
+def test_parse_budget_accepts_bare_number_string():
+    assert _parse_budget("100") == (None, 100.0)
+    assert _parse_budget("$100") == (None, 100.0)
+    assert _parse_budget("1,200") == (None, 1200.0)
+
+
+def test_parse_budget_still_parses_qualified_strings():
+    assert _parse_budget("under $500") == (None, 500.0)
+    assert _parse_budget("$100-$200") == (100.0, 200.0)
+    lo, hi = _parse_budget("around $500")
+    assert (lo, hi) == (400.0, 600.0)
+    assert _parse_budget("") == (None, None)
+    assert _parse_budget(None) == (None, None)
+
+
+@pytest.mark.asyncio
+async def test_numeric_budget_filters_over_ceiling_offer():
+    """slots["budget"] = 100 (int, as the slot extractor produces it) must drop an
+    over-budget offer from the card — the budget-ceiling-leak fix."""
+    fake_service = MagicMock()
+    fake_service.generate_compose = AsyncMock(return_value="mock response text")
+
+    state = {
+        "user_message": "best mechanical keyboard under $100",
+        "intent": "product",
+        "slots": {"category": "keyboards", "budget": 100},  # int — the leak trigger
+        "normalized_products": [{"name": "Cheap Keyboard"}],
+        "affiliate_products": {
+            "serper_shopping": [{
+                "product_name": "Cheap Keyboard",
+                "offers": [{
+                    "title": "Cheap Keyboard", "price": 59.99, "currency": "USD",
+                    "url": "https://www.google.com/shopping/product/kb", "merchant": "Walmart",
+                    "image_url": "https://img.example.com/kb.jpg",
+                    "source": "serper_shopping",
+                }],
+            }],
+            "amazon": [{
+                "product_name": "Cheap Keyboard",
+                "offers": [{
+                    "title": "Cheap Keyboard", "price": 159.99, "currency": "USD",
+                    "url": "https://amzn.to/kb", "merchant": "Amazon",
+                    "image_url": "https://img.example.com/amz.jpg",
+                }],
+            }],
+        },
+        "review_data": {},
+        "comparison_html": None,
+        "comparison_data": None,
+        "general_product_info": "",
+        "conversation_history": [],
+        "last_search_context": {},
+        "search_history": [],
+    }
+
+    with patch("app.services.model_service.model_service", fake_service):
+        result = await product_compose(state)
+
+    review_cards = [b for b in result.get("ui_blocks", []) if b.get("type") == "product_review"]
+    assert review_cards, "expected a product_review card"
+    prices = [l.get("price") for l in review_cards[0]["data"]["affiliate_links"]]
+    assert 59.99 in prices, f"in-budget offer missing: {prices}"
+    assert 159.99 not in prices, f"over-budget offer leaked past the ceiling: {prices}"
 
 
 @pytest.mark.asyncio

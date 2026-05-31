@@ -295,13 +295,22 @@ def _parse_budget(budget_str: str) -> tuple:
     Parse a budget string into (min_price, max_price) numeric bounds.
 
     Handles:
+    - numeric input 500 / 500.0 → (None, 500.0)   [slot extractor returns budget as a number]
     - "under $500" / "below $500" / "less than $500" → (None, 500.0)
     - "$100-$200" / "$100 to $200" → (100.0, 200.0)
     - "around $500" / "about $500" / "roughly $500" → (400.0, 600.0)
+    - bare "500" / "$500" / "1,200" → (None, 500.0)   [treated as a max ceiling]
 
     Returns (None, None) when no pattern matches.
     """
     import re
+    # The clarifier/slot extractor returns budget NUMERICALLY (e.g. "under $100" → 100),
+    # so a bare number must be accepted and treated as a hard max ceiling — otherwise
+    # the downstream offer filter is silently skipped and over-budget items leak through.
+    if isinstance(budget_str, bool):
+        return None, None
+    if isinstance(budget_str, (int, float)):
+        return (None, float(budget_str)) if budget_str > 0 else (None, None)
     if not budget_str or not isinstance(budget_str, str):
         return None, None
     # "under $500", "below $500", "less than $500"
@@ -317,6 +326,11 @@ def _parse_budget(budget_str: str) -> tuple:
     if m:
         center = float(m.group(1).replace(',', ''))
         return center * 0.8, center * 1.2
+    # Bare number with no qualifier ("100", "$100", "1,200") — treat as a max ceiling.
+    m = re.fullmatch(r'\s*\$?\s*([\d,]+(?:\.\d+)?)\s*', budget_str)
+    if m:
+        val = float(m.group(1).replace(',', ''))
+        return (None, val) if val > 0 else (None, None)
     return None, None
 
 

@@ -23,7 +23,7 @@ export default function TrendingCards() {
         <div className="rg-eyebrow">Popular this week</div>
         <button
           onClick={() => router.push('/chat?new=1')}
-          className="text-[12px]"
+          className="text-[12px] inline-flex items-center min-h-[40px] px-2 -mr-2"
           style={{ color: 'var(--ink-2)', background: 'none', border: 'none', cursor: 'pointer' }}
         >
           see all
@@ -61,7 +61,7 @@ export default function TrendingCards() {
                 </p>
               </div>
 
-              <ChevronRight size={16} aria-hidden="true" style={{ color: 'var(--ink-3)', flexShrink: 0 }} className="group-hover:text-[var(--terra)] transition-colors" />
+              <ChevronRight size={16} aria-hidden="true" style={{ color: 'var(--ink-2)', flexShrink: 0 }} className="group-hover:text-[var(--terra)] transition-colors" />
             </button>
           )
         })}

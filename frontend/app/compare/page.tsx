@@ -65,7 +65,7 @@ export default function ComparePage() {
     cheaper && pricier && gap != null
       ? gap === 0
         ? `Same price — so it comes down to which one fits your situation better.`
-        : `The ${cheaper.name} saves you $${gap}. The ${pricier.name} is the splurge — worth it only if its edge matters to you.`
+        : `The ${cheaper.name} saves you $${gap.toFixed(2)}. The ${pricier.name} is the splurge — worth it only if its edge matters to you.`
       : `Two solid picks. Open each to see how they stack up on the things you care about.`
 
   return (

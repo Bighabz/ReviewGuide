@@ -54,18 +54,18 @@ export default function ProfilePage() {
       {/* What lives here, eventually */}
       <div className="mt-10">
         <div className="rg-eyebrow">What lives here, eventually</div>
-        <div className="mt-4 space-y-3" style={{ opacity: 0.42 }}>
+        <div className="mt-4 space-y-3">
           {['Your taste profile', 'Budgets & non-negotiables', 'Things you keep coming back to'].map((label) => (
             <div
               key={label}
               className="rounded-[12px] px-4 py-5"
               style={{ border: '1px dashed var(--line-2)' }}
             >
-              <span className="text-[14px] font-medium" style={{ color: 'var(--ink-3)' }}>{label}</span>
+              <span className="text-[14px] font-medium" style={{ color: 'var(--ink-2)' }}>{label}</span>
             </div>
           ))}
         </div>
-        <p className="text-[11px] mt-4" style={{ color: 'var(--ink-3)' }}>
+        <p className="text-[11px] mt-4" style={{ color: 'var(--ink-2)' }}>
           Filled in by your conversations · never by a form.
         </p>
       </div>
