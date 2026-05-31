@@ -269,6 +269,59 @@ async def test_serper_price_backfills_zero_priced_amazon_offer():
         "Amazon affiliate buy-link was dropped"
 
 
+@pytest.mark.asyncio
+async def test_real_price_backfills_from_live_ebay_when_no_serper_match():
+    """When Serper has no match for a product but a LIVE eBay offer (real,
+    non-placeholder image) does, its real price backfills the price-0 Amazon
+    offer. Mock eBay offers (placehold.co image) must NOT be used."""
+    fake_service = MagicMock()
+    fake_service.generate_compose = AsyncMock(return_value="mock response text")
+
+    state = {
+        "user_message": "best wireless earbuds under $100",
+        "intent": "product",
+        "slots": {"category": "earbuds"},
+        "normalized_products": [{"name": "Samsung Galaxy Buds 2"}],
+        "affiliate_products": {
+            "amazon": [{
+                "product_name": "Samsung Galaxy Buds 2",
+                "offers": [{
+                    "title": "Samsung Galaxy Buds 2", "price": 0, "currency": "USD",
+                    "url": "https://amzn.to/galaxybuds", "merchant": "Amazon",
+                    "image_url": "",
+                }],
+            }],
+            # Live eBay Browse-API offer: real price + real (non-placeholder) image.
+            "ebay": [{
+                "product_name": "Samsung Galaxy Buds 2",
+                "offers": [{
+                    "title": "Samsung Galaxy Buds 2", "price": 39.99, "currency": "USD",
+                    "url": "https://www.ebay.com/itm/123", "merchant": "eBay (emilystore)",
+                    "image_url": "https://i.ebayimg.com/images/g/abc/s-l500.jpg",
+                    "source": "ebay",
+                }],
+            }],
+        },
+        "review_data": {},
+        "comparison_html": None,
+        "comparison_data": None,
+        "general_product_info": "",
+        "conversation_history": [],
+        "last_search_context": {},
+        "search_history": [],
+    }
+
+    with patch("app.services.model_service.model_service", fake_service):
+        result = await product_compose(state)
+
+    review_cards = [b for b in result.get("ui_blocks", []) if b.get("type") == "product_review"]
+    assert review_cards, "expected a product_review card"
+    links = review_cards[0]["data"]["affiliate_links"]
+    prices = [l.get("price") for l in links]
+    assert 0 not in prices and 0.0 not in prices, f"a $0 offer survived: {prices}"
+    assert 39.99 in prices, f"live eBay price not backfilled: {prices}"
+
+
 @pytest.fixture
 def capturing_model_service():
     """
