@@ -65,6 +65,59 @@ class TestSerpAPIClient:
         }
 
     @pytest.mark.asyncio
+    async def test_search_shopping_offer_parses_real_price(
+        self,
+        mock_serpapi_shopping_response,
+    ):
+        """search_shopping_offer returns a normalized offer with the price parsed
+        from Serper's "$278.00" string into a float, plus merchant/image fields."""
+        with patch("app.core.config.settings") as mock_settings:
+            mock_settings.SERPAPI_API_KEY = "test-key"
+            mock_settings.SERPAPI_MAX_SOURCES = 8
+            mock_settings.SERPAPI_CACHE_TTL = 86400
+            mock_settings.SERPAPI_TIMEOUT = 15.0
+            mock_settings.REDIS_RETRY_MAX_ATTEMPTS = 1
+            mock_settings.REDIS_RETRY_BACKOFF_BASE = 0.01
+
+            from app.services.serpapi.client import SerpAPIClient
+
+            client = SerpAPIClient()
+            with patch.object(client, "_serper_request", new_callable=AsyncMock,
+                              return_value=mock_serpapi_shopping_response), \
+                 patch("app.core.redis_client.redis_get_with_retry", new_callable=AsyncMock, return_value=None), \
+                 patch("app.core.redis_client.redis_set_with_retry", new_callable=AsyncMock, return_value=True):
+                offer = await client.search_shopping_offer("Sony WH-1000XM5")
+
+            assert offer is not None
+            assert offer["price"] == 278.0          # parsed from "$278.00"
+            assert isinstance(offer["price"], float)
+            assert offer["merchant"] == "Amazon"
+            assert offer["rating"] == 4.7
+            assert offer["review_count"] == 8234
+
+    @pytest.mark.asyncio
+    async def test_search_shopping_offer_no_priced_result_returns_none(self):
+        """When no shopping item has a parseable price, returns None (cached as {})."""
+        with patch("app.core.config.settings") as mock_settings:
+            mock_settings.SERPAPI_API_KEY = "test-key"
+            mock_settings.SERPAPI_MAX_SOURCES = 8
+            mock_settings.SERPAPI_CACHE_TTL = 86400
+            mock_settings.SERPAPI_TIMEOUT = 15.0
+            mock_settings.REDIS_RETRY_MAX_ATTEMPTS = 1
+            mock_settings.REDIS_RETRY_BACKOFF_BASE = 0.01
+
+            from app.services.serpapi.client import SerpAPIClient
+
+            client = SerpAPIClient()
+            with patch.object(client, "_serper_request", new_callable=AsyncMock,
+                              return_value={"shopping": [{"title": "X", "source": "Y"}]}), \
+                 patch("app.core.redis_client.redis_get_with_retry", new_callable=AsyncMock, return_value=None), \
+                 patch("app.core.redis_client.redis_set_with_retry", new_callable=AsyncMock, return_value=True):
+                offer = await client.search_shopping_offer("Obscure Product")
+
+            assert offer is None
+
+    @pytest.mark.asyncio
     async def test_search_reviews_success(
         self,
         mock_serpapi_editorial_response,

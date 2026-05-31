@@ -129,6 +129,7 @@ async def test_affiliate_search_products_parallel_within_provider():
          patch("app.core.config.settings") as mock_settings:
         mock_settings.MAX_AFFILIATE_OFFERS_PER_PRODUCT = 3
         mock_settings.AMAZON_DEFAULT_COUNTRY = "US"
+        mock_settings.ENABLE_SERPAPI = False  # don't trigger Serper enrichment (no network in unit test)
         mock_manager.get_available_providers.return_value = ["mock_provider"]
         mock_manager.get_provider.return_value = mock_provider
 
@@ -168,3 +169,107 @@ async def test_planner_fast_path_includes_review_and_affiliate():
     assert "product_affiliate" in all_tools, (
         f"product_affiliate not found in plan. Tools: {all_tools}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Serper Google Shopping enrichment — the REAL-price source.
+# Affiliate providers run in mock mode (Amazon price=0, eBay placeholder images),
+# so product_affiliate calls Serper /shopping per product and surfaces the result
+# as a `serper_shopping` provider group carrying a real price + image + merchant.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_affiliate_adds_serper_shopping_offers_with_real_price():
+    """When Serper returns a priced shopping offer, product_affiliate adds a
+    `serper_shopping` provider group with that real price/image/merchant."""
+    state = {
+        "normalized_products": [{"title": "Sony WH-1000XM5"}],
+        "slots": {},
+        "last_search_context": {},
+    }
+
+    serper_instance = MagicMock()
+    serper_instance.search_shopping_offer = AsyncMock(return_value={
+        "price": 348.0,
+        "currency": "USD",
+        "merchant": "Amazon",
+        "url": "https://www.google.com/shopping/product/123",
+        "image_url": "https://img.example.com/sony.jpg",
+        "title": "Sony WH-1000XM5",
+        "rating": 4.7,
+        "review_count": 12000,
+    })
+
+    with patch("app.services.affiliate.manager.affiliate_manager") as mock_manager, \
+         patch("app.core.config.settings") as mock_settings, \
+         patch("app.services.serpapi.client.SerpAPIClient", return_value=serper_instance):
+        mock_settings.MAX_AFFILIATE_OFFERS_PER_PRODUCT = 3
+        mock_settings.AMAZON_DEFAULT_COUNTRY = "US"
+        mock_settings.ENABLE_SERPAPI = True
+        mock_settings.SERPAPI_API_KEY = "test-serper-key"
+        # No real affiliate providers — isolate the Serper path.
+        mock_manager.get_available_providers.return_value = []
+
+        result = await product_affiliate(state)
+
+    assert result["success"] is True
+    assert "serper_shopping" in result["affiliate_products"]
+    groups = result["affiliate_products"]["serper_shopping"]
+    assert len(groups) == 1
+    offer = groups[0]["offers"][0]
+    assert offer["price"] == 348.0
+    assert offer["source"] == "serper_shopping"
+    assert offer["image_url"] == "https://img.example.com/sony.jpg"
+    serper_instance.search_shopping_offer.assert_awaited_once_with("Sony WH-1000XM5")
+
+
+@pytest.mark.asyncio
+async def test_affiliate_skips_serper_when_disabled():
+    """ENABLE_SERPAPI=False ⇒ no serper_shopping group, no client constructed."""
+    state = {
+        "normalized_products": [{"title": "Sony WH-1000XM5"}],
+        "slots": {},
+        "last_search_context": {},
+    }
+
+    with patch("app.services.affiliate.manager.affiliate_manager") as mock_manager, \
+         patch("app.core.config.settings") as mock_settings, \
+         patch("app.services.serpapi.client.SerpAPIClient") as mock_client_cls:
+        mock_settings.MAX_AFFILIATE_OFFERS_PER_PRODUCT = 3
+        mock_settings.AMAZON_DEFAULT_COUNTRY = "US"
+        mock_settings.ENABLE_SERPAPI = False
+        mock_settings.SERPAPI_API_KEY = ""
+        mock_manager.get_available_providers.return_value = []
+
+        result = await product_affiliate(state)
+
+    assert "serper_shopping" not in result["affiliate_products"]
+    mock_client_cls.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_affiliate_serper_unpriced_result_is_skipped():
+    """A Serper lookup that returns None (no priced result) adds no group and
+    does not raise."""
+    state = {
+        "normalized_products": [{"title": "Obscure Product"}],
+        "slots": {},
+        "last_search_context": {},
+    }
+
+    serper_instance = MagicMock()
+    serper_instance.search_shopping_offer = AsyncMock(return_value=None)
+
+    with patch("app.services.affiliate.manager.affiliate_manager") as mock_manager, \
+         patch("app.core.config.settings") as mock_settings, \
+         patch("app.services.serpapi.client.SerpAPIClient", return_value=serper_instance):
+        mock_settings.MAX_AFFILIATE_OFFERS_PER_PRODUCT = 3
+        mock_settings.AMAZON_DEFAULT_COUNTRY = "US"
+        mock_settings.ENABLE_SERPAPI = True
+        mock_settings.SERPAPI_API_KEY = "test-serper-key"
+        mock_manager.get_available_providers.return_value = []
+
+        result = await product_affiliate(state)
+
+    assert result["success"] is True
+    assert "serper_shopping" not in result["affiliate_products"]

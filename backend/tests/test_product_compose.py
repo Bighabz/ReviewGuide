@@ -206,6 +206,69 @@ _REVIEW_STATE_WITH_DATA = {
 }
 
 
+@pytest.mark.asyncio
+async def test_serper_price_backfills_zero_priced_amazon_offer():
+    """The real-price fix: when an Amazon offer has price=0 (mock mode, no PA-API)
+    but a serper_shopping offer carries a real price for the same product,
+    product_compose stamps that real price onto the Amazon offer so the card's
+    headline (affiliate_links[0]) shows a real price instead of $0."""
+    # compose calls model_service.generate_compose (awaitable) — mock it so the
+    # parallel LLM batch resolves and card-building is reached.
+    fake_service = MagicMock()
+    fake_service.generate_compose = AsyncMock(return_value="mock response text")
+
+    state = {
+        "user_message": "best wireless earbuds under $100",
+        "intent": "product",
+        "slots": {"category": "earbuds"},
+        "normalized_products": [{"name": "Jabra Elite 3"}],
+        "affiliate_products": {
+            # Amazon offer with a real affiliate link but NO price (mock mode).
+            "amazon": [{
+                "product_name": "Jabra Elite 3",
+                "offers": [{
+                    "title": "Jabra Elite 3", "price": 0, "currency": "USD",
+                    "url": "https://amzn.to/jabra", "merchant": "Amazon",
+                    "image_url": "",
+                }],
+            }],
+            # Serper Google Shopping offer carrying the REAL price + image.
+            "serper_shopping": [{
+                "product_name": "Jabra Elite 3",
+                "offers": [{
+                    "title": "Jabra Elite 3", "price": 79.99, "currency": "USD",
+                    "url": "https://www.google.com/shopping/product/jabra",
+                    "merchant": "Walmart", "image_url": "https://img.example.com/jabra.jpg",
+                    "rating": 4.4, "review_count": 5000, "source": "serper_shopping",
+                }],
+            }],
+        },
+        "review_data": {},
+        "comparison_html": None,
+        "comparison_data": None,
+        "general_product_info": "",
+        "conversation_history": [],
+        "last_search_context": {},
+        "search_history": [],
+    }
+
+    with patch("app.services.model_service.model_service", fake_service):
+        result = await product_compose(state)
+
+    blocks = result.get("ui_blocks", [])
+    review_cards = [b for b in blocks if b.get("type") == "product_review"]
+    assert review_cards, f"expected a product_review card, got block types {[b.get('type') for b in blocks]}"
+
+    links = review_cards[0]["data"]["affiliate_links"]
+    prices = [l.get("price") for l in links]
+    # No surviving offer renders $0 — the real price flowed onto the Amazon offer.
+    assert 0 not in prices and 0.0 not in prices, f"a $0 offer survived: {prices}"
+    assert 79.99 in prices, f"real Serper price not surfaced on the card: {prices}"
+    # The Amazon affiliate link is preserved as a buy option.
+    assert any("amzn.to" in (l.get("affiliate_link") or "") for l in links), \
+        "Amazon affiliate buy-link was dropped"
+
+
 @pytest.fixture
 def capturing_model_service():
     """
