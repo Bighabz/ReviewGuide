@@ -79,6 +79,7 @@ export default function ChatInput({
         <motion.button
           onClick={() => onSend()}
           disabled={disabled || !hasValue}
+          aria-label="Send message"
           className="absolute right-2.5 bottom-2.5 rounded-full w-9 h-9 flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed"
           style={{
             // Always a visible dark-ish circle; full ink once there's text to send

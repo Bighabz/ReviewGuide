@@ -168,7 +168,7 @@ export default function MobileTabBar() {
                 <span
                   style={{
                     fontSize: '10px',
-                    color: isActive ? '#B8543A' : '#9B9B9B',
+                    color: isActive ? '#B8543A' : '#6B6560',
                     fontFamily: 'var(--font-dm-sans, system-ui)',
                     fontWeight: 500,
                     marginTop: '-6px',
@@ -199,12 +199,12 @@ export default function MobileTabBar() {
                   <Icon
                     size={22}
                     strokeWidth={isActive ? 2 : 1.5}
-                    color={isActive ? '#B8543A' : '#9B9B9B'}
+                    color={isActive ? '#B8543A' : '#6B6560'}
                   />
                   <span
                     style={{
                       fontSize: '10px',
-                      color: isActive ? '#B8543A' : '#9B9B9B',
+                      color: isActive ? '#B8543A' : '#6B6560',
                       fontFamily: 'var(--font-dm-sans, system-ui)',
                       fontWeight: 500,
                     }}
@@ -287,12 +287,12 @@ export default function MobileTabBar() {
               <Icon
                 size={22}
                 strokeWidth={isActive ? 2 : 1.5}
-                color={isActive ? '#B8543A' : '#9B9B9B'}
+                color={isActive ? '#B8543A' : '#6B6560'}
               />
               <span
                 style={{
                   fontSize: '10px',
-                  color: isActive ? '#B8543A' : '#9B9B9B',
+                  color: isActive ? '#B8543A' : '#6B6560',
                   fontFamily: 'var(--font-dm-sans, system-ui)',
                   fontWeight: 500,
                 }}
