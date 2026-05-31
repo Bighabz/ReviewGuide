@@ -56,7 +56,10 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
+    <main className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
+      {/* sr-only page title: gives the page an <h1> for screen readers and
+          satisfies axe page-has-heading-one (the logo is an image, not a heading). */}
+      <h1 className="sr-only">Sign in to ReviewGuide.ai</h1>
       <div className="bg-white rounded-2xl shadow-2xl p-6 sm:p-8 w-full max-w-md" style={{ boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)' }}>
         {/* Logo and Branding */}
         <div className="text-center mb-6 sm:mb-8 overflow-hidden">
@@ -137,6 +140,6 @@ export default function LoginPage() {
           <p>Phase 1 Development - Admin Access Only</p>
         </div>
       </div>
-    </div>
+    </main>
   )
 }
