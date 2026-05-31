@@ -11,6 +11,7 @@ import { streamChat, fetchConversationHistory, NextSuggestion, ResponseMetadata 
 import { SUGGESTION_CLICK_PREFIX } from '@/lib/utils'
 import { TRENDING_SEARCHES, UI_TEXT, CHAT_CONFIG } from '@/lib/constants'
 import { saveRecentSearch } from '@/lib/recentSearches'
+import { useChatStarter } from '@/lib/chatStarters'
 import { useStreamReducer } from '@/hooks/useStreamReducer'
 import { TOOL_BLOCK_MAP, BLOCK_SKELETON_CONFIG } from '@/lib/skeletonMap'
 import type { SkeletonBlockType } from '@/components/BlockSkeleton'
@@ -97,6 +98,9 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
   // Cycling verb animation for welcome screen headline
   const [verbIndex, setVerbIndex] = useState(0)
   const [verbVisible, setVerbVisible] = useState(true)
+
+  // Group B: dynamic chat starter content — SSR-stable set 0, random on mount.
+  const starter = useChatStarter()
 
   // Track which message ID is currently being updated (can change if create_new_message is sent)
   const currentMessageIdRef = useRef<string>('')
@@ -775,7 +779,7 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
           <div className="flex flex-col items-center justify-center px-4 lg:pr-28 pt-14 sm:pt-16 pb-10 sm:pb-16">
               {/* Blueprint chat-empty (§7.2): italic-serif greeting, no logo video */}
               <h1 className="rg-display text-center" style={{ fontSize: 30, lineHeight: '34px', color: 'var(--ink)' }}>
-                What are you trying to figure out?
+                {starter.greeting}
               </h1>
               <HeroSubline className="text-center mt-3 max-w-md" style={{ fontSize: 15, color: 'var(--ink-2)' }} />
 
@@ -790,7 +794,7 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
               </div>
 
               <div className="flex flex-wrap justify-center gap-2 mt-4">
-                {['Best wireless earbuds under $100', 'Plan a 5-day trip to Tokyo', 'Compare MacBook Air vs Pro'].map((suggestion, idx) => (
+                {starter.chips.map((suggestion, idx) => (
                   <button
                     key={idx}
                     onClick={() => {
