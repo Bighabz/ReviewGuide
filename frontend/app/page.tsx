@@ -1,7 +1,7 @@
 'use client'
 
 import DiscoverSearchBar from '@/components/discover/DiscoverSearchBar'
-import TrendingCards from '@/components/discover/TrendingCards'
+import TrendingCarousel from '@/components/discover/TrendingCarousel'
 import DiscoverHeroLogo from '@/components/DiscoverHeroLogo'
 import HeroSubline from '@/components/HeroSubline'
 
@@ -23,9 +23,9 @@ export default function DiscoverPage() {
         </div>
       </div>
 
-      {/* Popular this week */}
+      {/* Popular this week — Netflix-style topic carousel → /topic/[slug] */}
       <div className="mt-10">
-        <TrendingCards />
+        <TrendingCarousel />
       </div>
     </div>
   )
