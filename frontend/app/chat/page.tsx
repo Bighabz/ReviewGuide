@@ -163,7 +163,9 @@ function ChatPageContent() {
           §11.6 — no filter chip bars / refinement sidebars on /chat).
           Main content now spans the full viewport width. */}
       <div className="flex-1 flex overflow-hidden relative min-h-0">
-        <main className="flex-1 flex flex-col overflow-hidden min-h-0">
+        {/* Inner wrapper is a plain <div>: NavLayout already renders the page
+            <main> landmark, so a nested <main> here is a duplicate (axe). */}
+        <div className="flex-1 flex flex-col overflow-hidden min-h-0">
           <ErrorBoundary>
             <ChatContainer
               clearHistoryTrigger={clearHistoryTrigger}
@@ -173,7 +175,7 @@ function ChatPageContent() {
               initialDraft={initialDraft}
             />
           </ErrorBoundary>
-        </main>
+        </div>
 
         <ConversationSidebar
           isOpen={conversationSidebarOpen}
