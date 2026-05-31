@@ -123,7 +123,15 @@ export default function MessageList({ messages, isStreaming }: MessageListProps)
   }, [lastAiId])
 
   return (
-    <div ref={containerRef} className="flex-1 overflow-y-auto p-3 sm:p-6 relative">
+    <div
+      ref={containerRef}
+      // The mobile header (block md:hidden) is position:fixed h-12 (48px) and
+      // overlays the top of this scroller. Offset the top padding AND
+      // scroll-padding (so scrollIntoView({block:'start'}) stops the newest
+      // message *below* the header, not clipped under it) on mobile only;
+      // desktop's in-flow UnifiedTopbar needs no offset. 60px = 48 + 12 gap.
+      className="flex-1 overflow-y-auto relative px-3 pb-3 pt-[60px] sm:px-6 sm:pb-6 md:pt-6 scroll-pt-[60px] md:scroll-pt-0"
+    >
       <div className="max-w-4xl mx-auto space-y-4 sm:space-y-6">
         {messages.map((message, idx) => (
           <Message
