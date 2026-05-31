@@ -514,6 +514,33 @@ async def product_compose(state: Dict[str, Any]) -> Dict[str, Any]:
                     })
 
             if all_offers_for_product:
+                # Backfill a REAL price/image from the Serper Google Shopping offer
+                # onto offers that lack them. Affiliate providers run in mock mode
+                # (Amazon price=0 without PA-API), and the Amazon offer sorts first —
+                # so it drives the card's headline price. Without this, that headline
+                # renders "$0". Stamping Serper's real market price + product image
+                # onto unpriced offers makes the card look as it would with PA-API,
+                # while preserving the Amazon affiliate buy-link. The serper_shopping
+                # offer also remains as its own (true-merchant) retailer line.
+                serper_offer = next(
+                    (o for o in all_offers_for_product
+                     if o.get("source") == "serper_shopping" and _extract_price(o)),
+                    None,
+                )
+                if serper_offer:
+                    real_price = _extract_price(serper_offer)
+                    real_image = serper_offer.get("image_url", "")
+                    for o in all_offers_for_product:
+                        if o.get("source") == "serper_shopping":
+                            continue
+                        if _extract_price(o) is None:
+                            o["price"] = real_price
+                        # Only fill EMPTY images (Amazon mock). eBay mock offers keep
+                        # their placehold.co image so the downstream real-offer filter
+                        # still drops them — their synthetic prices must never surface.
+                        if real_image and not o.get("image_url"):
+                            o["image_url"] = real_image
+
                 # Apply budget enforcement: filter out offers exceeding the max price.
                 # If all offers exceed the budget, keep them all so the user still sees results.
                 if budget_max is not None:

@@ -319,6 +319,82 @@ class SerpAPIClient:
             logger.warning(f"[serper] Shopping search failed: {e}")
             return {}
 
+    @staticmethod
+    def _parse_price(price: Any) -> Optional[float]:
+        """Parse a Serper shopping price (e.g. "$278.00", "1,299", 49.99) into a float.
+        Returns None when no positive numeric price can be determined."""
+        if price is None:
+            return None
+        if isinstance(price, (int, float)):
+            return float(price) if price > 0 else None
+        if isinstance(price, str):
+            import re
+            cleaned = re.sub(r"[^\d.]", "", price)
+            try:
+                val = float(cleaned)
+                return val if val > 0 else None
+            except ValueError:
+                return None
+        return None
+
+    async def search_shopping_offer(self, product_name: str) -> Optional[Dict[str, Any]]:
+        """Fetch a single REAL Google Shopping offer for a product via Serper.
+
+        Returns a normalized offer dict with a real price, product image, merchant,
+        and buy-link — or None when no priced result is found.
+
+        Used by product_affiliate to surface real prices/images on product cards:
+        the affiliate providers run in mock mode (Amazon price=0 without PA-API,
+        eBay placeholder images), so this is currently the only real-price source.
+        Results are cached in Redis (same TTL as review bundles).
+        """
+        cached = await self._get_cached_shopping(product_name)
+        if cached is not None:
+            # {} is a sentinel for "looked up, no priced result" — avoids re-querying.
+            return cached or None
+
+        try:
+            results = await self._serper_shopping(product_name)
+            shopping = results.get("shopping", [])
+
+            offer: Optional[Dict[str, Any]] = None
+            for item in shopping:
+                price = self._parse_price(item.get("price"))
+                if price is None:
+                    continue
+
+                rating = None
+                review_count = None
+                if item.get("rating"):
+                    try:
+                        rating = float(item["rating"])
+                    except (ValueError, TypeError):
+                        pass
+                if item.get("ratingCount"):
+                    try:
+                        review_count = int(str(item["ratingCount"]).replace(",", ""))
+                    except (ValueError, TypeError):
+                        pass
+
+                offer = {
+                    "price": price,
+                    "currency": "USD",
+                    "merchant": item.get("source") or "",
+                    "url": item.get("link") or "",
+                    "image_url": item.get("imageUrl") or "",
+                    "title": item.get("title") or product_name,
+                    "rating": rating,
+                    "review_count": review_count,
+                }
+                break
+
+            await self._set_cached_shopping(product_name, offer or {})
+            return offer
+
+        except Exception as e:
+            logger.warning(f"[serper] Shopping offer lookup failed for '{product_name}': {e}")
+            return None
+
     async def _serper_search(self, query: str, num: int = 10) -> Dict[str, Any]:
         """Execute a Google search via Serper.dev."""
         return await self._serper_request(
@@ -395,3 +471,33 @@ class SerpAPIClient:
             await redis_set_with_retry(key, data, ex=self.cache_ttl)
         except Exception as e:
             logger.warning(f"[serper] Cache write failed: {e}")
+
+    @staticmethod
+    def _shopping_cache_key(product_name: str) -> str:
+        """Redis cache key for a Google Shopping offer lookup."""
+        h = hashlib.sha256(product_name.lower().strip().encode()).hexdigest()[:16]
+        return f"serper_shop:{h}"
+
+    async def _get_cached_shopping(self, product_name: str) -> Optional[Dict[str, Any]]:
+        """Get a cached shopping offer from Redis. Returns None on cache miss,
+        or the cached dict ({} sentinel = looked-up-but-no-priced-result)."""
+        try:
+            from app.core.redis_client import redis_get_with_retry
+            data = await redis_get_with_retry(self._shopping_cache_key(product_name))
+            if data is not None:
+                return json.loads(data)
+        except Exception as e:
+            logger.warning(f"[serper] Shopping cache read failed: {e}")
+        return None
+
+    async def _set_cached_shopping(self, product_name: str, offer: Dict[str, Any]) -> None:
+        """Cache a shopping offer ({} when none found) in Redis."""
+        try:
+            from app.core.redis_client import redis_set_with_retry
+            await redis_set_with_retry(
+                self._shopping_cache_key(product_name),
+                json.dumps(offer),
+                ex=self.cache_ttl,
+            )
+        except Exception as e:
+            logger.warning(f"[serper] Shopping cache write failed: {e}")
