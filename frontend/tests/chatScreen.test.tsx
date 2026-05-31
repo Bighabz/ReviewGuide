@@ -64,6 +64,7 @@ vi.mock('lucide-react', () => ({
 }))
 
 import Message from '@/components/Message'
+import MessageList from '@/components/MessageList'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -480,5 +481,29 @@ describe('In-chat Results flow', () => {
       />
     )
     expect(screen.queryByText('Show the full take ↓')).toBeNull()
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CHAT — Message scroller clears the fixed mobile header (header-overlap bug)
+// The mobile header is position:fixed h-12 (48px); the scroller must offset its
+// top padding AND scroll-padding below md so messages (and scrollIntoView's
+// block:'start' landing) are never clipped under it. Desktop (md+) resets.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('CHAT — MessageList clears the fixed mobile header', () => {
+  it('scroll container has the mobile top offset + scroll-padding, reset at md', () => {
+    const { container } = render(
+      <MessageList messages={[makeUserMessage(), makeAssistantMessage()]} />
+    )
+    const scroller = container.querySelector('.overflow-y-auto') as HTMLElement
+    expect(scroller).toBeTruthy()
+    const cls = scroller.className
+    // mobile: pushed below the 48px fixed header (48 + 12 gap)
+    expect(cls).toContain('pt-[60px]')
+    expect(cls).toContain('scroll-pt-[60px]')
+    // desktop: in-flow topbar — no extra offset
+    expect(cls).toContain('md:pt-6')
+    expect(cls).toContain('md:scroll-pt-0')
   })
 })
