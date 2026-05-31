@@ -100,6 +100,17 @@ describe('DiscoverPage — trending cards (DISC-03)', () => {
     // research" CTA (draft=) lives on /topic/[slug], not the carousel.
     expect(calledUrl).toMatch(/^\/topic\//)
   })
+
+  it('renders pagination dots — one per card, exactly one active (the swipe affordance)', () => {
+    render(<DiscoverPage />)
+    const cards = document.querySelectorAll('[data-testid="trending-card"]')
+    const dots = document.querySelectorAll('button[aria-label^="Show "]')
+    // One dot per card.
+    expect(dots.length).toBe(cards.length)
+    // Exactly one dot is current (active) on load.
+    const active = Array.from(dots).filter((d) => d.getAttribute('aria-current') === 'true')
+    expect(active.length).toBe(1)
+  })
 })
 
 // ────────────────────────────────────────────────────────────────
