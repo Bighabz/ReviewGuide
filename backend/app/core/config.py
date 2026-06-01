@@ -153,6 +153,14 @@ class Settings(BaseSettings):
     SERPAPI_MAX_SOURCES: int = Field(default=8, description="Max review sources per product")
     SERPAPI_CACHE_TTL: int = Field(default=86400, description="Redis cache TTL in seconds (24h)")
     SERPAPI_TIMEOUT: float = Field(default=15.0, description="SerpAPI request timeout")
+
+    # Cross-provider failover: the primary review/shopping provider is Serper.dev
+    # (google.serper.dev). When it errors or runs out of credits, fail over to
+    # SerpApi.com (a DIFFERENT service — different endpoint/auth/schema), adapted
+    # back into Serper's response shape. Default off → zero behavior change until a
+    # SerpApi.com key is set and the flag is flipped in prod.
+    SERPAPI_FALLBACK_ENABLED: bool = Field(default=False, description="On Serper.dev error/credit-exhaustion, fail over to SerpApi.com")
+    SERPAPI_COM_API_KEY: str = Field(default="", description="SerpApi.com API key (fallback provider; different service from Serper.dev)")
     ENABLE_REDDIT_API: bool = Field(
         default=False,
         description="Enable Reddit API (Tier 3) - Requires commercial license and user consent"
