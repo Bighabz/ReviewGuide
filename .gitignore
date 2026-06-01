@@ -12,6 +12,9 @@ env/
 dist/
 build/
 
+# Voice bake-off results (backend/eval/README.md)
+backend/eval/results/
+
 ai_prj
 ai_prj.pub
 
