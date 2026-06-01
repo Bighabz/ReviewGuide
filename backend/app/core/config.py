@@ -226,6 +226,14 @@ class Settings(BaseSettings):
     # user message. Default off; flip on after the eval A/B confirms it helps.
     USE_GROUNDED_COMPOSE: bool = Field(default=False, description="Ground the blog compose call via tool_outputs/history/profile slots")
 
+    # Tier 5 / A1 evidence grounding: insert review_search into the STANDARD
+    # product plan (recommendation/comparison) so the composer writes from real
+    # review data (editorial path) instead of invented product names + parametric
+    # knowledge (concierge path). review_search self-gates on ENABLE_SERPAPI, so
+    # this no-ops gracefully where SerpAPI is off. Default off — the ~+8s latency
+    # is opt-in and A/B-able; flip on in prod once the eval confirms the accuracy gain.
+    USE_REVIEW_GROUNDING: bool = Field(default=False, description="Insert review_search into the standard product plan so real review evidence reaches the composer (editorial path). Self-gates on ENABLE_SERPAPI; ~+8s latency.")
+
     # Agent-specific Max Tokens
     PLANNER_MAX_TOKENS: int = Field(default=2000, description="Max tokens for planner agent")
     INTENT_MAX_TOKENS: int = Field(default=50, description="Max tokens for intent agent")

@@ -597,19 +597,29 @@ Example: {{"tools": ["product_search"]}} - this will auto-add normalize, affilia
     def _create_standard_product_plan(self, include_extractor: bool = True) -> Dict[str, Any]:
         """
         Standard plan for comparison and recommendation queries.
-        Pipeline: [extractor →] [product_search ∥ evidence] → normalize → affiliate → compose → suggestions
-        Skips review_search and ranking (faster).
+        Pipeline: [extractor →] [product_search ∥ evidence] → [review_search →] normalize → affiliate → compose → suggestions
+        Skips ranking (faster). review_search is inserted only when
+        USE_REVIEW_GROUNDING is on — it fetches real review evidence (so the
+        composer takes the editorial path) at a ~+8s latency cost, and self-gates
+        on ENABLE_SERPAPI (empty review_data → concierge path, unchanged).
         """
         steps = []
         step_num = 1
         if include_extractor:
             steps.append({"id": f"step_{step_num}", "tools": ["product_extractor"], "parallel": False})
             step_num += 1
+        steps.append({"id": f"step_{step_num}", "tools": ["product_search", "product_evidence"], "parallel": True})
+        step_num += 1
+        # Tier 5 / A1: real review evidence in the standard flow. review_search must
+        # run after product_search (pre-req) and before product_normalize (its
+        # review_data is merged in normalize and flips compose to the editorial path).
+        if self.settings.USE_REVIEW_GROUNDING:
+            steps.append({"id": f"step_{step_num}", "tools": ["review_search"], "parallel": False})
+            step_num += 1
         steps.extend([
-            {"id": f"step_{step_num}", "tools": ["product_search", "product_evidence"], "parallel": True},
-            {"id": f"step_{step_num + 1}", "tools": ["product_normalize"], "parallel": False},
-            {"id": f"step_{step_num + 2}", "tools": ["product_affiliate"], "parallel": False},
-            {"id": f"step_{step_num + 3}", "tools": ["product_compose"], "parallel": False},
+            {"id": f"step_{step_num}", "tools": ["product_normalize"], "parallel": False},
+            {"id": f"step_{step_num + 1}", "tools": ["product_affiliate"], "parallel": False},
+            {"id": f"step_{step_num + 2}", "tools": ["product_compose"], "parallel": False},
         ])
         return {"steps": steps}
 

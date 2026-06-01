@@ -51,6 +51,14 @@ JUDGE_DIMENSIONS: Dict[str, str] = {
         "use case, must-have); an empty string when there is no constraint to frame. "
         "Never restates the question, never lists options."
     ),
+    "claim_support": (
+        "Every factual claim in the body — who a product is for, its strengths and "
+        "weaknesses, ratings, and the relative ranking — is supported by, and does not "
+        "contradict, the evidence the writer was given (shown below). Inventing specs, "
+        "products, or numbers the evidence doesn't carry scores 1; a body whose claims "
+        "all trace to the evidence (synthesis is fine, fabrication is not) scores 5. "
+        "Judge substance, not voice."
+    ),
 }
 
 
@@ -103,7 +111,8 @@ The voice rules card:
 {RULES_CARD}
 
 You will be shown one anonymous candidate response (you do not know which
-model wrote it). Score it 1-5 on each dimension below. Be harsh: 5 means
+model wrote it), preceded by the evidence payload the writer was given (use it
+to score claim_support). Score it 1-5 on each dimension below. Be harsh: 5 means
 "could ship as-is", 3 means "competent but generic", 1 means "violates the
 rule outright". Do not give credit for length or politeness.
 
@@ -135,6 +144,14 @@ Return ONLY a JSON object of this exact shape (no markdown fences):
 {expectations_block}
 
 {transitional_note}
+
+## Evidence the writer was given
+
+This is the exact product/review payload the candidate wrote from. Judge
+claim_support against it: the body's claims must trace to this evidence (synthesis
+is fine; inventing specs, products, or numbers not present here is not).
+
+{case.blog_data}
 
 ## Candidate response
 
