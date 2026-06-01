@@ -124,7 +124,14 @@ class ModelService:
         key so rotating either credential evicts the right cached instances.
         """
         effective_key = api_key or settings.OPENAI_API_KEY
-        fingerprint = hashlib.sha256((effective_key or "").encode()).hexdigest()[:8]
+        # Default (OpenAI) path uses the _api_key_fingerprint property so existing
+        # cache-rotation behaviour and tests are preserved; an explicit api_key
+        # override (e.g. OpenRouter) fingerprints that key instead.
+        fingerprint = (
+            hashlib.sha256(api_key.encode()).hexdigest()[:8]
+            if api_key
+            else self._api_key_fingerprint
+        )
         cache_key = self._canonical_key(model, temperature, max_tokens, json_mode, stream, fingerprint, base_url)
         if cache_key not in self._llm_cache:
             kwargs: dict = {
