@@ -42,7 +42,9 @@ export default function TrendingGrid() {
       </div>
 
       {/* 2-up grid (4 rows × 2 = 8) on mobile/tablet; 4-up (2 rows × 4) on desktop.
-          Scrolls with the page. */}
+          Scrolls with the page. Cards are 4:5 posters below lg and squares on
+          desktop — square keeps the row short enough that a slice of the second
+          row shows above the fold (the "scroll for more" cue). */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {topics.map((topic) => (
           <button
@@ -53,7 +55,7 @@ export default function TrendingGrid() {
             className="group relative overflow-hidden rounded-2xl text-left"
             style={{ boxShadow: 'var(--shadow-float)', border: '1px solid var(--line)', cursor: 'pointer' }}
           >
-            <div className="relative aspect-[4/5]">
+            <div className="relative aspect-[4/5] lg:aspect-square">
               <img
                 src={topic.image}
                 alt={topic.title}
