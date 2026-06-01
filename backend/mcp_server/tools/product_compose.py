@@ -389,6 +389,41 @@ def _synthesize_transitional(user_message: str, slots: Optional[dict]) -> str:
     return ""
 
 
+def _format_history(conversation_history: Optional[list], n: int = 6) -> Optional[str]:
+    """Format the last ``n`` conversation turns for build_system_prompt's history
+    slot. Session-scoped only (the caller passes session history; cross-chat
+    content is forbidden). Returns None when there is nothing to show.
+    """
+    if not conversation_history:
+        return None
+    recent = conversation_history[-n:]
+    lines = [
+        f"{msg.get('role', 'user')}: {msg.get('content', '')[:150]}"
+        for msg in recent
+        if msg.get("content")
+    ]
+    return "\n".join(lines) or None
+
+
+def _profile_inject(user_prefs: Optional[dict]) -> Optional[str]:
+    """Build a one-line personality-profile fragment from accumulated user
+    preferences (past categories / brands) for build_system_prompt's profile
+    slot. Returns None for users with no history — never an empty string, per
+    the build_system_prompt contract.
+    """
+    user_prefs = user_prefs or {}
+    cats = list(user_prefs.get("categories", {}).keys())[:2]
+    brands = list(user_prefs.get("brands", {}).keys())[:2]
+    parts = []
+    if cats:
+        parts.append(f"often searches for {', '.join(cats)}")
+    if brands:
+        parts.append(f"favors {', '.join(brands)}")
+    if not parts:
+        return None
+    return f"Returning user who {' and '.join(parts)}."
+
+
 @tool_error_handler(tool_name="product_compose", error_message="Failed to compose product response")
 async def product_compose(state: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -1011,11 +1046,28 @@ TRANSITIONAL RULES (transitional_reasoning field):
   than skip it.
 - Never restate the question back; never list options; never exceed one sentence."""
 
-        llm_tasks['blog_article'] = model_service.generate_compose(
-            messages=[
+        if getattr(settings, "USE_GROUNDED_COMPOSE", False):
+            # Tier 2.2/2.3: product facts → RESEARCH slot, conversation → history
+            # slot, accumulated prefs → profile slot; the user message is just the
+            # query. The model reads labelled research + who-the-user-is instead of
+            # parsing one undifferentiated string with no memory.
+            blog_messages = [
+                {"role": "system", "content": build_system_prompt(
+                    role_prompt=blog_role,
+                    kind="response",
+                    profile_inject=_profile_inject((state.get("metadata") or {}).get("user_preferences")),
+                    history=_format_history(state.get("conversation_history")),
+                    tool_outputs=blog_data,
+                )},
+                {"role": "user", "content": f'User asked: "{user_message}"'},
+            ]
+        else:
+            blog_messages = [
                 {"role": "system", "content": build_system_prompt(role_prompt=blog_role, kind="response")},
-                {"role": "user", "content": blog_data}
-            ],
+                {"role": "user", "content": blog_data},
+            ]
+        llm_tasks['blog_article'] = model_service.generate_compose(
+            messages=blog_messages,
             temperature=0.7,
             max_tokens=700,
             response_format={"type": "json_object"},

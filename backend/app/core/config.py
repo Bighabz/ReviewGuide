@@ -220,6 +220,12 @@ class Settings(BaseSettings):
     OPENROUTER_API_KEY: str = Field(default="", description="OpenRouter API key (OpenAI-compatible endpoint)")
     OPENROUTER_BASE_URL: str = Field(default="https://openrouter.ai/api/v1", description="OpenRouter base URL")
 
+    # Tier 2.2/2.3 grounding: route product facts through build_system_prompt's
+    # tool_outputs slot and inject conversation history + a user-preference
+    # profile into the blog compose call, instead of cramming everything into the
+    # user message. Default off; flip on after the eval A/B confirms it helps.
+    USE_GROUNDED_COMPOSE: bool = Field(default=False, description="Ground the blog compose call via tool_outputs/history/profile slots")
+
     # Agent-specific Max Tokens
     PLANNER_MAX_TOKENS: int = Field(default=2000, description="Max tokens for planner agent")
     INTENT_MAX_TOKENS: int = Field(default=50, description="Max tokens for intent agent")
