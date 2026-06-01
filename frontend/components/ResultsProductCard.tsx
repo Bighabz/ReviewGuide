@@ -6,6 +6,7 @@ import { ShoppingCart, Bookmark } from 'lucide-react'
 import { lookupCuratedProduct } from '@/lib/curatedProductLookup'
 import type { ExtractedProduct } from '@/lib/extractResultsData'
 import { toggleSaved, isSaved, slugifyProduct, type SavedItem } from '@/lib/savedItems'
+import { stashProductDetail } from '@/lib/productDetail'
 
 interface ResultsProductCardProps {
   product: ExtractedProduct
@@ -87,6 +88,18 @@ export default function ResultsProductCard({ product, index }: ResultsProductCar
         id: slug, name: product.name, price: product.price,
         imageUrl: imageUrl ?? undefined, url: ctaHref, role: roleLabel(index),
       }))
+      // E1: results cards only carry a short description (no pros/cons), so the
+      // detail page shows the summary + buy link and an honest note for the rest.
+      stashProductDetail({
+        id: slug,
+        name: product.name,
+        role: roleLabel(index),
+        summary: product.description,
+        imageUrl: imageUrl ?? undefined,
+        price: product.price,
+        url: ctaHref,
+        buyLinks: ctaHref ? [{ merchant: product.merchant || 'Online', price: product.price, url: ctaHref }] : [],
+      })
     } catch { /* ignore */ }
     router.push(`/product/${slug}`)
   }
