@@ -8,8 +8,11 @@ import HeroSubline from '@/components/HeroSubline'
 export default function DiscoverPage() {
   return (
     <div className="flex flex-col pb-20 px-4 sm:px-6 md:px-8">
-      {/* Hero section — animated intro video (recolored terracotta), then italic-display greeting */}
-      <div className="flex flex-col items-center pt-8 sm:pt-12 pb-8">
+      {/* Hero section — animated intro video (recolored terracotta), then italic-display greeting.
+          The mobile header is a fixed 48px bar that overlays the top; pt-8 tucked the logo
+          partly under it. pt-[76px] (<md) centers the logo between the header and the tagline
+          (~28px gap above, matching the gap below); desktop's in-flow topbar needs no offset. */}
+      <div className="flex flex-col items-center pt-[76px] md:pt-12 pb-8">
         <DiscoverHeroLogo width={340} />
         <h1
           className="rg-display text-center"
