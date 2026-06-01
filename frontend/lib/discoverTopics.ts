@@ -1,12 +1,12 @@
 // Pure data module (server-safe — no React, no 'use client'). The client-only
-// rotation hook lives in components/discover/TrendingCarousel.tsx.
+// rotation hook lives in components/discover/TrendingGrid.tsx.
 
 export interface DiscoverTopic {
   /** URL slug → /topic/[slug]. Kebab-case, stable. */
   slug: string
-  /** Carousel card + landing-page H1. */
+  /** Grid card + landing-page H1. */
   title: string
-  /** Short overlay line on the carousel card (≈4–7 words). */
+  /** Short overlay line on the grid card (≈4–7 words). */
   hook: string
   /** Eyebrow / grouping label. */
   category: string
@@ -14,8 +14,10 @@ export interface DiscoverTopic {
   image: string
   /** Research query seeded into chat from the landing-page CTA. */
   query: string
-  /** Editorial intro shown on the landing page (1–2 sentences). */
+  /** Editorial intro / lede shown on the landing page (1–2 sentences). */
   blurb: string
+  /** Fuller article body for the /topic/[slug] blog page (attached on lookup). */
+  body?: string
 }
 
 // ── Pool of ~50 curated Discover topics ─────────────────────────────────────
@@ -103,7 +105,65 @@ export const DISCOVER_TOPICS: DiscoverTopic[] = [
   { slug: 'boutique-hotels', title: 'Boutique Hotels Worth It', hook: 'Stays you’ll brag about', category: 'Travel', image: '/images/travel/hero-hotel.webp', query: 'Best boutique hotels for a weekend getaway', blurb: 'A great hotel is half the trip. We find the boutique stays with character — the ones that make the weekend feel like a story.' },
 ]
 
-/** Lookup a topic by slug (for the /topic/[slug] landing page). */
+// Blog body per topic (slug → 2-3 sentence editorial). Kept separate from the
+// grid data (which only needs title/hook/image) so getTopicBySlug can attach it
+// for the /topic/[slug] blog page.
+export const TOPIC_BODIES: Record<string, string> = {
+  'noise-cancelling-headphones': 'The gap between “good” and “great” ANC is mostly consistency — how well a pair hushes a steady drone (a plane, an AC unit) versus sudden noise (a voice, a door). Spend on a comfortable clamp and a transparency mode you’ll actually use; skip the “studio sound” marketing unless you mix music. The flagships are worth it for frequent flyers, but the mid-tier has closed most of the gap.',
+  'wireless-earbuds': 'Fit is everything — the best-sounding bud is useless if it falls out on a run or aches after an hour. Look for multiple tip sizes, a secure-but-light fit, and battery that clears your longest stretch without the case. ANC and spatial audio are nice extras, but at this price they’re tie-breakers, not deal-makers.',
+  'bluetooth-speakers': 'Match the speaker to where it lives: a shower or beach speaker needs a real IP rating and a strap, a backyard speaker wants loudness and battery, a desk speaker wants clean mids over thumping bass. Stereo pairing and a mic are nice, but a speaker that survives a drop and a splash beats one with a longer spec sheet.',
+  'home-audio-setup': 'Most rooms are transformed by a soundbar with a real subwoofer or a tidy pair of bookshelf speakers — not by chasing watts. Decide first whether you want one-box simplicity or a small system you can grow, then prioritize room fit and easy inputs. Placement and a sub do more for the sound than the Atmos badge.',
+  'student-laptops': 'For class-to-class life, weight and battery beat raw power. Aim for an all-day battery, a comfortable keyboard, and enough storage for four years; a bright screen matters more than a GPU you’ll rarely tax. Buy the RAM you need up front — most thin laptops can’t be upgraded later.',
+  'creator-laptops': 'Editing and exporting reward sustained performance, not just peak benchmarks — look for strong cooling, fast storage, and a color-accurate screen. RAM and a capable GPU matter for 4K timelines, but a panel that shows true color saves you re-edits. Battery is a trade-off here; the best creator laptops plug in when the work gets serious.',
+  'budget-laptops': 'Under $700 the corners are cut somewhere — the trick is making sure they’re cut where you won’t feel them. Prioritize a decent IPS screen, real storage (256GB+ SSD), and 8–16GB RAM over a slightly faster chip. Skip the cheapest panels and spinning drives; those are the regrets.',
+  'macbook-vs-windows': 'It comes down to your software and your ecosystem, not a spec sheet. macOS wins on battery, trackpad, and resale; Windows wins on price range, ports, gaming, and app breadth. If your key apps run great on both, buy the keyboard, screen, and ecosystem you already live in.',
+  'tablets': 'Be honest about whether you want a couch screen or a laptop replacement. For media and reading, a mid-range tablet with a good screen is plenty; for real work you’re paying for the keyboard, pen, and the OS’s multitasking. The accessories often cost as much as the tablet — budget for the whole kit.',
+  'flagship-phones': 'Flagships separate on camera consistency, battery endurance, and how long they’ll get updates — not megapixels. Decide which camera you’ll actually use and how long you keep a phone; a few extra years of software is worth real money. Almost all of them are fast enough; the differences live in the details.',
+  'budget-phones': 'Sub-$400 phones nail the basics now — the question is which compromise you can live with: the camera, the screen smoothness, or the update window. Prioritize a clean software experience and a couple years of updates. A slower chip you’ll never notice; a phone that stops getting patches you will.',
+  'camera-phones': 'The best phone camera gets the shot right without fuss — good auto processing, reliable night mode, a usable zoom. Extra lenses only help if you’ll use them, so favor a great main sensor over a long spec list. Video quality and stabilization matter more than people expect; check those if you film at all.',
+  'smart-home-starter': 'Start with one ecosystem and a couple of high-payoff devices — a smart speaker, a few bulbs or a plug, maybe a video doorbell — rather than wiring the whole house. Pick the platform your phone already likes so setup stays painless. You can always expand; the magic shows up the first week, under $200.',
+  'robot-vacuums': 'The good ones map your home, dodge furniture and cords, and empty themselves; the cheap ones bump around and get stuck. With pets, prioritize suction and a brush that resists hair tangles, plus a self-empty base. Mopping is a handy bonus on most — fine for light spills, not a replacement for a real mop.',
+  'video-doorbells': 'A doorbell cam is cheap peace of mind, but the subscription is the real cost — check what you lose without it. Look for sharp video, a head-to-toe field of view so you see packages, and alerts that tell people from cars. Wired models are more reliable; battery ones are easier to install.',
+  'smart-thermostats': 'A smart thermostat earns its price by learning your schedule and trimming the times no one’s home. Confirm it works with your HVAC wiring (a C-wire is the common gotcha) before buying. The savings are real over a season, and the remote control on a cold morning is the part you’ll love.',
+  'espresso-machines': 'Your daily café habit pays for a machine by spring — the question is how much fuss you want. Beginner-friendly automatics get you a solid shot with little practice; manual machines reward effort with café-level results. Whatever you pick, a decent grinder matters as much as the machine itself.',
+  'air-fryers': 'The right air fryer earns its counter space nightly, so judge it on crisp, capacity, and cleanup. Basket models crisp best and clean easiest; oven styles fit more but take the counter. Match the size to your household — a too-small basket means batches you’ll resent.',
+  'blenders': 'A cheap blender chops; a good one purées kale into silk and crushes ice without complaint. If you make smoothies daily or hot soups, spend on motor power and blade quality; for the occasional shake a mid-range model is plenty. A jar that’s easy to clean decides whether you actually use it.',
+  'coffee-makers': 'Better mornings come down to consistent temperature and even saturation, not gimmicks. A simple, well-built drip machine beats a feature-stuffed one that brews lukewarm; SCA-certified models guarantee the basics. Decide if you want a carafe for a crowd or single-cup convenience, then keep it simple.',
+  'running-shoes': 'The right shoe depends on your stride, your distance, and where you run — road, trail, or treadmill. Prioritize fit and the right cushioning over color; a shoe that feels great in mile one but punishes you in mile six is the wrong shoe. Replace them on mileage, not looks.',
+  'fitness-smartwatches': 'A tracker is only useful if you’ll wear it, so battery life and comfort matter as much as sensors. Decide what you actually track — steps and sleep, or serious training metrics — and buy to that, not the longest feature list. Accuracy on heart rate and GPS is where the good ones separate from the rest.',
+  'home-gym': 'A small, versatile kit in the garage beats a membership you skip — adjustable dumbbells, a bench, and a few bands cover most goals. Buy gear that scales with you and stores easily; square footage is the real constraint. Spend on the pieces you’ll use every session, not the gadgets you’ll use once.',
+  'exercise-bikes': 'The bike is half the cost — the classes and subscription are the rest, so factor those in. Peloton nails the ecosystem, but several challengers deliver the ride for less if you don’t need the badge. Decide whether you’re buying the community or just the cardio, then shop accordingly.',
+  'mirrorless-cameras': 'Mirrorless gives you near-pro quality in a smaller bag, and the lens system matters more than the body. Pick a mount with the lenses you’ll grow into; a great kit lens and one prime beat a stack of mediocre glass. For beginners, in-body stabilization and reliable autofocus are the features that actually help.',
+  'vlogging-gear': 'Good content is mostly good audio and a camera that flips the screen around — start there before chasing resolution. A small kit (camera, clip mic, compact tripod) punches far above its size. Stabilization and quick autofocus matter more than megapixels when you’re moving and talking.',
+  'action-cameras': 'Mud, surf, and snow are the whole point, so prioritize stabilization, mounts, and a swappable battery. The flagship’s smoothness is worth it for fast motion; otherwise last year’s model is a bargain. Don’t forget the accessories — the right mount makes or breaks the shot.',
+  'gaming-laptops': 'A gaming laptop balances frames, heat, and noise — the best ones run hot games cool without sounding like a jet. Match the GPU to the resolution you’ll actually play at, and value a good cooling design over a flashy lid. Battery is a compromise; these are at their best plugged in.',
+  'gaming-headsets': 'Positional audio wins rounds and a comfortable fit wins marathons, so weigh both. Wireless is freeing if the latency is low; wired never drops and never needs charging. A clear mic matters more than RGB — your teammates will thank you.',
+  'game-consoles': 'The right console is the one with the games you want and the friends you play with — that’s 90% of the decision. Weigh exclusives, online costs, and whether you value portability (Switch) or raw power (PlayStation, Xbox). Pick once, then spend your budget on games.',
+  'everyday-sneakers': 'An everyday sneaker has to go with everything and feel like nothing by hour eight. Favor comfort, a neutral look, and materials that age well over hype drops. The best pair is the one you reach for without thinking.',
+  'winter-coats': 'A great coat is warmth you stop thinking about for years — so judge warmth-to-weight, not bulk. Decide your real conditions (commute cold vs. backcountry cold) and buy the fill and cut for it. A coat that’s warm but unwearable stays in the closet.',
+  'work-bags': 'The right bag protects your laptop and your back without looking like a gym sack. Prioritize a padded sleeve, comfortable straps, and a layout that fits your daily carry — then style. A commute-proof bag you enjoy carrying is worth the premium.',
+  'skincare-starter': 'A great routine is three good products done consistently, not thirty done sporadically — cleanser, moisturizer, sunscreen is the foundation. Add actives slowly, one at a time, so you can tell what’s working. The budget picks dermatologists rate beat the luxury jars more often than not.',
+  'hair-tools': 'The right tool cuts your routine in half and saves your strands from heat damage — look for adjustable heat and even ceramic or ionic plates. Match the tool to your hair type; the priciest dryer isn’t better for everyone. The premium pays off in speed and consistency, not novelty.',
+  'camping-gear': 'A good first kit decides whether it’s “again next weekend” or “never again,” so get the sleep system right — tent, pad, and bag rated for your nights. Favor durable, easy-to-pitch gear over ultralight you’ll fuss with. Weight matters more the farther you carry it; for car camping, comfort wins.',
+  'hiking-boots': 'Blisters end a hike faster than weather, so fit and break-in come first. Match the boot to your terrain and load — light trail shoes for day hikes, sturdier boots for packs and rock. Grip, waterproofing, and a roomy toe box are what you’ll feel mile after mile.',
+  'office-chairs': 'You spend more hours in your chair than your bed, so buy accordingly — adjustable lumbar, seat depth, and armrests save your back at hour eight. Mesh breathes; foam cushions. Test the adjustments you’ll actually use rather than counting levers.',
+  'mattresses': 'The right mattress is one of the cheapest health upgrades you’ll make, and the best one depends on how you sleep — side sleepers want pressure relief, back and stomach sleepers want support. Match firmness to your body and your aches, and use the trial period. Don’t over-index on a showroom’s five-minute test.',
+  'standing-desks': 'A stable, quiet desk changes how a workday feels — wobble at standing height is the dealbreaker, so prioritize a solid frame and smooth motors. Get the height range and width right for your space and monitors. Programmable presets are the small luxury you’ll use every day.',
+  '4k-tvs': 'You don’t need four figures for a stunning picture — under $700, look for good contrast, low input lag for games, and enough brightness for your room. Panel quality and processing matter more than a long feature list. Match the size to your viewing distance; bigger usually beats marginally sharper.',
+  'air-purifiers': 'The right purifier quietly pulls pollen and dust from the room you sleep in — size it to the room (CADR) and check the noise at night. A true HEPA filter is the baseline; the ongoing filter cost is the part people forget. Skip the gimmicks; clean air is mostly fan plus filter done well.',
+  'baby-gear': 'Every list says you need everything — you don’t. Focus the budget on safety-critical, daily-use gear (car seat, a safe sleep space, a stroller that fits your life) and let the rest wait. The first-year regret is usually the gadgets, not the basics.',
+  'kids-tech': 'The best kids’ tech teaches something and survives a toddler — prioritize durability, parental controls, and age-appropriate content over specs. A rugged tablet with good controls beats a fancy one you’re afraid to hand over. Screen time done right is about the software, not the hardware.',
+  'tokyo-guide': 'Tokyo rewards the curious — the best of it is down side streets and in tiny restaurants, not on the must-see list. Base yourself near a major train line, get a transit card on day one, and leave room to wander a neighborhood with no plan. Spring and autumn are sublime but crowded; shoulder weeks are the sweet spot.',
+  'europe-by-rail': 'Trains turn Europe into one walkable city after another — the trick is not over-packing the itinerary. Chain cities a few hours apart, book the scenic high-speed legs ahead, and weigh a rail pass against point-to-point tickets for your route. Slower and deeper beats a blur of stations.',
+  'caribbean-escape': 'Every island has a personality — party, barefoot-luxury, diving, or do-nothing beach — so match it to the trip you actually want. Watch the seasons (hurricane risk vs. peak prices) and decide between an all-inclusive and a villa. The right island makes the planning easy.',
+  'cheap-flights': 'The cheapest seat is rarely the first one you see — flexibility on dates and airports is the biggest lever. Set fare alerts, look a few weeks out for domestic and a couple months for international, and price one-ways separately. The tools do the watching; you just need to pounce.',
+  'mountain-getaways': 'Altitude resets everything — pick a town that matches your pace, from ski-in luxury to quiet trailhead cabins. Weigh the season (powder vs. wildflowers), the drive, and whether you want a resort or a basecamp. The view is the amenity that never disappoints.',
+  'boutique-hotels': 'A great hotel is half the trip — boutique stays trade chain consistency for character and a sense of place. Read recent reviews for the things photos hide (noise, service, the actual room), and book direct for perks. The right stay turns a weekend into a story you tell.',
+}
+
+/** Lookup a topic by slug (for the /topic/[slug] blog page), with its body attached. */
 export function getTopicBySlug(slug: string): DiscoverTopic | undefined {
-  return DISCOVER_TOPICS.find((t) => t.slug === slug)
+  const topic = DISCOVER_TOPICS.find((t) => t.slug === slug)
+  if (!topic) return undefined
+  return { ...topic, body: TOPIC_BODIES[topic.slug] }
 }
