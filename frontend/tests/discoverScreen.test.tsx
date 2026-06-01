@@ -101,15 +101,14 @@ describe('DiscoverPage — trending cards (DISC-03)', () => {
     expect(calledUrl).toMatch(/^\/topic\//)
   })
 
-  it('renders pagination dots — one per card, exactly one active (the swipe affordance)', () => {
+  it('lays the trending cards out in a 2-up grid (no horizontal carousel)', () => {
     render(<DiscoverPage />)
     const cards = document.querySelectorAll('[data-testid="trending-card"]')
-    const dots = document.querySelectorAll('button[aria-label^="Show "]')
-    // One dot per card.
-    expect(dots.length).toBe(cards.length)
-    // Exactly one dot is current (active) on load.
-    const active = Array.from(dots).filter((d) => d.getAttribute('aria-current') === 'true')
-    expect(active.length).toBe(1)
+    expect(cards.length).toBeGreaterThanOrEqual(4)
+    // The cards live inside a 2-column grid container.
+    const grid = cards[0].closest('.grid')
+    expect(grid).toBeTruthy()
+    expect((grid as HTMLElement).className).toContain('grid-cols-2')
   })
 })
 
