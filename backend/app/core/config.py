@@ -206,8 +206,19 @@ class Settings(BaseSettings):
     PLANNER_MODEL: str = Field(default="gpt-4o-mini", description="Model for planner agent")
     INTENT_MODEL: str = Field(default="gpt-4o-mini", description="Model for intent classification agent")
     CLARIFIER_MODEL: str = Field(default="gpt-4o-mini", description="Model for clarifier agent")
-    COMPOSER_MODEL: str = Field(default="gpt-4o-mini", description="Model for composer agents")
+    COMPOSER_MODEL: str = Field(default="gpt-4o-mini", description="Model for composer agents (OpenAI fallback when OpenRouter compose is off/unkeyed)")
     PRODUCT_SEARCH_MODEL: str = Field(default="gpt-4o-mini", description="Model for product search")
+
+    # OpenRouter compose routing. Data-backed: in the voice bake-off (backend/eval),
+    # Claude Haiku 4.5 won on BOTH quality (#1) and latency (~6.8s p50, faster than
+    # gpt-4o-mini's ~9s) and handled json_object cleanly via OpenRouter. Routes ALL
+    # compose calls through OpenRouter's OpenAI-compatible endpoint. Gated on the key:
+    # where OPENROUTER_API_KEY is unset (e.g. an env without it) this no-ops and
+    # compose falls back to COMPOSER_MODEL on OpenAI — so the switch is safe by default.
+    USE_OPENROUTER_COMPOSE: bool = Field(default=True, description="Route compose calls to OpenRouter (OPENROUTER_COMPOSE_MODEL) instead of OpenAI COMPOSER_MODEL")
+    OPENROUTER_COMPOSE_MODEL: str = Field(default="anthropic/claude-haiku-4.5", description="OpenRouter model slug for compose calls (bake-off winner)")
+    OPENROUTER_API_KEY: str = Field(default="", description="OpenRouter API key (OpenAI-compatible endpoint)")
+    OPENROUTER_BASE_URL: str = Field(default="https://openrouter.ai/api/v1", description="OpenRouter base URL")
 
     # Agent-specific Max Tokens
     PLANNER_MAX_TOKENS: int = Field(default=2000, description="Max tokens for planner agent")
