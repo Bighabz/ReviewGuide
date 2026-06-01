@@ -237,7 +237,7 @@ class Settings(BaseSettings):
     # Agent-specific Max Tokens
     PLANNER_MAX_TOKENS: int = Field(default=2000, description="Max tokens for planner agent")
     INTENT_MAX_TOKENS: int = Field(default=50, description="Max tokens for intent agent")
-    CLARIFIER_MAX_TOKENS: int = Field(default=800, description="Max tokens for clarifier agent")
+    CLARIFIER_MAX_TOKENS: int = Field(default=1200, description="Max tokens for clarifier agent (raised from 800 — questions now carry per-category option chips, which roughly doubles the JSON size)")
     COMPOSER_MAX_TOKENS: int = Field(default=1500, description="Max tokens for composer agents (raised from 80 — was truncating JSON output and causing Pydantic parse failures in product_compose)")
     PRODUCT_SEARCH_MAX_TOKENS: int = Field(default=500, description="Max tokens for product search")
 
