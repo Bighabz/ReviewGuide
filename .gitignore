@@ -84,3 +84,6 @@ kishan_frontend/
 # Auto-generated
 frontend/next-env.d.ts
 frontend/tsconfig.tsbuildinfo
+
+# Large design scratch artifact — kept locally, not tracked (2.2MB)
+frontend/design/ReviewGuide standalone.html
