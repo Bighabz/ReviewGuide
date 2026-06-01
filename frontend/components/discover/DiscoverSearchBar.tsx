@@ -1,10 +1,52 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Search } from 'lucide-react'
 
+// Pool of short example queries for the placeholder line. Three show per
+// visit ("Ask anything — a, b, c..."), freshly rotated on each page load.
+// Keep entries short — the line truncates on narrow screens. Add freely.
+export const PLACEHOLDER_EXAMPLES = [
+  'best headphones',
+  'Tokyo trip',
+  'laptop deals',
+  'robot vacuums',
+  'a weekend in Lisbon',
+  'standing desks',
+  '4K TVs under $500',
+  'espresso machines',
+  'running shoes',
+  'noise-cancelling earbuds',
+  'family hotels in Orlando',
+  'air purifiers',
+  'mattresses for back pain',
+  'iPhone vs Pixel',
+  'a beginner road bike',
+]
+
+/**
+ * Returns `count` example queries. SSR + first client paint = the first
+ * `count` in array order (deterministic → no hydration mismatch); the client
+ * shuffles the full pool on mount and shows a fresh trio. Mirrors
+ * HeroSubline.tsx / TrendingGrid.tsx — never call Math.random() during render.
+ */
+function useRotatedExamples(count = 3): string[] {
+  const [examples, setExamples] = useState<string[]>(() => PLACEHOLDER_EXAMPLES.slice(0, count))
+  useEffect(() => {
+    const shuffled = [...PLACEHOLDER_EXAMPLES]
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1))
+      ;[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
+    }
+    setExamples(shuffled.slice(0, count))
+  }, [count])
+  return examples
+}
+
 export default function DiscoverSearchBar() {
   const router = useRouter()
+  const examples = useRotatedExamples(3)
 
   return (
     <button
@@ -38,7 +80,7 @@ export default function DiscoverSearchBar() {
         className="text-sm truncate"
         style={{ color: 'var(--ink-2)' }}
       >
-        Ask anything — best headphones, Tokyo trip, laptop deals...
+        Ask anything — {examples.join(', ')}...
       </span>
     </button>
   )
