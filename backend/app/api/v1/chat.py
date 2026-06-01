@@ -67,6 +67,33 @@ def _sse_event(event_type: str, data: dict, encoder_cls=DateTimeEncoder) -> str:
     return f"event: {safe_type}\ndata: {json_payload}\n\n"
 
 
+def _preference_summary(prefs: Optional[dict]) -> list:
+    """B-phase 3: derive a tiny list of interest keywords (top categories /
+    brands / use-cases) from this user's accumulated preferences, so the
+    frontend can bias the chat empty-state starter toward what they research.
+
+    Privacy: returned only in the requesting user's OWN chat 'done' event —
+    never via an enumerable by-id endpoint. Counts are dropped (keys only).
+    """
+    if not prefs or not isinstance(prefs, dict):
+        return []
+    out: list = []
+    for key in ("categories", "brands", "use_cases"):
+        bucket = prefs.get(key)
+        if isinstance(bucket, dict) and bucket:
+            ranked = sorted(bucket.items(), key=lambda kv: kv[1] if isinstance(kv[1], (int, float)) else 0, reverse=True)
+            out.extend(str(k) for k, _ in ranked[:3] if k)
+    # De-dupe, preserve order, cap.
+    seen: set = set()
+    summary = []
+    for token in out:
+        low = token.lower()
+        if low not in seen:
+            seen.add(low)
+            summary.append(token)
+    return summary[:6]
+
+
 logger = get_logger(__name__)
 colored_logger = get_colored_logger(__name__)
 
@@ -823,6 +850,9 @@ async def generate_chat_stream(
             "user_id": user_id,
             "completeness": "full",  # RFC §1.8: degraded logic deferred to a later phase
             "response_metadata": _response_metadata,  # RFC §2.5 content trust metadata
+            # B-phase 3: the user's own interest keywords, to personalize the
+            # chat empty-state starter on their next visit (privacy-safe — own stream).
+            "preference_summary": _preference_summary(user_preferences),
             # RFC §1.1 — stage-level latency telemetry
             "stage_telemetry": result_state.get("stage_telemetry") or [],
         }

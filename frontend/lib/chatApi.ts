@@ -3,6 +3,8 @@
  * Includes auto-reconnect with exponential backoff
  */
 
+import { cachePreferenceSummary } from '@/lib/userPreferences'
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 // Retry configuration
@@ -72,6 +74,7 @@ export interface StreamChunk {
   error?: string
   session_id?: string
   user_id?: number  // User ID returned by backend for persistence
+  preference_summary?: string[]  // B-phase 3: interest keywords for starter biasing
   status?: string
   intent?: string
   ui_blocks?: any[]
@@ -371,6 +374,9 @@ export async function streamChat({
                 milestones.done_ts = Date.now()
                 sendTelemetry(milestones)
                 // done event: terminal — workflow completed
+                // B-phase 3: cache the user's interest keywords to bias the
+                // chat empty-state starter on their next visit.
+                cachePreferenceSummary(chunk.preference_summary)
                 // Guard: only dispatch RECEIVE_DONE when chunk carries a real session_id,
                 // preventing artifact onComplete callbacks from triggering the FSM transition.
                 if (chunk.session_id) {
