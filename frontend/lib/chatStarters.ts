@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { getRecentSearches } from './recentSearches'
 import { getSavedItems } from './savedItems'
+import { getPreferenceSummary } from './userPreferences'
 
 export interface StarterSet {
   /** Italic-serif headline shown on the chat empty state. */
@@ -86,9 +87,13 @@ function readUserSignal(): string {
   try {
     const recents = getRecentSearches()
     const saved = getSavedItems()
+    // B-phase 3: backend-accumulated interest keywords (top categories/brands),
+    // which survive recent-search rotation and aggregate the user's full history.
+    const prefs = getPreferenceSummary()
     return [
       ...recents.map((r) => `${r.query} ${r.category} ${(r.productNames ?? []).join(' ')}`),
       ...saved.map((i) => `${i.name} ${i.role ?? ''}`),
+      ...prefs,
     ].join(' ')
   } catch {
     return '' // localStorage unavailable (SSR, private browsing)
