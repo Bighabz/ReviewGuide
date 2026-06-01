@@ -9,7 +9,7 @@ import sys
 import os
 import json
 from datetime import datetime
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from urllib.parse import quote_plus
 from app.core.error_manager import tool_error_handler
 
@@ -355,6 +355,40 @@ def _extract_price(offer: dict) -> float | None:
         except ValueError:
             return None
     return None
+
+
+def _synthesize_transitional(user_message: str, slots: Optional[dict], top_pick: str) -> str:
+    """E2: deterministically frame the pick when the query carries a real
+    constraint but the LLM declined to emit transitional_reasoning.
+
+    The LLM is reluctant to produce this aside even on clearly-constrained
+    queries, so when it returns "" we fill it from the parsed budget / explicit
+    use-case slot. Returns "" when there is no constraint to frame — preserving
+    the conservative default for bare "best X" queries.
+    """
+    slots = slots or {}
+
+    # Budget — prefer the structured slot, fall back to parsing the raw message.
+    _, max_b = _parse_budget(slots.get("budget"))
+    if max_b is None:
+        _, max_b = _parse_budget(user_message or "")
+
+    pick = (top_pick or "").strip()
+
+    if max_b and max_b > 0:
+        budget = f"${int(max_b)}" if float(max_b).is_integer() else f"${max_b}"
+        if pick:
+            return f"Under {budget}, value leads over flagship extras — {pick} makes the most of the budget."
+        return f"Under {budget}, the value picks lead — that shapes the shortlist."
+
+    # Use-case — only from an explicit slot, to avoid free-text false positives.
+    use_case = str(slots.get("use_case") or "").strip()
+    if use_case:
+        if pick:
+            return f"For {use_case}, {pick} leads — that focus reshapes the ranking."
+        return f"For {use_case}, the priorities shift — and so does the pick."
+
+    return ""
 
 
 @tool_error_handler(tool_name="product_compose", error_message="Failed to compose product response")
@@ -1393,6 +1427,12 @@ TRANSITIONAL RULES (transitional_reasoning field):
                 # Quiz-path transitional reasoning — emitted only when the latest
                 # constraint changed the shortlist (LLM-judged; empty otherwise).
                 transitional_text = (parsed.get("transitional_reasoning") or "").strip()
+                # E2: the LLM rarely emits this even on clearly-constrained
+                # queries. When it skips one but the query carries a budget /
+                # use-case that shapes the pick, frame it deterministically.
+                if not transitional_text:
+                    lead_pick = blog_product_names[0] if blog_product_names else ""
+                    transitional_text = _synthesize_transitional(user_message, slots, lead_pick)
                 assistant_text = body
                 logger.info(
                     f"[product_compose] LLM blog article: body={len(body)} chars, "
