@@ -6,8 +6,6 @@ from app.core.centralized_logger import get_logger
 import asyncio
 import hashlib
 import json
-import uuid
-from datetime import datetime
 from typing import Optional, Dict, AsyncGenerator
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
@@ -67,6 +65,7 @@ class ModelService:
         json_mode: bool,
         stream: bool,
         api_key_fingerprint: str,
+        base_url: Optional[str] = None,
     ) -> tuple:
         """Build a normalized cache key that avoids spurious misses.
 
@@ -80,7 +79,28 @@ class ModelService:
         model_default = _MODEL_DEFAULTS.get(model, _DEFAULT_MAX_TOKENS)
         effective_max = max_tokens if (max_tokens is not None and max_tokens > 0 and max_tokens < model_default) else None
         effective_temp = round(temperature, 1)
-        return (model, effective_temp, effective_max, json_mode, stream, api_key_fingerprint)
+        return (model, effective_temp, effective_max, json_mode, stream, api_key_fingerprint, base_url)
+
+    @staticmethod
+    def _strip_json_fence(text: str) -> str:
+        """Strip a markdown code fence (```json … ```) wrapping a JSON payload.
+
+        Anthropic models served via OpenRouter emit a fenced block even when
+        ``response_format={"type": "json_object"}`` is requested (OpenRouter
+        cannot enforce OpenAI-style JSON mode on them). product_compose calls
+        ``json.loads`` on the compose output, so the fence must be removed or the
+        blog/descriptions/top_pick parse fails and falls back to raw text.
+        """
+        if not text:
+            return text
+        s = text.strip()
+        if not s.startswith("```"):
+            return s
+        nl = s.find("\n")
+        s = s[nl + 1:] if nl != -1 else s.lstrip("`")
+        if s.rstrip().endswith("```"):
+            s = s.rstrip()[:-3]
+        return s.strip()
 
     def _get_llm(
         self,
@@ -89,23 +109,33 @@ class ModelService:
         max_tokens: Optional[int],
         json_mode: bool,
         stream: bool,
+        base_url: Optional[str] = None,
+        api_key: Optional[str] = None,
     ) -> ChatOpenAI:
         """Get or create a cached ChatOpenAI instance.
 
         Instances are cached by a canonical key (model, temperature, max_tokens,
-        json_mode, stream, api_key_fingerprint) so HTTP connections are reused
-        via the underlying httpx.AsyncClient.
+        json_mode, stream, api_key_fingerprint, base_url) so HTTP connections are
+        reused via the underlying httpx.AsyncClient.
+
+        ``base_url`` + ``api_key`` let a caller target an OpenAI-compatible endpoint
+        other than OpenAI (e.g. OpenRouter for compose). When omitted, the default
+        OpenAI credentials are used. The fingerprint is derived from the *effective*
+        key so rotating either credential evicts the right cached instances.
         """
-        fingerprint = self._api_key_fingerprint
-        cache_key = self._canonical_key(model, temperature, max_tokens, json_mode, stream, fingerprint)
+        effective_key = api_key or settings.OPENAI_API_KEY
+        fingerprint = hashlib.sha256((effective_key or "").encode()).hexdigest()[:8]
+        cache_key = self._canonical_key(model, temperature, max_tokens, json_mode, stream, fingerprint, base_url)
         if cache_key not in self._llm_cache:
             kwargs: dict = {
                 "model": model,
-                "openai_api_key": settings.OPENAI_API_KEY,
+                "openai_api_key": effective_key,
                 "streaming": stream,
                 "request_timeout": 12,    # Hard cap: no single LLM call waits > 12s
                 "max_retries": 1,         # One retry on transient failure (12s × 2 = 24s worst case, fits 15s tool timeout on first attempt)
             }
+            if base_url:
+                kwargs["openai_api_base"] = base_url
             # o3 models don't support temperature parameter
             if not model.startswith("o3"):
                 kwargs["temperature"] = temperature
@@ -173,6 +203,38 @@ class ModelService:
         OpenAI path. This keeps the call sites in product_compose / general_compose
         working whether or not the Anthropic flag is set.
         """
+        # OpenRouter compose route (data-backed: Haiku 4.5 won the voice bake-off on
+        # quality + latency and handles json_object cleanly via OpenRouter). Takes
+        # precedence over the native-Anthropic path and, unlike it, passes
+        # response_format through. No-ops when unkeyed → OpenAI fallback below.
+        use_openrouter = (
+            getattr(settings, "USE_OPENROUTER_COMPOSE", False)
+            and getattr(settings, "OPENROUTER_API_KEY", "")
+        )
+        if use_openrouter:
+            model_name = getattr(settings, "OPENROUTER_COMPOSE_MODEL", "anthropic/claude-haiku-4.5")
+            content = await self.generate(
+                messages=messages,
+                model=model_name,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                agent_name=agent_name,
+                session_id=session_id,
+                response_format=response_format,
+                callbacks=callbacks,
+                base_url=settings.OPENROUTER_BASE_URL,
+                api_key=settings.OPENROUTER_API_KEY,
+            )
+            # OpenRouter-served Anthropic models wrap JSON in a ```json fence even
+            # in json_object mode; strip it so downstream json.loads succeeds.
+            if response_format and response_format.get("type") == "json_object":
+                content = self._strip_json_fence(content)
+            logger.info(json.dumps({
+                "event": "model_call", "agent": agent_name or "unknown",
+                "model": model_name, "session_id": session_id, "provider": "openrouter",
+            }))
+            return content
+
         use_anthropic = (
             getattr(settings, "USE_ANTHROPIC_COMPOSE", False)
             and getattr(settings, "ANTHROPIC_API_KEY", "")
@@ -234,12 +296,26 @@ class ModelService:
                 messages=messages, temperature=temperature,
                 max_tokens=max_tokens, agent_name=agent_name,
             )
+        use_openrouter = (
+            getattr(settings, "USE_OPENROUTER_COMPOSE", False)
+            and getattr(settings, "OPENROUTER_API_KEY", "")
+        )
         use_anthropic = (
             getattr(settings, "USE_ANTHROPIC_COMPOSE", False)
             and getattr(settings, "ANTHROPIC_API_KEY", "")
         )
         try:
-            if use_anthropic:
+            if use_openrouter:
+                llm = self._get_llm(
+                    model=settings.OPENROUTER_COMPOSE_MODEL,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    json_mode=False,
+                    stream=True,
+                    base_url=settings.OPENROUTER_BASE_URL,
+                    api_key=settings.OPENROUTER_API_KEY,
+                )
+            elif use_anthropic:
                 llm = self.get_compose_model()
             else:
                 llm = self._get_llm(model=settings.COMPOSER_MODEL, temperature=temperature)
@@ -313,6 +389,8 @@ class ModelService:
             session_id: Optional[str] = None,
             response_format: Optional[Dict[str, str]] = None,
             callbacks: Optional[list] = None,
+            base_url: Optional[str] = None,
+            api_key: Optional[str] = None,
     ) -> str | AsyncGenerator[str, None]:
         """
         Generate completion with unified Langfuse tracing via callbacks.
@@ -348,7 +426,7 @@ class ModelService:
 
             # Get cached LLM instance (enables HTTP connection pooling)
             json_mode = bool(response_format and response_format.get("type") == "json_object")
-            llm = self._get_llm(model, temperature, max_tokens, json_mode, stream)
+            llm = self._get_llm(model, temperature, max_tokens, json_mode, stream, base_url=base_url, api_key=api_key)
 
             # Log API input (YELLOW)
             colored_logger.api_input(
