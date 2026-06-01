@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { ExternalLink, Star, Bookmark } from 'lucide-react'
 import { toggleSaved, isSaved, slugifyProduct, type SavedItem } from '@/lib/savedItems'
+import { stashProductDetail } from '@/lib/productDetail'
 
 // Bookmark toggle — terra fill when saved, pop + ring on tap, no toast.
 function SaveToggle({ item }: { item: Omit<SavedItem, 'savedAt'> }) {
@@ -113,11 +114,29 @@ export default function ProductReview({ product }: ProductReviewProps) {
 
   function openDetail() {
     try {
+      // Basic payload (back-compat + bookmark fallback).
       sessionStorage.setItem('active_product', JSON.stringify({
         id: slug, name: product_name,
         price: firstLink?.price, imageUrl: image_url, url: firstLink?.affiliate_link,
         role: roleLabel,
       }))
+      // E1: full analysis handoff so /product/[id] renders real sections.
+      stashProductDetail({
+        id: slug,
+        name: product_name,
+        role: roleLabel,
+        rating,
+        summary,
+        imageUrl: image_url,
+        price: firstLink?.price,
+        url: firstLink?.affiliate_link,
+        features: Array.isArray(features) ? features : [],
+        pros: (pros ?? []).map((p) => ({ description: p.description, citations: p.citations })),
+        cons: (cons ?? []).map((c) => ({ description: c.description, citations: c.citations })),
+        buyLinks: (affiliate_links ?? []).map((l) => ({
+          merchant: l.merchant, price: l.price, url: l.affiliate_link,
+        })),
+      })
     } catch { /* ignore */ }
     router.push(`/product/${slug}`)
   }
