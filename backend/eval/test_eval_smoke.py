@@ -172,6 +172,29 @@ def test_judge_messages_are_blind_and_complete():
     assert output["follow_up_question"] in combined
 
 
+def test_judge_scores_claim_support_against_evidence():
+    """The claim_support dimension (Tier 5 / A1) must be scored, and the judge
+    must be shown the evidence payload so it can actually verify the claims."""
+    case = CASES_BY_ID["earbuds_under_100"]
+    output = json.loads(KNOWN_GOOD_OUTPUT)
+    messages = build_judge_messages(case, output)
+    combined = messages[0]["content"] + messages[1]["content"]
+
+    # The new dimension is in the rubric...
+    assert "claim_support" in JUDGE_DIMENSIONS
+    assert "claim_support" in combined
+    # ...and the writer's evidence is shown so claim_support is verifiable.
+    assert case.blog_data in messages[1]["content"]
+
+    # The judge response must carry a claim_support score (parse iterates the rubric).
+    fake_response = json.dumps({
+        "scores": {dim: {"score": 4, "rationale": "fine"} for dim in JUDGE_DIMENSIONS}
+    })
+    scores = parse_judge_response(fake_response)
+    assert scores is not None
+    assert "claim_support" in scores
+
+
 def test_judge_response_parsing_round_trip():
     fake_response = json.dumps({
         "scores": {dim: {"score": 4, "rationale": "fine"} for dim in JUDGE_DIMENSIONS}
