@@ -27,6 +27,10 @@ from app.core.centralized_logger import get_logger
 
 logger = get_logger(__name__)
 
+# SerpApi.com fallback endpoint (a different provider from Serper.dev — used only
+# when Serper.dev errors/runs out of credits and failover is configured).
+SERPAPI_COM_URL = "https://serpapi.com/search.json"
+
 # Trusted source authority scores (higher = more authoritative)
 TRUSTED_SOURCES: Dict[str, float] = {
     "wirecutter.com": 0.95,
@@ -169,6 +173,9 @@ class SerpAPIClient:
         self.max_sources = settings.SERPAPI_MAX_SOURCES
         self.cache_ttl = settings.SERPAPI_CACHE_TTL
         self.timeout = settings.SERPAPI_TIMEOUT
+        # Cross-provider failover (Serper.dev primary → SerpApi.com on error/credit-exhaustion)
+        self.fallback_enabled = settings.SERPAPI_FALLBACK_ENABLED
+        self.serpapi_com_key = settings.SERPAPI_COM_API_KEY
 
     async def search_reviews(
         self,
@@ -205,11 +212,13 @@ class SerpAPIClient:
             # Merge results
             all_sources: List[ReviewSource] = []
             shopping_data: Dict[str, Any] = {}
+            had_provider_error = False
 
             for i, result in enumerate(results):
                 if isinstance(result, Exception):
                     search_names = ["editorial", "reddit", "shopping"]
                     logger.warning(f"[serper] {search_names[i]} search failed: {result}")
+                    had_provider_error = True
                     continue
                 if i < 2:
                     all_sources.extend(result)
@@ -251,8 +260,18 @@ class SerpAPIClient:
                 consensus="",
             )
 
-            # Cache result
-            await self._set_cached(product_name, category, bundle)
+            # Cache result — but NEVER cache an empty bundle that resulted from a
+            # provider error (e.g. Serper.dev out of credits with no fallback). The
+            # 24h TTL would otherwise mask the fix for a full day per product. A
+            # genuinely-empty result (searches succeeded, just no reviews) is still
+            # cached to avoid re-querying obscure products.
+            if unique_sources or not had_provider_error:
+                await self._set_cached(product_name, category, bundle)
+            else:
+                logger.warning(
+                    f"[serper] Not caching empty bundle for '{product_name}' — provider error "
+                    "(avoiding 24h cache poisoning)"
+                )
 
             logger.info(
                 f"[serper] Found {len(unique_sources)} sources for '{product_name}' "
@@ -404,18 +423,30 @@ class SerpAPIClient:
             return None
 
     async def _serper_search(self, query: str, num: int = 10) -> Dict[str, Any]:
-        """Execute a Google search via Serper.dev."""
-        return await self._serper_request(
-            "https://google.serper.dev/search",
-            {"q": query, "num": num},
-        )
+        """Execute a Google search via Serper.dev, failing over to SerpApi.com on error."""
+        try:
+            return await self._serper_request(
+                "https://google.serper.dev/search",
+                {"q": query, "num": num},
+            )
+        except Exception as e:
+            self._log_provider_failure(e)
+            if self._should_failover(e):
+                return await self._serpapi_com_search(query, num)
+            raise
 
     async def _serper_shopping(self, query: str) -> Dict[str, Any]:
-        """Execute a Google Shopping search via Serper.dev."""
-        return await self._serper_request(
-            "https://google.serper.dev/shopping",
-            {"q": query, "num": 5},
-        )
+        """Execute a Google Shopping search via Serper.dev, failing over to SerpApi.com on error."""
+        try:
+            return await self._serper_request(
+                "https://google.serper.dev/shopping",
+                {"q": query, "num": 5},
+            )
+        except Exception as e:
+            self._log_provider_failure(e)
+            if self._should_failover(e):
+                return await self._serpapi_com_shopping(query)
+            raise
 
     async def _serper_request(self, url: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Make async POST request to Serper.dev."""
@@ -432,6 +463,104 @@ class SerpAPIClient:
             )
             response.raise_for_status()
             return response.json()
+
+    # ------------------------------------------------------------------
+    # Cross-provider failover (Serper.dev → SerpApi.com)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _is_credit_exhaustion(exc: Exception) -> bool:
+        """True if exc is a Serper.dev 400 'Not enough credits' response."""
+        import httpx
+
+        if not isinstance(exc, httpx.HTTPStatusError) or exc.response is None:
+            return False
+        if exc.response.status_code != 400:
+            return False
+        try:
+            body = exc.response.text or ""
+        except Exception:
+            body = ""
+        return "credit" in body.lower()
+
+    def _log_provider_failure(self, exc: Exception) -> None:
+        """Loudly surface a primary-provider failure so it can't degrade silently.
+
+        Credit-exhaustion is the one we keep hitting (account runs dry → reviews and
+        prices quietly fall back to empty), so it gets an unmissable WARNING whether or
+        not failover is configured.
+        """
+        if self._is_credit_exhaustion(exc):
+            logger.warning(
+                "[serper] OUT OF CREDITS on Serper.dev — review/price evidence degraded. "
+                "%s", "Failing over to SerpApi.com." if (self.fallback_enabled and self.serpapi_com_key)
+                else "No SerpApi.com fallback configured (SERPAPI_FALLBACK_ENABLED / SERPAPI_COM_API_KEY)."
+            )
+        else:
+            logger.warning(f"[serper] Serper.dev request failed: {type(exc).__name__}: {exc}")
+
+    def _should_failover(self, exc: Exception) -> bool:
+        """Fail over to SerpApi.com only when configured AND the error is a provider
+        error worth retrying elsewhere (HTTP status — credits/auth/rate-limit — or a
+        network/timeout error). Non-provider bugs re-raise unchanged."""
+        if not (self.fallback_enabled and self.serpapi_com_key):
+            return False
+        import httpx
+
+        return isinstance(exc, (httpx.HTTPStatusError, httpx.RequestError))
+
+    async def _serpapi_com_search(self, query: str, num: int = 10) -> Dict[str, Any]:
+        """Google search via SerpApi.com, mapped into Serper.dev's organic shape."""
+        data = await self._serpapi_com_request({"engine": "google", "q": query, "num": num})
+        organic = [
+            {
+                "link": item.get("link", ""),
+                "title": item.get("title", ""),
+                "snippet": item.get("snippet", ""),
+                "date": item.get("date"),
+            }
+            for item in data.get("organic_results", [])
+        ]
+        logger.info(f"[serpapi.com] search returned {len(organic)} organic results for '{query}'")
+        return {"organic": organic}
+
+    async def _serpapi_com_shopping(self, query: str) -> Dict[str, Any]:
+        """Google Shopping via SerpApi.com, mapped into Serper.dev's shopping shape
+        (so _search_shopping / search_shopping_offer parse it unchanged)."""
+        data = await self._serpapi_com_request({"engine": "google_shopping", "q": query})
+        shopping = []
+        for item in data.get("shopping_results", []):
+            # SerpApi.com gives price as "$278.00" (price) and/or 278.0 (extracted_price);
+            # _parse_price handles either, so pass whichever is present.
+            price = item.get("price")
+            if price is None:
+                price = item.get("extracted_price")
+            shopping.append({
+                "title": item.get("title", ""),
+                "price": price,
+                "rating": item.get("rating"),
+                "ratingCount": item.get("reviews"),
+                "source": item.get("source", ""),
+                "link": item.get("product_link") or item.get("link", ""),
+                "imageUrl": item.get("thumbnail", ""),
+            })
+        logger.info(f"[serpapi.com] shopping returned {len(shopping)} results for '{query}'")
+        return {"shopping": shopping}
+
+    async def _serpapi_com_request(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Make async GET request to SerpApi.com (api_key as a query param)."""
+        import httpx
+
+        full_params = {**params, "api_key": self.serpapi_com_key}
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await client.get(SERPAPI_COM_URL, params=full_params)
+            response.raise_for_status()
+            data = response.json()
+        # SerpApi.com signals failures (bad key, exhausted plan) via an "error" body
+        # with HTTP 200 — surface it as an exception so the dual-failure path stays graceful.
+        if isinstance(data, dict) and data.get("error"):
+            raise RuntimeError(f"SerpApi.com error: {data['error']}")
+        return data
 
     def _parse_organic_results(self, results: Dict[str, Any]) -> List[ReviewSource]:
         """Parse Serper organic results into ReviewSource objects."""
