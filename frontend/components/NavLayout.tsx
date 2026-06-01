@@ -64,18 +64,23 @@ export default function NavLayout({ children }: NavLayoutProps) {
             overflow-y-auto added 2026-04-21 to fix desktop overflow at ≤1200px-tall viewports:
             without it, content taller than (viewport - topbar - footer) overflowed main and
             rendered behind the footer. Chat page's inner h-full overflow-hidden prevents
-            double-scroll; homepage/browse use main's scroll. */}
+            double-scroll; homepage/browse use main's scroll.
+
+            The footer lives INSIDE main (last child) so it scrolls with the page content
+            instead of staying pinned to the viewport. This pairs with app/template.tsx
+            using min-h-full on non-chat routes: the page wrapper fills the screen on short
+            pages but grows on long ones, keeping the footer at the true bottom. */}
         <main className="flex-1 min-h-0 overflow-y-auto pb-[calc(64px+env(safe-area-inset-bottom))] md:pb-0">
           {children}
-        </main>
 
-        {/* Desktop: Footer (hidden on mobile, and hidden on /chat so the chat
-            welcome screen + input can fill the viewport). */}
-        {!isChat && (
-          <div className="hidden md:block">
-            <Footer />
-          </div>
-        )}
+          {/* Desktop: Footer (hidden on mobile, and hidden on /chat so the chat
+              welcome screen + input can fill the viewport). */}
+          {!isChat && (
+            <div className="hidden md:block">
+              <Footer />
+            </div>
+          )}
+        </main>
 
         {/* Mobile: MobileTabBar (hidden on desktop) */}
         <div className="block md:hidden">

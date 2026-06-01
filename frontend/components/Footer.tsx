@@ -3,7 +3,7 @@ import Link from 'next/link'
 export default function Footer() {
   return (
     <footer className="w-full border-t border-[var(--border)] bg-[var(--surface)]">
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10 sm:py-12">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
         {/* Three-column grid */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-8 sm:gap-12">
           {/* Brand */}
@@ -56,14 +56,14 @@ export default function Footer() {
         </div>
 
         {/* Prominent Affiliate Disclosure */}
-        <div className="mt-8 pt-6 border-t border-[var(--border)]">
+        <div className="mt-3 pt-3 border-t border-[var(--border)]">
           <p className="text-sm text-[var(--text-secondary)] leading-relaxed max-w-3xl">
             ReviewGuide.ai participates in affiliate marketing programs, including the Amazon Associates program. We may earn commissions when you purchase products through links on our site, at no additional cost to you. Our recommendations are generated independently and are not influenced by affiliate partnerships.
           </p>
         </div>
 
         {/* Copyright */}
-        <div className="mt-6 pt-4 border-t border-[var(--border)]">
+        <div className="mt-3 pt-3 border-t border-[var(--border)]">
           <p className="text-xs text-[var(--text-muted)]">
             &copy; {new Date().getFullYear()} ReviewGuide.ai. All rights reserved.
           </p>

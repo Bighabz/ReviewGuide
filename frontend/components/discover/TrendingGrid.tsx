@@ -41,8 +41,9 @@ export default function TrendingGrid() {
         <div className="rg-eyebrow">Popular this week</div>
       </div>
 
-      {/* 2-up grid — scrolls with the page (4 rows × 2 = 8) */}
-      <div className="grid grid-cols-2 gap-3">
+      {/* 2-up grid (4 rows × 2 = 8) on mobile/tablet; 4-up (2 rows × 4) on desktop.
+          Scrolls with the page. */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {topics.map((topic) => (
           <button
             key={topic.slug}
