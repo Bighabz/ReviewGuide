@@ -78,13 +78,40 @@ export default function Message({ message, isLast = false }: MessageProps) {
     [message.next_suggestions]
   )
 
-  // Update relative timestamp every minute
+  // Update relative timestamp every minute.
+  // D3 (perf): in a long thread every message keeps its own 60s ticker; pause
+  // them while the tab is hidden (and resync on return) so a backgrounded chat
+  // does no per-minute work.
   useEffect(() => {
-    const interval = setInterval(() => {
-      setRelativeTime(formatTimestamp(message.timestamp))
-    }, 60000) // Update every minute
-
-    return () => clearInterval(interval)
+    let interval: ReturnType<typeof setInterval> | null = null
+    const tick = () => setRelativeTime(formatTimestamp(message.timestamp))
+    const start = () => {
+      if (!interval) interval = setInterval(tick, 60000)
+    }
+    const stop = () => {
+      if (interval) {
+        clearInterval(interval)
+        interval = null
+      }
+    }
+    const onVisibility = () => {
+      if (typeof document === 'undefined' || document.visibilityState === 'visible') {
+        tick() // resync the time we missed while hidden
+        start()
+      } else {
+        stop()
+      }
+    }
+    onVisibility()
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', onVisibility)
+    }
+    return () => {
+      stop()
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', onVisibility)
+      }
+    }
   }, [message.timestamp])
 
   const handleCopy = async () => {
