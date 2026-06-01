@@ -491,7 +491,7 @@ def write_csv(results: List[CaseResult], path: Path) -> None:
         "generic_follow_up", "body_word_count", "over_word_cap", "latency_s",
         "error", "notes", *JUDGE_DIMENSIONS, "mean_judge",
     ]
-    with path.open("w", newline="") as f:
+    with path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         for r in results:
@@ -630,7 +630,7 @@ async def run(args: argparse.Namespace) -> int:
     md_path = RESULTS_DIR / f"{timestamp}.md"
     csv_path = RESULTS_DIR / f"{timestamp}.csv"
 
-    md_path.write_text(render_report(results, models, cases, judge_model, timestamp))
+    md_path.write_text(render_report(results, models, cases, judge_model, timestamp), encoding="utf-8")
     write_csv(results, csv_path)
 
     print(f"\nReport: {md_path}")

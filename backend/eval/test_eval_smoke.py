@@ -32,7 +32,7 @@ def test_blog_role_in_sync_with_production():
     If this fails, someone edited the production prompt — copy the new text
     into voice_eval.BLOG_ROLE so the bake-off keeps measuring the real prompt.
     """
-    source = (_BACKEND_DIR / "mcp_server" / "tools" / "product_compose.py").read_text()
+    source = (_BACKEND_DIR / "mcp_server" / "tools" / "product_compose.py").read_text(encoding="utf-8")
     match = re.search(r'blog_role = """(.*?)"""', source, re.DOTALL)
     assert match, "Could not find blog_role triple-quoted string in product_compose.py"
     assert match.group(1) == BLOG_ROLE, (
