@@ -961,13 +961,22 @@ FOLLOW-UP RULES:
 - Must NOT be a bulleted list of multiple questions — just one single question
 
 TRANSITIONAL RULES (transitional_reasoning field):
-- This is a single, compressed-consensus sentence shown BEFORE the guide, as a brief
-  aside, ONLY when the user's most recent message added a constraint (a budget, a use
-  case, a must-have) that MEANINGFULLY changed which products lead the ranking.
-- Voice: "$X puts the [tier] on the table — that changes the pick for [situation]." or
-  "Once comfort matters more than ANC, the order flips." One sentence, no preamble.
-- Return an EMPTY STRING "" on routine confirmations, greetings, or first-turn queries
-  where no prior shortlist existed to change. When in doubt, return "".
+- This is a single, compressed-consensus sentence shown BEFORE the guide as a brief
+  aside that frames HOW the user's key constraint shapes the pick. Emit it whenever the
+  conversation carries a meaningful constraint — a budget, a use case, a must-have, or a
+  deal-breaker — that drives which products lead the ranking. This INCLUDES the first
+  turn when the query itself names such a constraint (e.g. "under $100", "for small
+  ears", "best for travel", "quiet for an office").
+- ALSO emit it when the user's latest message added or changed a constraint that flips
+  the ranking from a prior shortlist.
+- Voice (one sentence, no preamble, no generic filler):
+    "$X puts the [tier] on the table — that changes the pick for [situation]."
+    "Once comfort matters more than ANC, the order flips."
+    "Under $100, value beats flagship features, so the pick leans practical."
+- Return an EMPTY STRING "" ONLY when there is no real constraint to frame: bare
+  greetings, intros, or vague "what's good?" queries with no budget / use case /
+  must-have. When the query carries a genuine constraint, prefer to frame it rather
+  than skip it.
 - Never restate the question back; never list options; never exceed one sentence."""
 
         llm_tasks['blog_article'] = model_service.generate_compose(
