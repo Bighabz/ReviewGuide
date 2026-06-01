@@ -23,6 +23,10 @@ const ANIMATED_LOGO = '/images/animated_logo.webp';
 
 export default function DiscoverHeroLogo({ width = 340 }: { width?: number }) {
   const [reducedMotion, setReducedMotion] = useState(false);
+  // D1 (perf): the animated WebP is ~2.26MB. SSR + first paint show the 34KB
+  // static poster instantly; we preload the heavy WebP and only swap it in once
+  // it has decoded, so first contentful paint is never blocked on 2.26MB.
+  const [animatedReady, setAnimatedReady] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
@@ -32,6 +36,17 @@ export default function DiscoverHeroLogo({ width = 340 }: { width?: number }) {
     mq.addEventListener('change', handler);
     return () => mq.removeEventListener('change', handler);
   }, []);
+
+  // Preload the animated WebP off the critical path, then swap it in.
+  useEffect(() => {
+    if (reducedMotion || typeof window === 'undefined') return;
+    const img = new window.Image();
+    img.onload = () => setAnimatedReady(true);
+    img.src = ANIMATED_LOGO;
+    return () => {
+      img.onload = null;
+    };
+  }, [reducedMotion]);
 
   // Reduced motion: static recolored wordmark (no animation).
   if (reducedMotion) {
@@ -44,21 +59,38 @@ export default function DiscoverHeroLogo({ width = 340 }: { width?: number }) {
     );
   }
 
-  // Default (incl. SSR): the animated logo. Plays automatically as an image.
+  // Default (incl. SSR): a fixed-aspect box (no layout shift) showing the static
+  // poster until the animated WebP has decoded, then the animation.
   return (
     <div style={{ width: '100%', maxWidth: width, margin: '0 auto' }}>
       <div style={{ position: 'relative', width: '100%', aspectRatio: '16 / 7', overflow: 'hidden' }}>
-        <img
-          src={ANIMATED_LOGO}
-          alt="ReviewGuide.ai"
-          style={{
-            position: 'absolute',
-            left: '50%',
-            top: '50%',
-            width: '150%',
-            transform: 'translate(-50%, -50%)',
-          }}
-        />
+        {animatedReady ? (
+          <img
+            src={ANIMATED_LOGO}
+            alt="ReviewGuide.ai"
+            style={{
+              position: 'absolute',
+              left: '50%',
+              top: '50%',
+              width: '150%',
+              transform: 'translate(-50%, -50%)',
+            }}
+          />
+        ) : (
+          <img
+            src={STATIC_LOGO}
+            alt="ReviewGuide.ai"
+            decoding="async"
+            style={{
+              position: 'absolute',
+              left: '50%',
+              top: '50%',
+              maxWidth: '92%',
+              maxHeight: '82%',
+              transform: 'translate(-50%, -50%)',
+            }}
+          />
+        )}
       </div>
     </div>
   );

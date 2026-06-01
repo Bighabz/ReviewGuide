@@ -114,8 +114,12 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
   // originalQueryRef — the user query that triggered the interrupted stream (for retry)
   const originalQueryRef = useRef<string>('')
 
-  // Cycling verb animation for welcome screen headline
+  // Cycling verb animation for welcome screen headline.
+  // D3 (perf): only runs while the welcome headline is on screen — once any
+  // message exists (incl. during streaming) the headline is unmounted, so the
+  // 2.5s ticker would just be wasted work.
   useEffect(() => {
+    if (messages.length > 0) return
     let timeoutId: ReturnType<typeof setTimeout>
     const interval = setInterval(() => {
       setVerbVisible(false)
@@ -128,7 +132,7 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
       clearInterval(interval)
       clearTimeout(timeoutId)
     }
-  }, [])
+  }, [messages.length])
 
   // Sync isStreaming state to ChatStatusContext (for MobileHeader)
   useEffect(() => {
