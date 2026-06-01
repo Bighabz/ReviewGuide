@@ -1,0 +1,334 @@
+"""
+Conversational-expert clarifier: category-aware questions with tappable option
+chips, use-case-first / budget-last ordering, and chip-aware slot extraction.
+
+Covers:
+- _generate_followup_questions normalizes LLM output (options capped, strings,
+  free_text_hint defaulted) and enforces use_case-first / budget-last ordering
+- backward compat: questions without options still pass through untouched
+- LLM failure falls back to plain per-slot questions (no options)
+- _extract_all_slots_from_answer includes offered chip choices in its prompt
+- _handle_new_plan adds use_case + budget on substantive product queries,
+  ordered use_case first and budget last
+"""
+import os
+
+os.environ.setdefault("ENV", "test")
+os.environ.setdefault("SECRET_KEY", "test-secret-key-minimum-32-characters-long")
+os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
+os.environ.setdefault("OPENAI_API_KEY", "test-api-key")
+os.environ.setdefault("RATE_LIMIT_ENABLED", "false")
+os.environ.setdefault("LOG_ENABLED", "false")
+
+import json  # noqa: E402
+from unittest.mock import AsyncMock, patch  # noqa: E402
+
+import pytest  # noqa: E402
+
+from app.agents.clarifier_agent import ClarifierAgent  # noqa: E402
+
+
+@pytest.fixture
+def agent():
+    return ClarifierAgent()
+
+
+# ---------------------------------------------------------------------------
+# _generate_followup_questions — options + ordering
+# ---------------------------------------------------------------------------
+
+LAPTOP_LLM_RESPONSE = json.dumps({
+    "intro": "Happy to help you find the right laptop.",
+    "questions": [
+        {
+            "slot": "budget",
+            "question": "What's your budget?",
+            "options": ["Under $500", "$500–$800", "$800–$1,200", "$1,200+"],
+            "free_text_hint": "or type an amount",
+        },
+        {
+            "slot": "use_case",
+            "question": "What will you mainly use it for?",
+            "options": ["Student / everyday", "Gaming", "Creative / video editing", "Business / office"],
+            "free_text_hint": "or describe your own use",
+        },
+    ],
+    "closing": "Then I'll pull together a shortlist.",
+})
+
+
+@pytest.mark.asyncio
+async def test_options_pass_through_and_budget_ordered_last(agent):
+    """LLM returns budget first; the normalizer must reorder use_case → budget."""
+    agent.generate = AsyncMock(return_value=LAPTOP_LLM_RESPONSE)
+
+    result = await agent._generate_followup_questions(
+        missing_slots=["use_case", "budget"],
+        current_slots={"category": "laptops"},
+        user_message="best laptop",
+        intent="product",
+    )
+
+    slots_in_order = [q["slot"] for q in result["questions"]]
+    assert slots_in_order == ["use_case", "budget"], "use_case must lead, budget must close"
+
+    use_case_q = result["questions"][0]
+    assert use_case_q["options"] == ["Student / everyday", "Gaming", "Creative / video editing", "Business / office"]
+    assert use_case_q["free_text_hint"] == "or describe your own use"
+
+    budget_q = result["questions"][1]
+    assert "Under $500" in budget_q["options"]
+    assert "Under $50" not in budget_q["options"], "no generic tiers for laptops"
+
+
+@pytest.mark.asyncio
+async def test_options_normalization_caps_and_defaults(agent):
+    """Options are capped at 6 strings; missing free_text_hint gets a default."""
+    response = json.dumps({
+        "intro": "ok",
+        "questions": [
+            {
+                "slot": "use_case",
+                "question": "What for?",
+                # 8 options incl. blanks and a number — should cap at 6 non-empty strings
+                "options": ["a", "b", "", "c", 4, "d", "e", "f", "g"],
+                # no free_text_hint
+            },
+        ],
+        "closing": "",
+    })
+    agent.generate = AsyncMock(return_value=response)
+
+    result = await agent._generate_followup_questions(
+        missing_slots=["use_case"],
+        current_slots={},
+        user_message="best laptop",
+        intent="product",
+    )
+
+    q = result["questions"][0]
+    assert len(q["options"]) == 6
+    assert all(isinstance(o, str) and o for o in q["options"])
+    assert q["free_text_hint"] == "or type your own answer"
+
+
+@pytest.mark.asyncio
+async def test_questions_without_options_still_work(agent):
+    """Backward compat: a question with no options has no options key (frontend falls back)."""
+    response = json.dumps({
+        "intro": "ok",
+        "questions": [
+            {"slot": "destination", "question": "Where are you going?"},
+        ],
+        "closing": "",
+    })
+    agent.generate = AsyncMock(return_value=response)
+
+    result = await agent._generate_followup_questions(
+        missing_slots=["destination"],
+        current_slots={},
+        user_message="plan a trip",
+        intent="travel",
+    )
+
+    q = result["questions"][0]
+    assert q == {"slot": "destination", "question": "Where are you going?"}
+    assert "options" not in q
+
+
+@pytest.mark.asyncio
+async def test_llm_failure_falls_back_to_plain_questions(agent):
+    """If the LLM call raises, we still produce one plain question per missing slot."""
+    agent.generate = AsyncMock(side_effect=RuntimeError("LLM down"))
+
+    result = await agent._generate_followup_questions(
+        missing_slots=["use_case", "budget"],
+        current_slots={},
+        user_message="best laptop",
+        intent="product",
+    )
+
+    assert [q["slot"] for q in result["questions"]] == ["use_case", "budget"]
+    assert all("options" not in q for q in result["questions"])
+
+
+@pytest.mark.asyncio
+async def test_malformed_question_entries_are_dropped(agent):
+    """Entries missing slot/question are dropped, then backfilled from missing_slots."""
+    response = json.dumps({
+        "intro": "ok",
+        "questions": [
+            {"question": "No slot here"},          # dropped (no slot)
+            {"slot": "budget"},                     # dropped (no question)
+            "not even a dict",                      # dropped
+        ],
+        "closing": "",
+    })
+    agent.generate = AsyncMock(return_value=response)
+
+    result = await agent._generate_followup_questions(
+        missing_slots=["budget"],
+        current_slots={},
+        user_message="best laptop",
+        intent="product",
+    )
+
+    assert len(result["questions"]) == 1
+    assert result["questions"][0]["slot"] == "budget"
+    assert result["questions"][0]["question"]  # backfilled placeholder
+
+
+@pytest.mark.asyncio
+async def test_product_prompt_carries_expert_framing(agent):
+    """The product prompt names the category and demands realistic options."""
+    agent.generate = AsyncMock(return_value=LAPTOP_LLM_RESPONSE)
+
+    await agent._generate_followup_questions(
+        missing_slots=["use_case", "budget"],
+        current_slots={"category": "laptops"},
+        user_message="best laptop",
+        intent="product",
+    )
+
+    system_prompt = agent.generate.call_args.kwargs["messages"][0]["content"]
+    assert "laptops specialist" in system_prompt
+    assert "options" in system_prompt
+    assert "budget LAST" in system_prompt
+
+
+# ---------------------------------------------------------------------------
+# _extract_all_slots_from_answer — chip-aware extraction context
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_extraction_prompt_includes_offered_choices(agent):
+    """The slot extractor sees the chips that were offered, so a tapped chip maps cleanly."""
+    agent.generate = AsyncMock(return_value=json.dumps({"use_case": "Gaming"}))
+
+    followups = [
+        {
+            "slot": "use_case",
+            "question": "What will you mainly use it for?",
+            "options": ["Student / everyday", "Gaming", "Business / office"],
+            "free_text_hint": "or describe your own use",
+        }
+    ]
+    extracted = await agent._extract_all_slots_from_answer(
+        slot_names=["use_case"],
+        user_message="Gaming",
+        followups=followups,
+    )
+
+    assert extracted == {"use_case": "Gaming"}
+    system_prompt = agent.generate.call_args.kwargs["messages"][0]["content"]
+    assert "offered choices" in system_prompt
+    assert "Student / everyday" in system_prompt
+
+
+@pytest.mark.asyncio
+async def test_extraction_without_options_unchanged(agent):
+    """Questions without options keep the original extraction context format."""
+    agent.generate = AsyncMock(return_value=json.dumps({"destination": "Tokyo"}))
+
+    followups = [{"slot": "destination", "question": "Where are you going?"}]
+    extracted = await agent._extract_all_slots_from_answer(
+        slot_names=["destination"],
+        user_message="Tokyo",
+        followups=followups,
+    )
+
+    assert extracted == {"destination": "Tokyo"}
+    system_prompt = agent.generate.call_args.kwargs["messages"][0]["content"]
+    assert "offered choices" not in system_prompt
+
+
+# ---------------------------------------------------------------------------
+# _handle_new_plan — expert-first ordering on substantive product queries
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_substantive_product_query_asks_use_case_first_budget_last(agent):
+    """'best laptop' (category extracted, nothing else) → ask use_case then budget."""
+    state = {
+        "plan": {"steps": [{"tools": ["product_search"]}]},
+        "slots": {},
+        "user_message": "best laptop",
+        "sanitized_text": "best laptop",
+        "intent": "product",
+        "conversation_history": [],
+        "last_search_context": {},
+        "session_id": "test-session",
+    }
+
+    captured = {}
+
+    async def fake_generate_followups(missing_slots, current_slots, user_message, intent, conversation_history=None):
+        captured["missing_slots"] = list(missing_slots)
+        return {
+            "intro": "x",
+            "questions": [{"slot": s, "question": f"{s}?"} for s in missing_slots],
+            "closing": "",
+        }
+
+    # Extraction finds the category but nothing else
+    agent._extract_all_slots_from_conversation = AsyncMock(
+        return_value={"category": "laptops", "use_case": None, "budget": None}
+    )
+    agent._generate_followup_questions = fake_generate_followups
+
+    with patch("app.agents.clarifier_agent.HaltStateManager.update_halt_state", new=AsyncMock()):
+        result = await agent._handle_new_plan(state, "test-session")
+
+    assert result["proceed_to_execution"] is False
+    assert captured["missing_slots"][0] == "use_case", "use_case must be asked first"
+    assert captured["missing_slots"][-1] == "budget", "budget must be asked last"
+
+
+@pytest.mark.asyncio
+async def test_non_substantive_query_does_not_inject_questions(agent):
+    """A query where no category/product was extracted doesn't get use_case/budget injected."""
+    state = {
+        "plan": {"steps": [{"tools": ["product_search"]}]},
+        "slots": {},
+        "user_message": "hmm",
+        "sanitized_text": "hmm",
+        "intent": "product",
+        "conversation_history": [],
+        "last_search_context": {},
+        "session_id": "test-session",
+    }
+
+    agent._extract_all_slots_from_conversation = AsyncMock(return_value={})
+
+    with patch("app.agents.clarifier_agent.HaltStateManager.update_halt_state", new=AsyncMock()):
+        result = await agent._handle_new_plan(state, "test-session")
+
+    # No required slots, not substantive → proceed without questions
+    assert result["proceed_to_execution"] is True
+    assert result["followups"] == []
+
+
+@pytest.mark.asyncio
+async def test_query_with_use_case_and_budget_skips_clarification(agent):
+    """'gaming laptop under $1500' — both slots present → no questions, straight to execution."""
+    state = {
+        "plan": {"steps": [{"tools": ["product_search"]}]},
+        "slots": {},
+        "user_message": "gaming laptop under $1500",
+        "sanitized_text": "gaming laptop under $1500",
+        "intent": "product",
+        "conversation_history": [],
+        "last_search_context": {},
+        "session_id": "test-session",
+    }
+
+    agent._extract_all_slots_from_conversation = AsyncMock(
+        return_value={"category": "laptops", "use_case": "gaming", "budget": "under $1500"}
+    )
+
+    with patch("app.agents.clarifier_agent.HaltStateManager.update_halt_state", new=AsyncMock()):
+        result = await agent._handle_new_plan(state, "test-session")
+
+    assert result["proceed_to_execution"] is True
+    assert result["followups"] == []
