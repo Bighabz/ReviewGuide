@@ -828,7 +828,11 @@ async def product_compose(state: Dict[str, Any]) -> Dict[str, Any]:
 
         # --- Personalized product descriptions ---
         if all_products_for_desc:
-            products_to_describe = all_products_for_desc[:15]
+            # Cap at 8: measured on Haiku via OpenRouter, the descriptions JSON
+            # parses reliably at <=8 products (8/8 at 1200 tok); 10-15 return
+            # malformed/truncated JSON regardless of token budget. Carousels
+            # typically show <=7, so this fully covers the common case.
+            products_to_describe = all_products_for_desc[:8]
             product_titles = [p["title"][:50] for p in products_to_describe]
             conversation_history = state.get("conversation_history", [])
             desc_context = ""
@@ -864,7 +868,10 @@ Products to describe:
                     {"role": "user", "content": desc_user}
                 ],
                 temperature=0.7,
-                max_tokens=600,
+                # Was 600: Haiku truncated the multi-product JSON mid-stream in prod
+                # and the parse failed, dropping card descriptions. 1200 fits the
+                # 8-product cap above with headroom (measured 8/8 on Haiku).
+                max_tokens=1200,
                 response_format={"type": "json_object"},
                 agent_name="product_compose_descriptions"
             )
