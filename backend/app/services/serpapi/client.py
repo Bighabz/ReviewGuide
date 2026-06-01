@@ -376,12 +376,20 @@ class SerpAPIClient:
                     except (ValueError, TypeError):
                         pass
 
+                # D2 (perf): Serper's Google Shopping `imageUrl` is frequently a
+                # base64 `data:image/webp;...` URI (~7–9KB each), which bloats the
+                # SSE payload by ~130–240KB per product response. Keep only real
+                # http(s) images; when empty, downstream picks another offer's
+                # image (live-eBay https) or the frontend's themed fallback.
+                raw_image = item.get("imageUrl") or ""
+                image_url = raw_image if raw_image.startswith("http") else ""
+
                 offer = {
                     "price": price,
                     "currency": "USD",
                     "merchant": item.get("source") or "",
                     "url": item.get("link") or "",
-                    "image_url": item.get("imageUrl") or "",
+                    "image_url": image_url,
                     "title": item.get("title") or product_name,
                     "rating": rating,
                     "review_count": review_count,
