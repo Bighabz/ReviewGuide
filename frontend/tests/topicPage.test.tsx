@@ -17,7 +17,7 @@ vi.mock('next/navigation', () => ({
 }))
 
 import TopicPage from '@/app/topic/[slug]/page'
-import { DISCOVER_TOPICS } from '@/lib/discoverTopics'
+import { DISCOVER_TOPICS, TOPIC_BODIES } from '@/lib/discoverTopics'
 
 const sample = DISCOVER_TOPICS[0]
 
@@ -27,15 +27,18 @@ describe('TopicPage', () => {
     mockNotFound.mockClear()
   })
 
-  it('renders the topic title and editorial blurb', () => {
+  it('renders the topic title and the blog body article', () => {
     render(<TopicPage params={{ slug: sample.slug }} />)
     expect(screen.getByRole('heading', { name: sample.title })).toBeTruthy()
-    expect(screen.getByText(sample.blurb)).toBeTruthy()
+    // The blog body (attached by getTopicBySlug) is the article on the page.
+    const body = TOPIC_BODIES[sample.slug]
+    expect(body).toBeTruthy()
+    expect(screen.getByText(body)).toBeTruthy()
   })
 
-  it('CTA seeds an editable chat draft (draft=, not auto-send q=)', () => {
+  it('CTA opens a new session seeded with the topic context (draft=, not auto-send q=)', () => {
     render(<TopicPage params={{ slug: sample.slug }} />)
-    fireEvent.click(screen.getByRole('button', { name: /start researching/i }))
+    fireEvent.click(screen.getByRole('button', { name: /research this in chat/i }))
     expect(mockPush).toHaveBeenCalledTimes(1)
     const url: string = mockPush.mock.calls[0][0]
     expect(url).toContain('/chat?draft=')

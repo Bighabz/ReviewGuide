@@ -6,7 +6,7 @@
 import { describe, it, expect } from 'vitest'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { DISCOVER_TOPICS, getTopicBySlug } from '@/lib/discoverTopics'
+import { DISCOVER_TOPICS, TOPIC_BODIES, getTopicBySlug } from '@/lib/discoverTopics'
 
 describe('DISCOVER_TOPICS', () => {
   it('is a large pool (>= 40 topics) for fresh rotation each visit', () => {
@@ -37,9 +37,17 @@ describe('DISCOVER_TOPICS', () => {
     }
   })
 
-  it('getTopicBySlug resolves known slugs and returns undefined otherwise', () => {
+  it('getTopicBySlug resolves known slugs (with body attached) and undefined otherwise', () => {
     const first = DISCOVER_TOPICS[0]
-    expect(getTopicBySlug(first.slug)).toEqual(first)
+    expect(getTopicBySlug(first.slug)).toEqual({ ...first, body: TOPIC_BODIES[first.slug] })
     expect(getTopicBySlug('definitely-not-a-real-topic')).toBeUndefined()
+  })
+
+  it('every topic has a non-trivial blog body (no bodyless blog page)', () => {
+    for (const t of DISCOVER_TOPICS) {
+      const body = TOPIC_BODIES[t.slug]
+      expect(body, `missing body for ${t.slug}`).toBeTruthy()
+      expect(body.length, `body too short for ${t.slug}`).toBeGreaterThan(120)
+    }
   })
 })
