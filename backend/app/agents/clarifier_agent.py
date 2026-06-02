@@ -858,11 +858,28 @@ Each option is 1-4 words. Also generate "free_text_hint": a short affordance lik
         # specialist questions, options, multi-select flags, and budget brackets are
         # pinned rather than improvised. Unlisted categories keep the generic expert
         # framing above and generalize via the LLM.
-        if intent == "product" and category:
-            pack = get_category_pack(category)
+        #
+        # Try every category signal, not just the category slot: the extractor often
+        # produces a generic category with the specific one in product_name
+        # ("best running shoes" → category="shoes", product_name="running shoes"),
+        # and the raw query is the last resort.
+        if intent == "product":
+            pack = None
+            matched_on = None
+            for candidate in (
+                current_slots.get("category"),
+                current_slots.get("product_type"),
+                current_slots.get("product_name"),
+                user_message,
+            ):
+                if candidate:
+                    pack = get_category_pack(str(candidate))
+                    if pack:
+                        matched_on = candidate
+                        break
             if pack:
                 expert_hint += format_pack_hint(pack)
-                logger.info(f"[Clarifier Agent] Using curated question pack for category '{category}'")
+                logger.info(f"[Clarifier Agent] Using curated question pack (matched on '{matched_on}')")
 
         role_prompt = f"""You collect missing information from the user before downstream tools run.
 
