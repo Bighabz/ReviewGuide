@@ -899,8 +899,8 @@ Each option is 1-4 words. Also generate "free_text_hint": a short affordance lik
         # produces a generic category with the specific one in product_name
         # ("best running shoes" → category="shoes", product_name="running shoes"),
         # and the raw query is the last resort.
+        pack = None
         if intent == "product":
-            pack = None
             matched_on = None
             for candidate in (
                 current_slots.get("category"),
@@ -980,7 +980,6 @@ Return ONLY valid JSON:
                     opts = [str(o).strip() for o in opts if str(o).strip()][:6]
                     if opts:
                         nq["options"] = opts
-                        nq["free_text_hint"] = str(q.get("free_text_hint") or "").strip() or "or type your own answer"
                         # Multi-select flag: only "multi_select" is meaningful (single_select
                         # is the default behavior and stays implicit). budget/use_case are
                         # always single-answer regardless of what the LLM emitted.
@@ -991,6 +990,35 @@ Return ONLY valid JSON:
                             nq["type"] = "multi_select"
                 normalized.append(nq)
             questions = normalized
+
+            # ── QA Round 5 (external bugs 2+3): pack data and microcopy are DETERMINISTIC ──
+            # The pack travels through the LLM prompt, but the LLM doesn't reliably echo
+            # the options / multi-select flag back (office chairs' features question came
+            # back single-select despite the pack saying multi_select=True). Enforce the
+            # pack on the LLM's output instead of trusting the round trip — the pack
+            # docstring says "authoritative"; this makes it true.
+            for q in questions:
+                if not q.get("options"):
+                    continue
+                if pack:
+                    if q["slot"] == "use_case":
+                        q["options"] = list(pack["use_case"]["options"])
+                    elif q["slot"] == "features":
+                        q["options"] = list(pack["features"]["options"])
+                        if pack["features"].get("multi_select"):
+                            q["type"] = "multi_select"
+                        else:
+                            q.pop("type", None)
+                    elif q["slot"] == "budget":
+                        q["options"] = list(pack["budget_brackets"])
+                # Consistent microcopy across every category (bug 3): one hint per
+                # question kind, never the LLM's per-category phrasing.
+                if q.get("type") == "multi_select":
+                    q["free_text_hint"] = "Select all that apply — or type your own"
+                elif q["slot"] == "budget":
+                    q["free_text_hint"] = "or type an amount"
+                else:
+                    q["free_text_hint"] = "or type your own answer"
 
             # Ensure we have questions for all missing slots
             if len(questions) != len(missing_slots):
@@ -1083,6 +1111,10 @@ Extract ALL the requested slot values from the user's answer.
 
 Rules:
 - Extract ALL slots mentioned in the questions above
+- The user may answer SEVERAL questions in ONE message, with answers separated by
+  semicolons or commas (e.g. "Road running; Max cushion; $80–$130" or
+  "Gaming, high-end specs, budget $1,200+"). Map each part back to its question
+  using the offered choices and extract every slot you can.
 - ALSO extract optional slots if user mentions them (e.g., "1 child" → children: 1)
 - For numbers (duration_days, adults, children, budget): return as number
 - For text (destination, origin, month, budget_level, travel_style, likes): return as string
