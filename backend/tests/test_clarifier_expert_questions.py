@@ -912,3 +912,154 @@ async def test_extraction_prompt_handles_combined_card_answer(agent):
     assert extracted["budget"] == "$80–$130"
     system_prompt = agent.generate.call_args.kwargs["messages"][0]["content"]
     assert "SEVERAL questions in ONE message" in system_prompt
+
+
+# ---------------------------------------------------------------------------
+# QA Round 5 — F5: cross-category slot bleed
+# ---------------------------------------------------------------------------
+# Prior conversation/search context may only satisfy clarifier slots when it's
+# about the SAME category. Before this fix, "best blender" after a running-shoes
+# search inherited running-shoe answers and never asked blender questions.
+
+from app.agents.clarifier_agent import _query_relates_to_context  # noqa: E402
+
+COFFEE_CONTEXT = {
+    "category": "coffee machine",
+    "product_type": "coffee machine",
+    "product_names": ["Hamilton Beach 49980A 2-Way Brewer", "Cuisinart DGB-900BC Grind & Brew"],
+    "budget": "under $100",
+    "use_case": "espresso drinks",
+    "features": "built-in grinder",
+    "top_prices": {"Hamilton Beach 49980A 2-Way Brewer": 39.99},
+}
+
+COFFEE_HISTORY = [
+    {"role": "user", "content": "best coffee machine"},
+    {"role": "assistant", "content": "Let's narrow down..."},
+    {"role": "user", "content": "I mostly make espresso drinks at home"},
+    {"role": "assistant", "content": "What's your budget?"},
+    {"role": "user", "content": "Under $100"},
+    {"role": "assistant", "content": "Here are the picks..."},
+]
+
+
+def test_query_relates_to_context_helper():
+    """Unit coverage for the category-relatedness check."""
+    # Cross-category: no word overlap → not related
+    assert _query_relates_to_context("best office chair", COFFEE_CONTEXT) is False
+    assert _query_relates_to_context("best blender", COFFEE_CONTEXT) is False
+    # Same-ish category: "machine" overlaps → related
+    assert _query_relates_to_context("best espresso machine", COFFEE_CONTEXT) is True
+    # Indeterminate cases count as related (pre-F5 behavior preserved)
+    assert _query_relates_to_context("best blender", {}) is True
+    assert _query_relates_to_context("", COFFEE_CONTEXT) is True
+
+
+@pytest.mark.asyncio
+async def test_cross_category_bare_query_asks_questions_despite_context(agent):
+    """F5 regression: 'best office chair' in a coffee-machine session must ask CHAIR
+    questions — the coffee budget/use_case must not suppress them. The bare query
+    also rides the F6 fast path (no extraction LLM call needed)."""
+    state = _new_plan_state("best office chair", history=list(COFFEE_HISTORY))
+    state["last_search_context"] = dict(COFFEE_CONTEXT)
+
+    extraction_mock = AsyncMock(return_value={})
+    agent._extract_all_slots_from_conversation = extraction_mock
+
+    captured = {}
+
+    async def fake_generate_followups(missing_slots, current_slots, user_message, intent, conversation_history=None):
+        captured["missing_slots"] = list(missing_slots)
+        captured["current_slots"] = dict(current_slots)
+        return {
+            "intro": "x",
+            "questions": [{"slot": s, "question": f"{s}?"} for s in missing_slots],
+            "closing": "",
+        }
+
+    agent._generate_followup_questions = fake_generate_followups
+
+    with patch("app.agents.clarifier_agent.HaltStateManager.update_halt_state", new=AsyncMock()):
+        result = await agent._handle_new_plan(state, "test-session")
+
+    # Questions ARE asked — the coffee context did not satisfy them
+    assert result["proceed_to_execution"] is False
+    assert "use_case" in captured["missing_slots"]
+    assert "budget" in captured["missing_slots"]
+    # Bare cross-category query rides the fast path (no LLM extraction call)
+    extraction_mock.assert_not_called()
+    assert captured["current_slots"].get("product_name") == "office chair"
+
+
+@pytest.mark.asyncio
+async def test_cross_category_qualified_query_extracts_from_message_only(agent):
+    """'best standing desk for small apartments' (not bare → LLM extraction) in a coffee
+    session: the extraction must receive an EMPTY history so coffee answers can't bleed."""
+    state = _new_plan_state("best standing desk for small apartments", history=list(COFFEE_HISTORY))
+    state["last_search_context"] = dict(COFFEE_CONTEXT)
+
+    extraction_mock = AsyncMock(return_value={"product_name": "standing desk"})
+    agent._extract_all_slots_from_conversation = extraction_mock
+    agent._generate_followup_questions = AsyncMock(
+        return_value={"intro": "", "questions": [{"slot": "use_case", "question": "u?"}], "closing": ""}
+    )
+
+    with patch("app.agents.clarifier_agent.HaltStateManager.update_halt_state", new=AsyncMock()):
+        result = await agent._handle_new_plan(state, "test-session")
+
+    extraction_mock.assert_called_once()
+    assert extraction_mock.call_args.kwargs["conversation_history"] == [], (
+        "cross-category extraction must not see the prior conversation"
+    )
+    # And questions get asked (coffee context did not satisfy them)
+    assert result["proceed_to_execution"] is False
+
+
+@pytest.mark.asyncio
+async def test_same_category_query_still_inherits_context(agent):
+    """'best espresso machine with milk frother' in a coffee session: context relates →
+    history IS passed to extraction and the coffee budget/use_case satisfy the expert
+    checks (no re-asking)."""
+    state = _new_plan_state("best espresso machine with milk frother", history=list(COFFEE_HISTORY))
+    state["last_search_context"] = dict(COFFEE_CONTEXT)
+
+    extraction_mock = AsyncMock(return_value={"product_name": "espresso machine"})
+    agent._extract_all_slots_from_conversation = extraction_mock
+
+    with patch("app.agents.clarifier_agent.HaltStateManager.update_halt_state", new=AsyncMock()):
+        result = await agent._handle_new_plan(state, "test-session")
+
+    # History passed through — same category, inheritance is legitimate
+    extraction_mock.assert_called_once()
+    assert extraction_mock.call_args.kwargs["conversation_history"] == COFFEE_HISTORY
+    # Coffee budget/use_case satisfy the checks → no questions re-asked
+    assert result["proceed_to_execution"] is True
+    assert result["followups"] == []
+
+
+@pytest.mark.asyncio
+async def test_fresh_session_unaffected_by_f5_gates(agent):
+    """No prior context → all F5 gates are no-ops (fast path + expert flow unchanged)."""
+    state = _new_plan_state("best mattress")
+
+    extraction_mock = AsyncMock(return_value={})
+    agent._extract_all_slots_from_conversation = extraction_mock
+
+    captured = {}
+
+    async def fake_generate_followups(missing_slots, current_slots, user_message, intent, conversation_history=None):
+        captured["missing_slots"] = list(missing_slots)
+        return {
+            "intro": "x",
+            "questions": [{"slot": s, "question": f"{s}?"} for s in missing_slots],
+            "closing": "",
+        }
+
+    agent._generate_followup_questions = fake_generate_followups
+
+    with patch("app.agents.clarifier_agent.HaltStateManager.update_halt_state", new=AsyncMock()):
+        result = await agent._handle_new_plan(state, "test-session")
+
+    assert result["proceed_to_execution"] is False
+    assert "use_case" in captured["missing_slots"]
+    extraction_mock.assert_not_called()  # F6 fast path

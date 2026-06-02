@@ -98,6 +98,52 @@ def _apply_refinement_action(action: str, slots: dict, last_search_context: dict
     return adjusted
 
 
+# Words that carry no category signal — ignored when comparing a query against
+# the prior search context.
+_GENERIC_QUERY_WORDS = {
+    "best", "good", "top", "great", "cheap", "show", "me", "a", "an",
+    "the", "find", "get", "buy", "for", "of", "to", "i", "want",
+    "need", "one", "ones", "some", "any", "you", "chose", "more",
+    "options", "picks", "deals", "recommend", "suggest", "what",
+    "which", "is", "are", "my", "new",
+}
+
+
+def _query_relates_to_context(user_msg: str, last_search_context: dict) -> bool:
+    """True when the query's content words overlap the prior search context
+    (same or related product category).
+
+    Used in two places:
+    - execute()'s topic guard: a short follow-up-looking message about a
+      DIFFERENT category must be treated as a new query, not slot-inherited.
+    - _handle_new_plan (QA Round 5 — F5): prior conversation turns and
+      last_search_context may only satisfy clarifier slots (budget / use_case /
+      features) when they're about the same category. Without this, "best
+      blender" right after a running-shoes search inherited running-shoe
+      answers and never asked blender questions — clarification effectively
+      only existed for the FIRST search of a session.
+
+    Indeterminate comparisons (empty context, or no content words on either
+    side) count as related, preserving the pre-F5 behavior for those cases.
+    """
+    context_words: set = set()
+    for src in (
+        [last_search_context.get("category", ""), last_search_context.get("product_type", "")]
+        + list(last_search_context.get("product_names", []) or [])
+    ):
+        context_words.update(str(src).lower().replace("-", " ").split())
+    content_words = [
+        w for w in re.sub(r"[^a-z0-9 ]", " ", (user_msg or "").lower()).split()
+        if w not in _GENERIC_QUERY_WORDS and len(w) >= 3
+    ]
+    if not content_words or not context_words:
+        return True
+    return any(
+        w in context_words or any(w in cw or cw in w for cw in context_words)
+        for w in content_words
+    )
+
+
 class ClarifierAgent(BaseAgent):
     """Clarifier agent for slot filling and follow-up questions"""
 
@@ -229,27 +275,7 @@ class ClarifierAgent(BaseAgent):
                 # right after a laptop search) is a NEW query — inheriting laptop
                 # slots into a mattress search produces garbage results.
                 if is_follow_up and not matched_signal:
-                    generic_words = {
-                        "best", "good", "top", "great", "cheap", "show", "me", "a", "an",
-                        "the", "find", "get", "buy", "for", "of", "to", "i", "want",
-                        "need", "one", "ones", "some", "any", "you", "chose", "more",
-                        "options", "picks", "deals", "recommend", "suggest", "what",
-                        "which", "is", "are", "my", "new",
-                    }
-                    context_words: set = set()
-                    for src in (
-                        [last_search_context.get("category", ""), last_search_context.get("product_type", "")]
-                        + list(last_search_context.get("product_names", []) or [])
-                    ):
-                        context_words.update(str(src).lower().replace("-", " ").split())
-                    content_words = [
-                        w for w in re.sub(r"[^a-z0-9 ]", " ", user_msg).split()
-                        if w not in generic_words and len(w) >= 3
-                    ]
-                    if content_words and context_words and not any(
-                        w in context_words or any(w in cw or cw in w for cw in context_words)
-                        for w in content_words
-                    ):
+                    if not _query_relates_to_context(user_msg, last_search_context):
                         logger.info(
                             f"[Clarifier Agent] Short message names a different topic than the search "
                             f"context — treating as NEW query: '{user_msg}'"
@@ -422,12 +448,28 @@ class ClarifierAgent(BaseAgent):
         # Combine both lists
         slots_to_extract = required_slots_to_extract + optional_slots_to_extract
 
+        # ── F5 (QA Round 5): cross-category context must not suppress clarification ──
+        # Prior conversation turns / last_search_context may only fill slots when
+        # they're about the SAME category as this query. "best blender" right after
+        # a running-shoes search must get blender questions — not inherit running-
+        # shoe answers and skip straight to results.
+        last_ctx = state.get("last_search_context", {}) or {}
+        context_relates = (not last_ctx) or _query_relates_to_context(user_message, last_ctx)
+        if last_ctx and not context_relates:
+            logger.info(
+                "[Clarifier Agent] F5: prior search context is a different category — "
+                "ignoring it (and prior conversation turns) for slot filling"
+            )
+
         # ── F6 fast path (QA Round 4): bare "best X" queries skip the extraction LLM call ──
         # The extraction call costs 3-8s; for a pure category ask ("best mattress",
         # "top wireless earbuds") there is nothing else to extract — every other word
         # is generic. That latency was pushing the clarifier past its hard stage budget,
         # and the timeout fallback silently skips clarification (no questions, straight
         # to search). Extract the product noun directly and save the whole LLM call.
+        # F5 extension: also applies to bare cross-category queries mid-session — the
+        # prior conversation is about a different category, so there's still nothing
+        # for the LLM to extract from it.
         fast_path_noun = None
         if intent == "product" and slots_to_extract and not current_slots.get("product_name"):
             user_turns = [m for m in conversation_history if m.get("role") == "user"]
@@ -438,7 +480,7 @@ class ClarifierAgent(BaseAgent):
                 r"^(?:the\s+)?(?:best|top|good|great|cheapest)\s+([a-z0-9][a-z0-9 \-&']{2,40})$",
                 query_clean,
             )
-            if m and is_first_turn and not has_digits:
+            if m and (is_first_turn or not context_relates) and not has_digits:
                 noun = m.group(1).strip()
                 noun_words = noun.split()
                 # A trailing qualifier ("for travel", "under budget") means there IS
@@ -459,7 +501,9 @@ class ClarifierAgent(BaseAgent):
             extracted_slots = await self._extract_all_slots_from_conversation(
                 slot_names=slots_to_extract,
                 user_message=user_message,
-                conversation_history=conversation_history,
+                # F5: a different-category conversation must not bleed its answers
+                # into this query's slots — extract from the current message only.
+                conversation_history=conversation_history if context_relates else [],
                 intent=intent
             )
 
@@ -575,7 +619,9 @@ class ClarifierAgent(BaseAgent):
         # All three are OPTIONAL slots on product_search, so the clarifier would
         # never ask them on its own.
         if intent == "product":
-            _ctx = state.get("last_search_context", {}) or {}
+            # F5: a different-category context must not satisfy these checks — its
+            # budget/use_case/features answers belong to another product entirely.
+            _ctx = last_ctx if context_relates else {}
             substantive = bool(
                 current_slots.get("category")
                 or current_slots.get("product_name")
