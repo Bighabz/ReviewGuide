@@ -224,3 +224,39 @@ async def test_travel_intent_never_gets_packs(agent):
 
     system_prompt = agent.generate.call_args.kwargs["messages"][0]["content"]
     assert "CURATED QUESTION SET" not in system_prompt
+
+
+@pytest.mark.asyncio
+async def test_pack_matches_via_product_name_when_category_is_generic(agent):
+    """Prod case: 'best running shoes' extracts category='shoes' (no pack) but
+    product_name='running shoes' (pack key). The lookup must try every signal."""
+    agent.generate = AsyncMock(return_value=LLM_RESPONSE)
+
+    await agent._generate_followup_questions(
+        missing_slots=["features", "budget"],
+        current_slots={"category": "shoes", "product_name": "running shoes", "use_case": "running"},
+        user_message="best running shoes",
+        intent="product",
+    )
+
+    system_prompt = agent.generate.call_args.kwargs["messages"][0]["content"]
+    assert "CURATED QUESTION SET" in system_prompt
+    assert "What kind of running do you do?" in system_prompt
+    assert "Under $80" in system_prompt  # running-shoes brackets, not generic
+
+
+@pytest.mark.asyncio
+async def test_pack_matches_via_raw_query_as_last_resort(agent):
+    """No useful slots at all — the raw user message still finds the pack."""
+    agent.generate = AsyncMock(return_value=LLM_RESPONSE)
+
+    await agent._generate_followup_questions(
+        missing_slots=["use_case", "features", "budget"],
+        current_slots={},
+        user_message="I need a good air purifier for my apartment",
+        intent="product",
+    )
+
+    system_prompt = agent.generate.call_args.kwargs["messages"][0]["content"]
+    assert "CURATED QUESTION SET" in system_prompt
+    assert "What's the main concern?" in system_prompt
