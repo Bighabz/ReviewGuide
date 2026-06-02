@@ -435,6 +435,13 @@ async def plan_executor_node(state: GraphState) -> Dict[str, Any]:
             # _extract_results. Without this entry, chat.py never sees it and
             # always reports amazon/ebay as "unavailable".
             "affiliate_products": results.get("affiliate_products", {}),
+            # Outcome 2 (refinement chips) — propagate the search context built
+            # by product_compose so chat.py can persist it across turns (same
+            # node-boundary silent-drop as follow_up_question above). Fall back
+            # to the incoming state's value so a non-product turn doesn't wipe
+            # the context a previous product turn established.
+            "last_search_context": results.get("last_search_context") or state.get("last_search_context", {}),
+            "search_history": results.get("search_history") or state.get("search_history", []),
             "current_agent": "plan_executor",
             "status": "halted" if results.get("halt") else "completed",
             "next_agent": None,
@@ -454,6 +461,8 @@ async def plan_executor_node(state: GraphState) -> Dict[str, Any]:
         "follow_up_question": None,
         "transitional_reasoning": None,
         "affiliate_products": {},
+        "last_search_context": {},
+        "search_history": [],
         "current_agent": "plan_executor",
         "status": "completed",
         "next_agent": None,

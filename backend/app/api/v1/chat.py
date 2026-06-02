@@ -290,10 +290,18 @@ async def generate_chat_stream(
             elif halt_state_data:
                 followups = halt_state_data.get("followups", [])
                 if not followups:
-                    # No followups = not a halted state, just stored slots - treat as new query
-                    logger.info(f"Halt state exists but no followups - treating as new query, clearing stale state")
+                    # No followups = not a real halt, just the search context persisted
+                    # after a completed search. Treat as a new query, BUT keep the
+                    # context fields (Outcome 2): they're what lets a refinement chip
+                    # ("Show cheaper options") adjust the previous search instead of
+                    # starting cold, and what the intent agent uses to classify short
+                    # follow-ups. Everything else (plan, questions) is dropped.
+                    logger.info(f"Halt state exists but no followups - treating as new query (keeping search context)")
                     await HaltStateManager.delete_halt_state(session_id)
-                    halt_state_data = None
+                    halt_state_data = {
+                        "last_search_context": halt_state_data.get("last_search_context", {}),
+                        "search_history": halt_state_data.get("search_history", []),
+                    }
                     halt_exists = False
 
         logger.info(f"[ChatEndpoint] Loading conversation history for session {session_id}...")
@@ -690,6 +698,30 @@ async def generate_chat_stream(
         if result_state.get("status") != "halted" and halt_exists:
             # Workflow completed - clear halt state
             await HaltStateManager.delete_halt_state(session_id)
+
+        # Outcome 2 (refinement chips): after a completed product search, persist the
+        # search context to Redis as a context-only halt state (no followups). The
+        # next turn's initial_state restores last_search_context from it (line ~384),
+        # which is what lets "Show cheaper options" / "Only Sony" re-run the search
+        # with adjusted slots instead of starting from scratch — and what lets the
+        # clarifier skip re-asking questions the user already answered.
+        # The workflow treats a followups-less halt state as "not halted" (it clears
+        # it and proceeds as a new query), so this never traps the session in a halt.
+        if (
+            result_state.get("status") != "halted"
+            and result_state.get("last_search_context")
+        ):
+            try:
+                await HaltStateManager.update_halt_state(session_id, {
+                    "intent": result_state.get("intent"),
+                    "slots": result_state.get("slots", {}),
+                    "followups": [],  # context-only: NOT a real halt
+                    "last_search_context": result_state.get("last_search_context", {}),
+                    "search_history": result_state.get("search_history", []),
+                })
+                logger.info("💾 Persisted search context for follow-up turns (context-only halt state)")
+            except Exception as ctx_err:
+                logger.warning(f"Failed to persist search context (non-fatal): {ctx_err}")
 
         # Get the response text and ui_blocks
         response_text = result_state.get("assistant_text", "")

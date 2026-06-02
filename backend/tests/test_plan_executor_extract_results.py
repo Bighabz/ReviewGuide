@@ -106,3 +106,43 @@ class TestExtractResultsAffiliateProducts:
         assert results.get("follow_up_question") == (
             "Are you leaning toward noise cancellation or sound quality?"
         )
+
+
+class TestExtractResultsSearchContext:
+    """Outcome 2 (refinement chips): last_search_context + search_history built by
+    product_compose must be lifted into results so they can persist across turns."""
+
+    def test_last_search_context_lifted_from_compose_result(self):
+        ctx = {
+            "category": "headphones",
+            "product_names": ["Sony WH-1000XM5", "Bose QC45"],
+            "top_prices": {"Sony WH-1000XM5": 149.99, "Bose QC45": 169.0},
+            "budget": "under $200",
+        }
+        executor = _executor_with_compose_result()
+        executor.context["step_1.product_compose"]["last_search_context"] = ctx
+
+        results = executor._extract_results()
+
+        assert results.get("last_search_context") == ctx, (
+            "_extract_results must lift last_search_context from the compose result. "
+            "Without it, the search context never persists and refinement chips "
+            "('Show cheaper options') have nothing to adjust."
+        )
+
+    def test_search_history_lifted_from_compose_result(self):
+        history = [{"category": "laptops", "product_names": ["Dell XPS 13"]}]
+        executor = _executor_with_compose_result()
+        executor.context["step_1.product_compose"]["search_history"] = history
+
+        results = executor._extract_results()
+
+        assert results.get("search_history") == history
+
+    def test_context_absent_when_compose_has_none(self):
+        executor = _executor_with_compose_result()
+
+        results = executor._extract_results()
+
+        assert not results.get("last_search_context")
+        assert not results.get("search_history")

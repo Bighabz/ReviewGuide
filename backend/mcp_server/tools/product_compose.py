@@ -27,7 +27,10 @@ TOOL_CONTRACT = {
         "pre": [],  # Auto-added at end of product intent
         "post": []
     },
-    "produces": ["assistant_text", "ui_blocks", "citations"],
+    # last_search_context is produced so it lands in shared execution state —
+    # next_step_suggestion (which runs after compose) builds the slot-aware
+    # refinement chips ("Show cheaper options", "Only <brand>") from it.
+    "produces": ["assistant_text", "ui_blocks", "citations", "last_search_context"],
     "citation_message": "Putting it together…",
     "tool_order": 800,
     "is_default": True,
