@@ -25,6 +25,11 @@ function ChatPageContent() {
   const [showClearDialog, setShowClearDialog] = useState(false)
   const [currentSessionId, setCurrentSessionId] = useState<string>('')
   const [switchToSessionId, setSwitchToSessionId] = useState<string | undefined>(undefined)
+  // QA5 bug 4 — whether switchToSessionId is a BRAND-NEW session (New Chat / ?new=1)
+  // vs an existing conversation picked from the sidebar. New sessions skip the
+  // history fetch + spinner in ChatContainer (nothing to fetch; the spinner
+  // unmount stole the user's first focus/click on the welcome input).
+  const [switchToSessionIsNew, setSwitchToSessionIsNew] = useState(false)
   const [initialQuery, setInitialQuery] = useState<string | undefined>(undefined)
   // initialDraft: pre-fills the composer WITHOUT sending (editable starting point).
   // Used by Discover category chips / "popular" rows so the user can refine before asking.
@@ -52,6 +57,7 @@ function ChatPageContent() {
       localStorage.removeItem(CHAT_CONFIG.MESSAGES_STORAGE_KEY)
       localStorage.setItem(CHAT_CONFIG.SESSION_STORAGE_KEY, newSessionId)
       setSwitchToSessionId(newSessionId)
+      setSwitchToSessionIsNew(true)
       setCurrentSessionId(newSessionId)
       setInitialDraft(draft)
       setInitialQuery(undefined)
@@ -74,6 +80,7 @@ function ChatPageContent() {
       localStorage.setItem(CHAT_CONFIG.SESSION_STORAGE_KEY, newSessionId)
 
       setSwitchToSessionId(newSessionId)
+      setSwitchToSessionIsNew(true)
       setCurrentSessionId(newSessionId)
       setInitialQuery(query)
 
@@ -97,6 +104,7 @@ function ChatPageContent() {
       localStorage.setItem(CHAT_CONFIG.SESSION_STORAGE_KEY, newSessionId)
 
       setSwitchToSessionId(newSessionId)
+      setSwitchToSessionIsNew(true)
       setCurrentSessionId(newSessionId)
       setInitialQuery(undefined)
 
@@ -128,6 +136,7 @@ function ChatPageContent() {
 
   const handleSelectConversation = useCallback((sessionId: string) => {
     setSwitchToSessionId(sessionId)
+    setSwitchToSessionIsNew(false) // existing conversation — history fetch applies
     setCurrentSessionId(sessionId)
     setInitialQuery(undefined) // Clear initial query when switching conversations
   }, [])
@@ -140,6 +149,7 @@ function ChatPageContent() {
       return v.toString(16)
     })
     setSwitchToSessionId(newSessionId)
+    setSwitchToSessionIsNew(true)
     setCurrentSessionId(newSessionId)
     setInitialQuery(undefined)
     processedQueryRef.current = null // Reset for next potential URL param processing
@@ -180,6 +190,7 @@ function ChatPageContent() {
             <ChatContainer
               clearHistoryTrigger={clearHistoryTrigger}
               externalSessionId={switchToSessionId}
+              externalSessionIsNew={switchToSessionIsNew}
               onSessionChange={handleSessionChange}
               initialQuery={initialQuery}
               initialDraft={initialDraft}

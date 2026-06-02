@@ -78,6 +78,12 @@ export interface Message {
 interface ChatContainerProps {
   clearHistoryTrigger?: number
   externalSessionId?: string  // Allow parent to set session ID
+  /** QA5 bug 4 — true when externalSessionId is a BRAND-NEW session (New Chat /
+      ?new=1). New sessions have no server history by definition, so the history
+      fetch + loading spinner are skipped: the spinner unmounted the welcome
+      screen and stole the user's first click/focus, and the fetch was a
+      guaranteed 401 for anonymous users (console noise). */
+  externalSessionIsNew?: boolean
   onSessionChange?: (sessionId: string) => void  // Notify parent of session changes
   initialQuery?: string  // Initial query from URL params (for sticky chat bar) — AUTO-SENDS
   initialDraft?: string  // Pre-fills the composer WITHOUT sending (editable starting point)
@@ -85,7 +91,7 @@ interface ChatContainerProps {
 
 const CYCLING_VERBS = ['simplified.', 'effortless.', 'smarter.', 'reimagined.', 'personalized.', 'instant.']
 
-export default function ChatContainer({ clearHistoryTrigger, externalSessionId, onSessionChange, initialQuery, initialDraft }: ChatContainerProps) {
+export default function ChatContainer({ clearHistoryTrigger, externalSessionId, externalSessionIsNew, onSessionChange, initialQuery, initialDraft }: ChatContainerProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const { streamState, dispatch: dispatchStream, isStreaming } = useStreamReducer()
@@ -306,6 +312,19 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
     // Only handle session switches that DON'T have an initialQuery (those are handled above)
     if (externalSessionId && externalSessionId !== lastExternalSessionIdRef.current && !initialQuery) {
       lastExternalSessionIdRef.current = externalSessionId
+
+      // QA5 bug 4 — brand-new session (New Chat / ?new=1): nothing to fetch.
+      // Reset synchronously with NO loading spinner, so the welcome screen (and
+      // anything the user already focused/typed) never unmounts, and no
+      // guaranteed-401 history request fires for anonymous users.
+      if (externalSessionIsNew) {
+        setMessages([])
+        setSessionId(externalSessionId)
+        localStorage.setItem(CHAT_CONFIG.SESSION_STORAGE_KEY, externalSessionId)
+        localStorage.setItem(CHAT_CONFIG.MESSAGES_STORAGE_KEY, JSON.stringify([]))
+        setIsLoadingHistory(false)
+        return
+      }
 
       const switchToSession = async () => {
         setIsLoadingHistory(true)
