@@ -594,3 +594,115 @@ async def test_blog_includes_source_inline_links(capturing_model_service):
     assert "[Wirecutter]" in user_content, (
         f"Expected '[Wirecutter]' markdown link in blog_data, but got:\n{user_content[:500]}"
     )
+
+
+@pytest.mark.asyncio
+async def test_google_shopping_is_context_only_not_a_buy_link():
+    """Google Shopping (serper_shopping) must be used for price/image/rating
+    CONTEXT only — never as a clickable buy-link to a merchant we don't earn
+    from. The real price still backfills the Amazon offer, but every clickable
+    affiliate_link points to Amazon."""
+    fake_service = MagicMock()
+    fake_service.generate_compose = AsyncMock(return_value="mock response text")
+
+    state = {
+        "user_message": "best wireless earbuds under $100",
+        "intent": "product",
+        "slots": {"category": "earbuds"},
+        "normalized_products": [{"name": "Jabra Elite 3"}],
+        "affiliate_products": {
+            "amazon": [{
+                "product_name": "Jabra Elite 3",
+                "offers": [{
+                    "title": "Jabra Elite 3", "price": 0, "currency": "USD",
+                    "url": "https://amzn.to/jabra", "merchant": "Amazon",
+                    "image_url": "",
+                }],
+            }],
+            "serper_shopping": [{
+                "product_name": "Jabra Elite 3",
+                "offers": [{
+                    "title": "Jabra Elite 3", "price": 79.99, "currency": "USD",
+                    "url": "https://www.google.com/shopping/product/jabra",
+                    "merchant": "Walmart", "image_url": "https://img.example.com/jabra.jpg",
+                    "rating": 4.4, "review_count": 5000, "source": "serper_shopping",
+                }],
+            }],
+        },
+        "review_data": {},
+        "comparison_html": None,
+        "comparison_data": None,
+        "general_product_info": "",
+        "conversation_history": [],
+        "last_search_context": {},
+        "search_history": [],
+    }
+
+    with patch("app.services.model_service.model_service", fake_service):
+        result = await product_compose(state)
+
+    review_cards = [b for b in result.get("ui_blocks", []) if b.get("type") == "product_review"]
+    assert review_cards
+    links = review_cards[0]["data"]["affiliate_links"]
+
+    # No clickable link points at Google Shopping or the non-affiliate merchant.
+    for link in links:
+        url = (link.get("affiliate_link") or "").lower()
+        assert "google.com/shopping" not in url, f"Google Shopping URL leaked as a buy-link: {url}"
+        assert link.get("merchant") != "Walmart", f"non-affiliate merchant surfaced: {link}"
+    # Every clickable link is an Amazon (affiliate) link.
+    assert all(
+        "amazon" in (l.get("affiliate_link") or "").lower()
+        or "amzn.to" in (l.get("affiliate_link") or "").lower()
+        for l in links
+    ), f"a non-Amazon buy-link survived: {[l.get('affiliate_link') for l in links]}"
+    # But the price CONTEXT from Shopping still flowed onto the card.
+    assert any(l.get("price") == 79.99 for l in links), "Shopping price context was lost"
+    # And the clean Shopping image is used.
+    assert review_cards[0]["data"]["image_url"] == "https://img.example.com/jabra.jpg"
+
+
+@pytest.mark.asyncio
+async def test_shopping_only_product_falls_back_to_tagged_amazon_search():
+    """If Google Shopping is the ONLY priced source (no Amazon/eBay offer), the
+    card keeps a buy-link — a tagged Amazon SEARCH url carrying the real price —
+    instead of dropping the card or linking out to a non-affiliate merchant."""
+    fake_service = MagicMock()
+    fake_service.generate_compose = AsyncMock(return_value="mock response text")
+
+    state = {
+        "user_message": "best wireless earbuds under $100",
+        "intent": "product",
+        "slots": {"category": "earbuds"},
+        "normalized_products": [{"name": "Jabra Elite 3"}],
+        "affiliate_products": {
+            "serper_shopping": [{
+                "product_name": "Jabra Elite 3",
+                "offers": [{
+                    "title": "Jabra Elite 3", "price": 79.99, "currency": "USD",
+                    "url": "https://www.google.com/shopping/product/jabra",
+                    "merchant": "Walmart", "image_url": "https://img.example.com/jabra.jpg",
+                    "rating": 4.4, "review_count": 5000, "source": "serper_shopping",
+                }],
+            }],
+        },
+        "review_data": {},
+        "comparison_html": None,
+        "comparison_data": None,
+        "general_product_info": "",
+        "conversation_history": [],
+        "last_search_context": {},
+        "search_history": [],
+    }
+
+    with patch("app.services.model_service.model_service", fake_service):
+        result = await product_compose(state)
+
+    review_cards = [b for b in result.get("ui_blocks", []) if b.get("type") == "product_review"]
+    assert review_cards
+    links = review_cards[0]["data"]["affiliate_links"]
+    assert links, "card lost its only buy-link"
+    for link in links:
+        url = (link.get("affiliate_link") or "").lower()
+        assert "google.com/shopping" not in url
+        assert "amazon.com/s" in url and "tag=revguide-20" in url, f"expected tagged Amazon search, got {url}"

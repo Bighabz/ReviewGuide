@@ -1360,7 +1360,35 @@ TRANSITIONAL RULES (transitional_reasoning field):
                     return (2, not o.get("image_url"))
                 return (3, not o.get("image_url"))
 
-            sorted_offers = sorted(real_offers, key=_offer_sort_key)
+            # Offers eligible to become CLICKABLE buy-links. Exclude Google Shopping
+            # (serper_shopping): we only earn on our Amazon affiliate links, so Shopping
+            # data is used for price/image/rating CONTEXT only (it still backfills the
+            # Amazon offer's price and supplies the card image above) — never as a buy
+            # destination to a merchant we aren't an affiliate of.
+            link_offers = [
+                o for o in real_offers if o.get("source", "").lower() != "serper_shopping"
+            ]
+            # If Shopping was the ONLY priced source (no Amazon/eBay offer), keep the
+            # card but point the buy-link at a tagged Amazon SEARCH url, carrying the
+            # real price/image as display context — rather than dropping the card or
+            # linking out to a non-affiliate merchant.
+            if not link_offers:
+                shop = next(
+                    (o for o in real_offers if o.get("source", "").lower() == "serper_shopping"),
+                    {},
+                )
+                link_offers = [{
+                    "source": "amazon",
+                    "merchant": "Amazon",
+                    "url": f"https://www.amazon.com/s?k={quote_plus(pname)}&tag=revguide-20",
+                    "price": shop.get("price", 0),
+                    "currency": shop.get("currency", "USD"),
+                    "image_url": shop.get("image_url", ""),
+                    "rating": shop.get("rating"),
+                    "review_count": shop.get("review_count"),
+                }]
+
+            sorted_offers = sorted(link_offers, key=_offer_sort_key)
 
             # Dedupe by merchant — keep only 1 offer per merchant (e.g., one eBay, one Amazon)
             seen_merchants = set()
