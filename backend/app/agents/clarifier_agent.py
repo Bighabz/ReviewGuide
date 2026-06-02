@@ -143,6 +143,22 @@ class ClarifierAgent(BaseAgent):
                     "proceed_to_execution": True  # Skip to next agent
                 }
 
+            # ── Pending questions take priority over refinement / follow-up shortcuts ──
+            # If the previous turn asked clarifier questions, this message IS the answer
+            # and must go to _handle_user_answer. This check has to come BEFORE the
+            # last_search_context block below: those shortcuts treat any short message
+            # ("You chose: Side sleeper" — 4 tokens) as a follow-up query whenever prior
+            # search context exists (i.e. any 2nd+ search in a session), which hijacks
+            # the chip answer, silently discards the remaining questions, and runs the
+            # search with stale inherited slots. (QA Round 4 — finding F0)
+            halt_state = await HaltStateManager.get_halt_state(session_id)
+            has_followups = bool(halt_state and halt_state.get("followups"))
+
+            if has_followups:
+                # RESUMED SESSION: User is answering follow-up questions
+                logger.info(f"[Clarifier Agent] Resumed session - extracting slots from user answer")
+                return await self._handle_user_answer(state, halt_state, session_id)
+
             # Skip clarification for follow-up queries when search context exists
             last_search_context = state.get("last_search_context", {})
             if last_search_context and intent == "product":
@@ -297,20 +313,9 @@ class ClarifierAgent(BaseAgent):
                         "proceed_to_execution": True
                     }
 
-            # Check if halt state exists (resumed session)
-            halt_state = await HaltStateManager.get_halt_state(session_id)
-
-            # Check if we have actual followup questions (not just empty list)
-            has_followups = halt_state and halt_state.get("followups") and len(halt_state.get("followups", [])) > 0
-
-            if has_followups:
-                # RESUMED SESSION: User is answering follow-up questions
-                logger.info(f"[Clarifier Agent] Resumed session - extracting slots from user answer")
-                return await self._handle_user_answer(state, halt_state, session_id)
-            else:
-                # NEW SESSION: Check if plan requires slots
-                logger.info(f"[Clarifier Agent] New session - checking plan for required slots")
-                return await self._handle_new_plan(state, session_id)
+            # NEW SESSION (no pending questions — checked above): check if plan requires slots
+            logger.info(f"[Clarifier Agent] New session - checking plan for required slots")
+            return await self._handle_new_plan(state, session_id)
 
         except Exception as e:
             logger.error(f"[Clarifier Agent] Error: {str(e)}", exc_info=True)

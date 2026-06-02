@@ -380,3 +380,144 @@ async def test_anaphoric_follow_up_still_works(agent):
 
     assert result["proceed_to_execution"] is True
     assert result["slots"]["category"] == "headphones"
+
+
+# ---------------------------------------------------------------------------
+# QA Round 4 — F0: pending questions take priority over follow-up shortcuts
+# ---------------------------------------------------------------------------
+# When the previous turn asked clarifier questions, the user's next message IS
+# the answer. It must reach _handle_user_answer even when last_search_context
+# exists (2nd+ search in a session) and the message is short enough to look
+# like a "follow-up query" to the inheritance shortcut.
+
+MATTRESS_PENDING_HALT_STATE = {
+    "intent": "product",
+    "slots": {},
+    "followups": [
+        {"slot": "use_case", "question": "How do you usually sleep?",
+         "options": ["Side sleeper", "Back sleeper", "Stomach sleeper", "It varies"]},
+        {"slot": "features", "question": "How firm do you like your mattress?",
+         "options": ["Soft", "Medium", "Firm"]},
+        {"slot": "budget", "question": "What's your budget for a mattress?",
+         "options": ["Under $500", "$500–$1,000", "$1,000–$2,000", "$2,000+"]},
+    ],
+    "missing_required_slots": ["use_case", "features", "budget"],
+    "plan": {"steps": [{"id": "s1", "tools": ["product_search"]}]},
+    "tools_by_required_slot": {},
+}
+
+MATTRESS_CONTEXT = {
+    "category": "mattress",
+    "product_type": "mattress",
+    "product_names": ["Nectar Sleep Premier", "Casper Original", "DreamCloud Luxury"],
+    "budget": "under $1500",
+    "brand": None,
+    "features": "memory foam",
+    "use_case": "side sleeper",
+    "top_prices": {"Nectar Sleep Premier": 899.0},
+    "avg_rating": {},
+    "query": "best mattress",
+}
+
+
+@pytest.mark.asyncio
+async def test_chip_answer_with_pending_questions_goes_to_extraction(agent):
+    """F0 regression: 'You chose: Side sleeper' while 3 questions are pending must be
+    treated as an ANSWER (extraction + re-ask remaining), never as a follow-up query
+    that skips clarification — even with same-category search context present."""
+    state = _refinement_state("You chose: Side sleeper", context=dict(MATTRESS_CONTEXT))
+
+    captured = {}
+
+    async def fake_handle_user_answer(st, halt_state, session_id):
+        captured["called"] = True
+        captured["halt_state"] = halt_state
+        return {
+            "slots": {"use_case": "Side sleeper"},
+            "followups": MATTRESS_PENDING_HALT_STATE["followups"][1:],
+            "missing_required_slots": ["features", "budget"],
+            "proceed_to_execution": False,
+        }
+
+    agent._handle_user_answer = fake_handle_user_answer
+
+    with patch(
+        "app.agents.clarifier_agent.HaltStateManager.get_halt_state",
+        new=AsyncMock(return_value=dict(MATTRESS_PENDING_HALT_STATE)),
+    ):
+        result = await agent.execute(state)
+
+    assert captured.get("called") is True, (
+        "A chip answer with pending followups must go to _handle_user_answer — the "
+        "follow-up/inheritance shortcut hijacked it (QA Round 4 F0)."
+    )
+    assert result["proceed_to_execution"] is False
+    assert result["missing_required_slots"] == ["features", "budget"]
+
+
+@pytest.mark.asyncio
+async def test_budget_chip_answer_with_pending_questions_not_hijacked(agent):
+    """F0 regression: budget chips ('You chose: $100–$250' — 3 tokens) are also short
+    enough for the follow-up rule; with pending questions they must go to extraction."""
+    state = _refinement_state("You chose: $500–$1,000", context=dict(MATTRESS_CONTEXT))
+
+    captured = {}
+
+    async def fake_handle_user_answer(st, halt_state, session_id):
+        captured["called"] = True
+        return {
+            "slots": {"budget": "$500–$1,000"},
+            "followups": [],
+            "missing_required_slots": [],
+            "proceed_to_execution": True,
+        }
+
+    agent._handle_user_answer = fake_handle_user_answer
+
+    with patch(
+        "app.agents.clarifier_agent.HaltStateManager.get_halt_state",
+        new=AsyncMock(return_value=dict(MATTRESS_PENDING_HALT_STATE)),
+    ):
+        result = await agent.execute(state)
+
+    assert captured.get("called") is True
+    assert result["proceed_to_execution"] is True
+    assert result["slots"]["budget"] == "$500–$1,000"
+
+
+@pytest.mark.asyncio
+async def test_refinement_chip_with_no_pending_questions_still_refines(agent):
+    """Refinement chips arrive AFTER results (no pending questions) — the refinement
+    path must still work when the halt state is context-only (followups: [])."""
+    state = _refinement_state("You chose: Show cheaper options")
+
+    context_only_halt_state = {
+        "intent": "product",
+        "slots": {},
+        "followups": [],  # context-only halt state (saved after a completed search)
+        "plan": None,
+    }
+
+    with patch(
+        "app.agents.clarifier_agent.HaltStateManager.get_halt_state",
+        new=AsyncMock(return_value=context_only_halt_state),
+    ):
+        result = await agent.execute(state)
+
+    assert result["proceed_to_execution"] is True
+    assert result["followups"] == []
+    assert result["slots"]["budget"] == "under $119"
+
+
+@pytest.mark.asyncio
+async def test_intro_intent_still_skips_before_halt_state(agent):
+    """Intro/unclear intents skip the clarifier entirely — even with pending questions."""
+    state = _refinement_state("hi", context={})
+    state["intent"] = "intro"
+
+    halt_lookup = AsyncMock(return_value=dict(MATTRESS_PENDING_HALT_STATE))
+    with patch("app.agents.clarifier_agent.HaltStateManager.get_halt_state", new=halt_lookup):
+        result = await agent.execute(state)
+
+    assert result["proceed_to_execution"] is True
+    halt_lookup.assert_not_called()
