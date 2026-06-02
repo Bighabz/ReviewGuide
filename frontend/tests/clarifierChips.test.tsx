@@ -317,3 +317,95 @@ describe('Clarifier chips — multi-select questions', () => {
     expect(screen.getAllByTestId('clarifier-option-chip')).toHaveLength(8)
   })
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 4. QA Round 4 F0b — question locking: chips give feedback and can't double-submit
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('Clarifier chips — question locking after an answer (QA4 F0b)', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('tapping a single-select chip marks it selected (terracotta) and disables the question', () => {
+    render(<Message message={makeClarifierMessage([LAPTOP_USE_CASE_QUESTION]) as any} />)
+    const chip = screen.getByText('Gaming').closest('button')!
+    fireEvent.click(chip)
+
+    // The tapped chip is highlighted…
+    expect(chip.className).toContain('bg-[var(--terra)]')
+    expect(chip.getAttribute('aria-pressed')).toBe('true')
+    // …and every chip in the question is now disabled
+    const chips = screen.getAllByTestId('clarifier-option-chip')
+    chips.forEach((c) => expect((c as HTMLButtonElement).disabled).toBe(true))
+  })
+
+  it('a second tap on another chip in the same question does NOT dispatch a second send', () => {
+    const dispatched: any[] = []
+    const spy = vi
+      .spyOn(window, 'dispatchEvent')
+      .mockImplementation((event: Event) => {
+        dispatched.push(event)
+        return true
+      })
+
+    render(<Message message={makeClarifierMessage([LAPTOP_USE_CASE_QUESTION]) as any} />)
+    fireEvent.click(screen.getByText('Gaming'))
+    fireEvent.click(screen.getByText('Business / office'))
+    fireEvent.click(screen.getByText('Gaming')) // double-tap the same chip too
+
+    const sendEvents = dispatched.filter((e) => e.type === 'sendSuggestion')
+    expect(sendEvents).toHaveLength(1)
+    expect((sendEvents[0] as CustomEvent).detail.question).toBe('Gaming')
+    spy.mockRestore()
+  })
+
+  it('answering one question does not lock a different question in the same block', () => {
+    const dispatched: any[] = []
+    const spy = vi
+      .spyOn(window, 'dispatchEvent')
+      .mockImplementation((event: Event) => {
+        dispatched.push(event)
+        return true
+      })
+
+    render(
+      <Message
+        message={makeClarifierMessage([LAPTOP_USE_CASE_QUESTION, LAPTOP_BUDGET_QUESTION]) as any}
+      />
+    )
+    fireEvent.click(screen.getByText('Gaming'))
+    // The budget question is its own component instance — still answerable
+    fireEvent.click(screen.getByText('Under $500'))
+
+    const sendEvents = dispatched.filter((e) => e.type === 'sendSuggestion')
+    expect(sendEvents).toHaveLength(2)
+    expect((sendEvents[1] as CustomEvent).detail.question).toBe('Under $500')
+    spy.mockRestore()
+  })
+
+  it('multi-select Done locks the question — chips and Done go inert after submit', () => {
+    const dispatched: any[] = []
+    const spy = vi
+      .spyOn(window, 'dispatchEvent')
+      .mockImplementation((event: Event) => {
+        dispatched.push(event)
+        return true
+      })
+
+    render(<Message message={makeClarifierMessage([HEADPHONES_FEATURES_MULTISELECT]) as any} />)
+    fireEvent.click(screen.getByText('Noise cancelling'))
+    fireEvent.click(screen.getByTestId('clarifier-multiselect-done'))
+
+    // Done button disappears after submit; chips are disabled
+    expect(screen.queryByTestId('clarifier-multiselect-done')).toBeNull()
+    const chips = screen.getAllByTestId('clarifier-option-chip')
+    chips.forEach((c) => expect((c as HTMLButtonElement).disabled).toBe(true))
+
+    // Toggling a chip after submit must not change selection or re-send
+    fireEvent.click(screen.getByText('Waterproof'))
+    const sendEvents = dispatched.filter((e) => e.type === 'sendSuggestion')
+    expect(sendEvents).toHaveLength(1)
+    spy.mockRestore()
+  })
+})

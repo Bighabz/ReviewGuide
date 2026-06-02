@@ -386,6 +386,13 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
   // Ref to always hold the latest handleSuggestionClick (avoids stale closure in event listener)
   const handleSuggestionClickRef = useRef<(question: string) => void>(() => { })
 
+  // QA Round 4 F0b — SYNCHRONOUS double-submit guard. isStreaming is React state,
+  // so two rapid chip taps (or chip + Enter) can both read the stale `false` value
+  // before the first tap's re-render lands — committing two user turns from what
+  // the user experienced as one action (the phantom-commit bug from external QA).
+  // A ref flips synchronously on the first call and blocks the second.
+  const sendInFlightRef = useRef(false)
+
   // Shared function to handle streaming with error management
   // overrideSessionId allows passing session ID directly when state hasn't updated yet
   const handleStream = async (messageToSend: string, isSuggestion: boolean = false, overrideSessionId?: string) => {
@@ -675,23 +682,28 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
 
   // Handle suggestion click from next_suggestions buttons
   const handleSuggestionClick = async (question: string) => {
-    if (isStreaming) return
+    if (isStreaming || sendInFlightRef.current) return
+    sendInFlightRef.current = true
 
-    // Prefix so backend knows this is a user accepting a bot suggestion
-    const messageToSend = `${SUGGESTION_CLICK_PREFIX} ${question}`
+    try {
+      // Prefix so backend knows this is a user accepting a bot suggestion
+      const messageToSend = `${SUGGESTION_CLICK_PREFIX} ${question}`
 
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      role: 'user',
-      content: messageToSend,
-      timestamp: new Date(),
-      isSuggestionClick: true,  // Mark as suggestion click for different visual treatment
+      const userMessage: Message = {
+        id: Date.now().toString(),
+        role: 'user',
+        content: messageToSend,
+        timestamp: new Date(),
+        isSuggestionClick: true,  // Mark as suggestion click for different visual treatment
+      }
+
+      setMessages((prev) => [...prev, userMessage])
+
+      // Use shared streaming function
+      await handleStream(messageToSend, true)
+    } finally {
+      sendInFlightRef.current = false
     }
-
-    setMessages((prev) => [...prev, userMessage])
-
-    // Use shared streaming function
-    await handleStream(messageToSend, true)
   }
 
   // Keep ref in sync with the latest handleSuggestionClick
@@ -714,24 +726,29 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
 
   const handleSendMessage = async (overrideText?: string) => {
     const messageToSend = overrideText ?? input
-    if (!messageToSend.trim() || isStreaming) return
+    if (!messageToSend.trim() || isStreaming || sendInFlightRef.current) return
+    sendInFlightRef.current = true
 
-    // Clear error banner when sending new message
-    setShowErrorBanner(false)
-    setPendingUserMessage('')
+    try {
+      // Clear error banner when sending new message
+      setShowErrorBanner(false)
+      setPendingUserMessage('')
 
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      role: 'user',
-      content: messageToSend,
-      timestamp: new Date(),
+      const userMessage: Message = {
+        id: Date.now().toString(),
+        role: 'user',
+        content: messageToSend,
+        timestamp: new Date(),
+      }
+
+      setMessages((prev) => [...prev, userMessage])
+      setInput('')
+
+      // Use shared streaming function
+      await handleStream(messageToSend, false)
+    } finally {
+      sendInFlightRef.current = false
     }
-
-    setMessages((prev) => [...prev, userMessage])
-    setInput('')
-
-    // Use shared streaming function
-    await handleStream(messageToSend, false)
   }
 
   // RFC §2.3: when the stream transitions to 'interrupted', preserve partial content

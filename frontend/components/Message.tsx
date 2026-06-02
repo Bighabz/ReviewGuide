@@ -78,11 +78,22 @@ function MultiSelectQuestion({
   onSubmit: (joined: string) => void
 }) {
   const [selected, setSelected] = useState<string[]>([])
+  // QA Round 4 F0b — once Done is tapped the question locks: chips and the Done
+  // button go inert so a double-click can't submit the same answer twice.
+  const [submitted, setSubmitted] = useState(false)
 
-  const toggle = (option: string) =>
+  const toggle = (option: string) => {
+    if (submitted) return
     setSelected((prev) =>
       prev.includes(option) ? prev.filter((o) => o !== option) : [...prev, option]
     )
+  }
+
+  const submit = () => {
+    if (submitted || selected.length === 0) return
+    setSubmitted(true)
+    onSubmit(selected.join(', '))
+  }
 
   return (
     <div className="space-y-2" data-testid="clarifier-question">
@@ -94,12 +105,15 @@ function MultiSelectQuestion({
             <button
               key={option}
               onClick={() => toggle(option)}
+              disabled={submitted}
               data-testid="clarifier-option-chip"
               aria-pressed={isSelected}
               className={
                 isSelected
                   ? 'inline-flex items-center gap-2 rounded-[12px] border border-[var(--terra)] bg-[var(--terra)] transition-all px-3.5 py-2 text-[14px] font-medium text-white'
-                  : 'inline-flex items-center gap-2 rounded-[12px] border border-[var(--line-2)] bg-[var(--paper-hi)] hover:border-[var(--terra)] hover:bg-[var(--terra-soft)] transition-all px-3.5 py-2 text-[14px] font-medium text-[var(--ink)]'
+                  : submitted
+                    ? 'inline-flex items-center gap-2 rounded-[12px] border border-[var(--line-2)] bg-[var(--paper-hi)] transition-all px-3.5 py-2 text-[14px] font-medium text-[var(--ink-3)] opacity-60'
+                    : 'inline-flex items-center gap-2 rounded-[12px] border border-[var(--line-2)] bg-[var(--paper-hi)] hover:border-[var(--terra)] hover:bg-[var(--terra-soft)] transition-all px-3.5 py-2 text-[14px] font-medium text-[var(--ink)]'
               }
             >
               <span
@@ -110,9 +124,9 @@ function MultiSelectQuestion({
             </button>
           )
         })}
-        {selected.length > 0 && (
+        {selected.length > 0 && !submitted && (
           <button
-            onClick={() => onSubmit(selected.join(', '))}
+            onClick={submit}
             data-testid="clarifier-multiselect-done"
             className="inline-flex items-center gap-2 rounded-[12px] border border-[var(--terra)] bg-[var(--paper-hi)] hover:bg-[var(--terra-soft)] transition-all px-3.5 py-2 text-[14px] font-semibold text-[var(--terra)]"
           >
@@ -120,6 +134,70 @@ function MultiSelectQuestion({
             <ArrowRight size={14} strokeWidth={1.5} />
           </button>
         )}
+      </div>
+      <p className="text-[12px] italic text-[var(--ink-3)]">{hint}</p>
+    </div>
+  )
+}
+
+/**
+ * Single-select clarifier question — tapping a chip submits it as the answer.
+ *
+ * QA Round 4 F0b — after one tap the question LOCKS: the tapped chip turns
+ * terracotta (instant visual feedback that the answer registered) and every
+ * chip in the question goes inert. Without this, chips gave no feedback and
+ * stayed clickable forever, so users re-clicked (thinking the tap didn't
+ * register) and rapid clicks raced past ChatContainer's async isStreaming
+ * guard — committing phantom duplicate turns.
+ */
+function SingleSelectQuestion({
+  question,
+  options,
+  hint,
+  onSubmit,
+}: {
+  question: string
+  options: string[]
+  hint: string
+  onSubmit: (option: string) => void
+}) {
+  const [answered, setAnswered] = useState<string | null>(null)
+
+  const pick = (option: string) => {
+    if (answered !== null) return // locked — this question was already answered
+    setAnswered(option)
+    onSubmit(option)
+  }
+
+  return (
+    <div className="space-y-2" data-testid="clarifier-question">
+      <p className="text-[14px] leading-[20px] text-[var(--ink)]">{question}</p>
+      <div className="flex flex-wrap gap-2">
+        {options.map((option) => {
+          const isSelected = answered === option
+          return (
+            <button
+              key={option}
+              onClick={() => pick(option)}
+              disabled={answered !== null}
+              data-testid="clarifier-option-chip"
+              aria-pressed={isSelected}
+              className={
+                isSelected
+                  ? 'inline-flex items-center gap-2 rounded-[12px] border border-[var(--terra)] bg-[var(--terra)] transition-all px-3.5 py-2 text-[14px] font-medium text-white'
+                  : answered !== null
+                    ? 'inline-flex items-center gap-2 rounded-[12px] border border-[var(--line-2)] bg-[var(--paper-hi)] transition-all px-3.5 py-2 text-[14px] font-medium text-[var(--ink-3)] opacity-60'
+                    : 'inline-flex items-center gap-2 rounded-[12px] border border-[var(--line-2)] bg-[var(--paper-hi)] hover:border-[var(--terra)] hover:bg-[var(--terra-soft)] transition-all px-3.5 py-2 text-[14px] font-medium text-[var(--ink)]'
+              }
+            >
+              <span
+                className="w-1 h-1 rounded-full flex-shrink-0"
+                style={{ background: isSelected ? '#fff' : 'var(--terra)' }}
+              />
+              {option}
+            </button>
+          )
+        })}
       </div>
       <p className="text-[12px] italic text-[var(--ink-3)]">{hint}</p>
     </div>
@@ -416,24 +494,16 @@ export default function Message({ message, isLast = false }: MessageProps) {
                                 />
                               )
                             }
+                            // Single-select question: chips submit on tap, then the
+                            // question locks (selected highlight + inert chips).
                             return (
-                              <div key={idx} className="space-y-2" data-testid="clarifier-question">
-                                <p className="text-[14px] leading-[20px] text-[var(--ink)]">{q.question}</p>
-                                <div className="flex flex-wrap gap-2">
-                                  {options.map((option) => (
-                                    <button
-                                      key={option}
-                                      onClick={() => send(option)}
-                                      data-testid="clarifier-option-chip"
-                                      className="inline-flex items-center gap-2 rounded-[12px] border border-[var(--line-2)] bg-[var(--paper-hi)] hover:border-[var(--terra)] hover:bg-[var(--terra-soft)] transition-all px-3.5 py-2 text-[14px] font-medium text-[var(--ink)]"
-                                    >
-                                      <span className="w-1 h-1 rounded-full flex-shrink-0" style={{ background: 'var(--terra)' }} />
-                                      {option}
-                                    </button>
-                                  ))}
-                                </div>
-                                <p className="text-[12px] italic text-[var(--ink-3)]">{hint}</p>
-                              </div>
+                              <SingleSelectQuestion
+                                key={idx}
+                                question={q.question}
+                                options={options}
+                                hint={hint}
+                                onSubmit={send}
+                              />
                             )
                           }
                           return (
