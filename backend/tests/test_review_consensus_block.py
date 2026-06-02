@@ -173,8 +173,11 @@ async def test_template_consensus_never_names_sources():
     That template must not name review sites (tone.md: no source citations)."""
     fake_service = _fake_service()
 
-    # 5 reviewed products → top 3 get (mocked) LLM consensus, last 2 get templates
+    # 5 reviewed products → top 3 get (mocked) LLM consensus, last 2 get templates.
+    # Each product also needs a purchasable offer: QA5 bug 6 made the consensus
+    # block only show products that appear in the cards (offer required).
     review_data = {}
+    shopping_offers = []
     site_names = ["Wirecutter", "RTINGS", "TechRadar", "SoundGuys", "PCMag"]
     for i in range(5):
         name = f"Headphone Model {i + 1}"
@@ -186,8 +189,26 @@ async def test_template_consensus_never_names_sources():
                 {"site_name": site_names[i], "url": f"https://example.com/{i}", "snippet": f"Snippet {i}"},
             ],
         }
+        shopping_offers.append({
+            "product_name": name,
+            "offers": [{
+                "title": name, "price": 199.0 + i, "currency": "USD",
+                "url": f"https://www.google.com/shopping/product/{i}", "merchant": "BestBuy",
+                "image_url": f"https://img.example.com/{i}.jpg",
+                "source": "serper_shopping",
+            }],
+        })
 
-    state = _base_state(review_data=review_data)
+    state = _base_state(
+        review_data=review_data,
+        # The 5 reviewed products must also exist in the search results + have offers:
+        # QA5 bug 6 made the consensus block only show products that get cards.
+        normalized_products=[
+            {"name": f"Headphone Model {i + 1}", "price": 199.0 + i, "url": f"https://example.com/{i}"}
+            for i in range(5)
+        ],
+        affiliate_products={"serper_shopping": shopping_offers},
+    )
 
     with patch("app.services.model_service.model_service", fake_service):
         result = await product_compose(state)
@@ -250,3 +271,74 @@ async def test_mixed_scale_ratings_normalize_to_five_scale():
     assert bundle.avg_rating <= 5.0, f"avg_rating {bundle.avg_rating} exceeds the 5-star scale"
     # 8.5/10 → 4.25; shopping 4.5 stays → avg = round((4.25 + 4.5) / 2, 1) = 4.4
     assert bundle.avg_rating == 4.4
+
+
+# ---------------------------------------------------------------------------
+# QA Round 5 (external bug 6) — consensus block matches the cards
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_offerless_reviewed_product_excluded_from_consensus():
+    """A product with review data but NO purchasable offer must not appear in the
+    consensus block (it has no card — ranking it #1 contradicts the page)."""
+    fake_service = _fake_service()
+
+    review_data = dict(_REVIEW_DATA)
+    # Reviewed heavily, ranked first by quality score — but nobody sells it here
+    review_data["Sennheiser Momentum 4"] = {
+        "avg_rating": 4.8,
+        "total_reviews": 9000,
+        "quality_score": 0.99,  # would rank #1 without the filter
+        "sources": [
+            {"site_name": "RTINGS", "url": "https://rtings.com/senn", "snippet": "Class-leading battery"},
+        ],
+    }
+
+    state = _base_state(review_data=review_data)
+
+    with patch("app.services.model_service.model_service", fake_service):
+        result = await product_compose(state)
+
+    blocks = result.get("ui_blocks", [])
+    consensus_blocks = [b for b in blocks if b.get("type") == "review_consensus"]
+    assert consensus_blocks
+
+    products = consensus_blocks[0]["data"]["products"]
+    names = [p["name"] for p in products]
+    assert "Sennheiser Momentum 4" not in names, (
+        "offerless product must be suppressed from the consensus block"
+    )
+    # The remaining products keep a gap-free 1..N rank sequence
+    assert [p["rank"] for p in products] == list(range(1, len(products) + 1))
+    # And the products that DO have offers still appear
+    assert "Sony WH-1000XM5" in names
+
+
+@pytest.mark.asyncio
+async def test_consensus_rank_renumbered_after_filtering():
+    """When the would-be #1 product is filtered out, the survivors are ranked 1..N
+    (no gaps, no rank-2-first lists)."""
+    fake_service = _fake_service()
+
+    review_data = dict(_REVIEW_DATA)
+    review_data["Phantom Product X"] = {
+        "avg_rating": 5.0,
+        "total_reviews": 50000,
+        "quality_score": 1.0,  # top quality score, but no offer anywhere
+        "sources": [
+            {"site_name": "PCMag", "url": "https://pcmag.com/x", "snippet": "Incredible"},
+        ],
+    }
+
+    state = _base_state(review_data=review_data)
+
+    with patch("app.services.model_service.model_service", fake_service):
+        result = await product_compose(state)
+
+    consensus_blocks = [
+        b for b in result.get("ui_blocks", []) if b.get("type") == "review_consensus"
+    ]
+    assert consensus_blocks
+    products = consensus_blocks[0]["data"]["products"]
+    assert products[0]["rank"] == 1, "first listed product must be rank 1 after filtering"
+    assert all(p["name"] != "Phantom Product X" for p in products)

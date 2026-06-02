@@ -1502,6 +1502,32 @@ TRANSITIONAL RULES (transitional_reasoning field):
         # citations. Synthesize."). Replaces the HTML comparison table whenever
         # real review data exists; the table remains as a fallback for queries
         # where review search returned nothing (e.g. providers out of credits).
+        #
+        # QA Round 5 (external bug 6): the consensus block must compare the SAME
+        # products the user can actually buy below it. Review bundles can contain
+        # products that never became cards (reviewed but no purchasable offer) or
+        # that the budget filter pruned (a $600 espresso machine on an "Under $100"
+        # ask). Ranking those #1 makes the response contradict its own cards.
+        def _eligible_for_consensus(pname: str) -> bool:
+            # Budget-pruned products must not re-enter via the consensus block
+            if _budget_pruned_names and any(
+                _fuzzy_product_match(pname, dropped) for dropped in _budget_pruned_names
+            ):
+                logger.info(
+                    f"[product_compose] Suppressed budget-pruned product from consensus: {pname}"
+                )
+                return False
+            # Only products with a real purchasable offer (i.e. products that get a card)
+            has_offer = any(
+                _fuzzy_product_match(p.get("name", ""), pname) and p.get("all_offers")
+                for p in products_with_offers
+            )
+            if not has_offer:
+                logger.info(
+                    f"[product_compose] Suppressed offerless product from consensus: {pname}"
+                )
+            return has_offer
+
         consensus_products = []
         if review_bundles:
             ranked_bundles = sorted(
@@ -1509,10 +1535,14 @@ TRANSITIONAL RULES (transitional_reasoning field):
                 key=lambda kv: kv[1].get("quality_score", 0),
                 reverse=True,
             )
-            for rank, (pname, bundle) in enumerate(ranked_bundles, 1):
+            rank = 0
+            for pname, bundle in ranked_bundles:
                 consensus_text = _get_result(f'consensus:{pname}', '')
                 if not consensus_text:
                     continue
+                if not _eligible_for_consensus(pname):
+                    continue
+                rank += 1  # rank AFTER filtering so the list stays 1..N with no gaps
                 consensus_products.append({
                     "name": pname,
                     "avg_rating": float(bundle.get("avg_rating") or 0),
