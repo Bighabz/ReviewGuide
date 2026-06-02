@@ -28,6 +28,10 @@ export interface FollowupQuestion {
   /** Free-text affordance shown under the chips, e.g. "or type an amount".
       Chips are the fast path; typing in the chat input always works too. */
   free_text_hint?: string
+  /** "multi_select" → chips toggle and a "Done" button submits the joined answer
+      (e.g. features: "Noise cancelling, Waterproof"). Absent / "single_select" →
+      chips submit on tap (the default). */
+  type?: 'single_select' | 'multi_select'
 }
 
 export interface StructuredFollowups {

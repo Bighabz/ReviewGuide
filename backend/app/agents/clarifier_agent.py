@@ -681,6 +681,8 @@ TRANSLATE each slot into the question THAT specialist actually leads with — ne
 
 For EVERY question, generate "options": 3-5 short tappable answer choices (1-4 words each), plus "free_text_hint": a short affordance like "or describe your own use" / "or type an amount".
 
+MULTI-SELECT: when a question naturally takes SEVERAL answers at once — typically the "features" question ("Which features matter to you?" → Noise cancelling + Waterproof both apply) — add "type": "multi_select" to that question. Questions where exactly one answer makes sense (use case, budget, size) get "type": "single_select" or no type at all. Never make budget or use_case multi-select.
+
 Question ORDER: use case / purpose first, then specifics, budget LAST.
 """ if intent == "product" else """
 For EVERY question, also generate "options": 3-5 short tappable answer choices covering the most common realistic answers (e.g. travel companions: "Solo", "Couple", "Family with kids", "Friends"; trip length: "Weekend", "4-5 days", "1 week", "2+ weeks").
@@ -710,7 +712,7 @@ Return ONLY valid JSON:
 {{
   "intro": "<your generated intro>",
   "questions": [
-    {{"slot": "<slot_name>", "question": "<your question>", "options": ["<choice 1>", "<choice 2>", "<choice 3>"], "free_text_hint": "<or type ...>"}},
+    {{"slot": "<slot_name>", "question": "<your question>", "options": ["<choice 1>", "<choice 2>", "<choice 3>"], "free_text_hint": "<or type ...>", "type": "<single_select or multi_select>"}},
     ...
   ],
   "closing": "<your generated closing>"
@@ -751,6 +753,14 @@ Return ONLY valid JSON:
                     if opts:
                         nq["options"] = opts
                         nq["free_text_hint"] = str(q.get("free_text_hint") or "").strip() or "or type your own answer"
+                        # Multi-select flag: only "multi_select" is meaningful (single_select
+                        # is the default behavior and stays implicit). budget/use_case are
+                        # always single-answer regardless of what the LLM emitted.
+                        if (
+                            q.get("type") == "multi_select"
+                            and q["slot"] not in ("budget", "use_case")
+                        ):
+                            nq["type"] = "multi_select"
                 normalized.append(nq)
             questions = normalized
 
@@ -811,6 +821,11 @@ Return ONLY valid JSON:
         questions_context = "\n".join([
             f"- {f['slot']}: \"{f['question']}\""
             + (f" (offered choices: {', '.join(f['options'])})" if f.get("options") else "")
+            + (
+                " [multi-select: the user may have picked SEVERAL choices joined by commas —"
+                " the whole combined list is this ONE slot's value]"
+                if f.get("type") == "multi_select" else ""
+            )
             for f in followups
         ])
 
