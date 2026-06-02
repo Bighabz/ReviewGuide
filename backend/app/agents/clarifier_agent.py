@@ -12,7 +12,7 @@ import json
 import re
 import sys
 import os
-from typing import Dict, Any, List, Set
+from typing import Dict, Any, List, Optional, Set
 
 # Add MCP server to path for tool contract imports
 backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -29,6 +29,72 @@ from ..services.prompts.voice import build_system_prompt
 from app.lib.toon_python import encode
 
 logger = get_logger(__name__)
+
+
+# ── Outcome 2: post-results refinement chips ────────────────────────────────
+# After a shortlist renders, next_step_suggestion emits deterministic refinement
+# chips ("Show cheaper options", "Only Sony", "More premium picks", "Different
+# use case"). Tapping one sends "You chose: <chip text>". These helpers map that
+# message to a slot adjustment so the previous search re-runs immediately —
+# answered questions are never re-asked.
+
+_SUGGESTION_PREFIX = "you chose:"
+
+
+def _strip_suggestion_prefix(message: str) -> str:
+    """Remove the frontend's suggestion-click prefix ("You chose: ...")."""
+    msg = (message or "").strip()
+    if msg.lower().startswith(_SUGGESTION_PREFIX):
+        msg = msg[len(_SUGGESTION_PREFIX):].strip()
+    return msg
+
+
+def _detect_refinement_action(message: str) -> Optional[str]:
+    """Map a refinement-chip message to an action.
+
+    Returns "cheaper", "premium", "different_use_case", "brand:<name>", or None.
+    Handles both the tapped form ("You chose: Show cheaper options") and typed
+    equivalents ("show cheaper options").
+    """
+    msg = _strip_suggestion_prefix(message).lower().strip().rstrip(".!?")
+    if msg in ("show cheaper options", "show me cheaper options", "cheaper options", "show cheaper"):
+        return "cheaper"
+    if msg in ("more premium picks", "more premium", "more premium options", "show premium options"):
+        return "premium"
+    if msg in ("different use case", "different use-case", "change use case"):
+        return "different_use_case"
+    m = re.match(r"^only ([a-z0-9][a-z0-9 \-&']{1,30})$", msg)
+    if m:
+        return f"brand:{m.group(1).strip()}"
+    return None
+
+
+def _shown_prices(last_search_context: dict) -> List[float]:
+    """Real prices from the shortlist the user just saw."""
+    return [
+        float(p) for p in (last_search_context.get("top_prices") or {}).values()
+        if isinstance(p, (int, float)) and p > 0
+    ]
+
+
+def _apply_refinement_action(action: str, slots: dict, last_search_context: dict) -> dict:
+    """Adjust slots for a refinement action ("cheaper" / "premium" / "brand:<name>")."""
+    adjusted = dict(slots)
+    prices = _shown_prices(last_search_context)
+
+    if action == "cheaper":
+        # New ceiling = 80% of the cheapest item just shown, so every new pick is
+        # cheaper than everything the user saw. Without price data, keep slots
+        # unchanged — re-running the search is still harmless.
+        if prices:
+            adjusted["budget"] = f"under ${int(min(prices) * 0.8)}"
+    elif action == "premium":
+        # New floor = 120% of the priciest item shown; replaces any old ceiling.
+        if prices:
+            adjusted["budget"] = f"over ${int(max(prices) * 1.2)}"
+    elif action.startswith("brand:"):
+        adjusted["brand"] = action.split(":", 1)[1].strip().title()
+    return adjusted
 
 
 class ClarifierAgent(BaseAgent):
@@ -79,6 +145,56 @@ class ClarifierAgent(BaseAgent):
             # Skip clarification for follow-up queries when search context exists
             last_search_context = state.get("last_search_context", {})
             if last_search_context and intent == "product":
+                # ── Outcome 2: refinement chips ──
+                # A tapped refinement chip ("You chose: Show cheaper options") re-runs
+                # the previous search with adjusted slots — nothing is re-asked.
+                raw_message = state.get("sanitized_text") or state.get("user_message", "")
+                refinement_action = _detect_refinement_action(raw_message)
+                if refinement_action:
+                    inherited = dict(state.get("slots", {}) or {})
+                    for key in ["budget", "brand", "features", "use_case", "category", "product_type"]:
+                        if not inherited.get(key) and last_search_context.get(key):
+                            inherited[key] = last_search_context[key]
+
+                    if refinement_action == "different_use_case":
+                        # Re-ask ONLY the use_case question; everything else stays answered.
+                        inherited.pop("use_case", None)
+                        followups_data = await self._generate_followup_questions(
+                            ["use_case"],
+                            inherited,
+                            raw_message,
+                            intent,
+                            conversation_history=state.get("conversation_history", []),
+                        )
+                        await HaltStateManager.update_halt_state(session_id, {
+                            "intent": intent,
+                            "slots": inherited,
+                            "followups": followups_data.get("questions", []),
+                            "missing_required_slots": ["use_case"],
+                            "plan": state.get("plan"),
+                            "tools_by_required_slot": {},
+                        })
+                        logger.info("[Clarifier Agent] Refinement: 'Different use case' → re-asking use_case only")
+                        return {
+                            "slots": inherited,
+                            "followups": followups_data.get("questions", []),
+                            "missing_required_slots": ["use_case"],
+                            "next_question": followups_data,
+                            "proceed_to_execution": False
+                        }
+
+                    adjusted = _apply_refinement_action(refinement_action, inherited, last_search_context)
+                    logger.info(
+                        f"[Clarifier Agent] Refinement chip '{refinement_action}' → "
+                        f"budget={adjusted.get('budget')}, brand={adjusted.get('brand')} — re-running search"
+                    )
+                    return {
+                        "slots": adjusted,
+                        "followups": [],
+                        "missing_required_slots": [],
+                        "proceed_to_execution": True
+                    }
+
                 user_msg = (state.get("sanitized_text") or state.get("user_message", "")).lower().strip()
                 reference_signals = [
                     "that one", "the first", "the second", "the third",
@@ -87,7 +203,41 @@ class ClarifierAgent(BaseAgent):
                     "more about", "tell me more", "go back to",
                     "the one with", "how about the",
                 ]
-                is_follow_up = any(signal in user_msg for signal in reference_signals) or len(user_msg.split()) <= 4
+                matched_signal = any(signal in user_msg for signal in reference_signals)
+                is_follow_up = matched_signal or len(user_msg.split()) <= 4
+
+                # Now that search context PERSISTS across turns (Outcome 2), the
+                # "short message = follow-up" rule needs a topic guard: a short message
+                # that names a DIFFERENT category than the context ("best mattress"
+                # right after a laptop search) is a NEW query — inheriting laptop
+                # slots into a mattress search produces garbage results.
+                if is_follow_up and not matched_signal:
+                    generic_words = {
+                        "best", "good", "top", "great", "cheap", "show", "me", "a", "an",
+                        "the", "find", "get", "buy", "for", "of", "to", "i", "want",
+                        "need", "one", "ones", "some", "any", "you", "chose", "more",
+                        "options", "picks", "deals", "recommend", "suggest", "what",
+                        "which", "is", "are", "my", "new",
+                    }
+                    context_words: set = set()
+                    for src in (
+                        [last_search_context.get("category", ""), last_search_context.get("product_type", "")]
+                        + list(last_search_context.get("product_names", []) or [])
+                    ):
+                        context_words.update(str(src).lower().replace("-", " ").split())
+                    content_words = [
+                        w for w in re.sub(r"[^a-z0-9 ]", " ", user_msg).split()
+                        if w not in generic_words and len(w) >= 3
+                    ]
+                    if content_words and context_words and not any(
+                        w in context_words or any(w in cw or cw in w for cw in context_words)
+                        for w in content_words
+                    ):
+                        logger.info(
+                            f"[Clarifier Agent] Short message names a different topic than the search "
+                            f"context — treating as NEW query: '{user_msg}'"
+                        )
+                        is_follow_up = False
 
                 # If a reference signal matched, check whether it contains an anaphoric reference
                 # (e.g. "tell me more about the blue one") vs. a genuinely new topic

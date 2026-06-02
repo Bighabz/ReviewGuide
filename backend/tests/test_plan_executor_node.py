@@ -236,3 +236,64 @@ async def test_fallback_on_timeout_passes_empty_affiliate_products():
 
     assert "affiliate_products" in update
     assert update["affiliate_products"] == {}
+
+
+@pytest.mark.asyncio
+async def test_node_propagates_last_search_context_from_results():
+    """Outcome 2: the search context built by product_compose must cross the node
+    boundary or chat.py can never persist it for refinement follow-ups."""
+    ctx = {
+        "category": "headphones",
+        "product_names": ["Sony WH-1000XM5"],
+        "top_prices": {"Sony WH-1000XM5": 149.99},
+    }
+    fake_results = {
+        "assistant_text": "Body.",
+        "ui_blocks": [],
+        "citations": [],
+        "next_suggestions": [],
+        "tool_citations": [],
+        "last_search_context": ctx,
+        "search_history": [{"category": "laptops"}],
+    }
+
+    with patch(
+        "app.services.langgraph.workflow.PlanExecutor"
+    ) as mock_executor_cls:
+        mock_executor = mock_executor_cls.return_value
+        mock_executor.execute = AsyncMock(return_value=fake_results)
+
+        update = await plan_executor_node(_minimal_state())
+
+    assert update.get("last_search_context") == ctx, (
+        "plan_executor_node must propagate last_search_context into its update dict."
+    )
+    assert update.get("search_history") == [{"category": "laptops"}]
+
+
+@pytest.mark.asyncio
+async def test_node_falls_back_to_state_context_when_results_have_none():
+    """A non-product turn (no compose context) must NOT wipe the context a previous
+    product turn established — the node falls back to the incoming state's value."""
+    prev_ctx = {"category": "laptops", "product_names": ["Dell XPS 13"]}
+    fake_results = {
+        "assistant_text": "General answer.",
+        "ui_blocks": [],
+        "citations": [],
+        "next_suggestions": [],
+        "tool_citations": [],
+    }
+
+    with patch(
+        "app.services.langgraph.workflow.PlanExecutor"
+    ) as mock_executor_cls:
+        mock_executor = mock_executor_cls.return_value
+        mock_executor.execute = AsyncMock(return_value=fake_results)
+
+        update = await plan_executor_node(
+            _minimal_state(last_search_context=prev_ctx, search_history=[])
+        )
+
+    assert update.get("last_search_context") == prev_ctx, (
+        "Node must carry forward the previous turn's context when this turn produced none."
+    )

@@ -189,6 +189,63 @@ IMPORTANT:
 - A general information question"""
 
 
+def _build_refinement_suggestions(state: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Outcome 2: deterministic slot-aware refinement chips after product results.
+
+    Built from last_search_context (written to shared state by product_compose)
+    rather than the LLM — so they're always grounded in the actual shortlist,
+    cost nothing, and never miss the 2s background-task timeout. The clarifier
+    recognizes each chip's text and adjusts the inherited slots so the search
+    re-runs WITHOUT re-asking answered questions:
+
+      "Show cheaper options"  → budget ceiling below the cheapest shown price
+      "More premium picks"    → budget floor above the priciest shown price
+      "Only <brand>"          → brand slot pinned to the top pick's brand
+      "Different use case"    → re-asks the use_case question only
+    """
+    ctx = state.get("last_search_context") or {}
+    product_names = ctx.get("product_names") or []
+    top_prices = ctx.get("top_prices") or {}
+    if not product_names and not top_prices:
+        return []
+
+    suggestions = [
+        {
+            "id": "refine_cheaper",
+            "question": "Show cheaper options",
+            "category": "refine_budget",
+            "confidence": 0.95,
+        },
+        {
+            "id": "refine_premium",
+            "question": "More premium picks",
+            "category": "refine_budget",
+            "confidence": 0.9,
+        },
+    ]
+
+    # "Only <brand>" — brand = leading word of the top pick's name ("Sony
+    # WH-1000XM5" → "Sony"). Skip when it doesn't look like a brand word.
+    if product_names:
+        brand = str(product_names[0]).split()[0].strip()
+        if brand and brand[0].isupper() and len(brand) >= 3 and not any(c.isdigit() for c in brand):
+            suggestions.append({
+                "id": "refine_brand",
+                "question": f"Only {brand}",
+                "category": "refine_features",
+                "confidence": 0.85,
+            })
+
+    suggestions.append({
+        "id": "refine_use_case",
+        "question": "Different use case",
+        "category": "clarify",
+        "confidence": 0.8,
+    })
+    return suggestions
+
+
 async def next_step_suggestion(state: Dict[str, Any]) -> Dict[str, Any]:
     """
     Generate relevant follow-up questions based on conversation history.
@@ -227,6 +284,22 @@ async def next_step_suggestion(state: Dict[str, Any]) -> Dict[str, Any]:
         top_product_names = [p.get("name", "") for p in (normalized_products or [])[:3] if p.get("name")] or product_names[:3]
 
         logger.info(f"[next_step_suggestion] Generating suggestions for intent={intent}")
+
+        # Outcome 2: when a product shortlist was just rendered, the deterministic
+        # slot-aware refinement chips ARE the next-step suggestions. Skip the LLM
+        # call entirely — instant (always beats the 2s background-task timeout),
+        # free, and grounded in the actual results.
+        if intent == "product":
+            refinement_suggestions = _build_refinement_suggestions(state)
+            if refinement_suggestions:
+                logger.info(
+                    f"[next_step_suggestion] Using {len(refinement_suggestions)} deterministic "
+                    f"refinement chips (skipping LLM): {[s['question'] for s in refinement_suggestions]}"
+                )
+                return {
+                    "next_suggestions": refinement_suggestions,
+                    "success": True
+                }
 
         # Build conversation context
         conversation_context = _build_conversation_context(state)

@@ -899,6 +899,15 @@ class PlanExecutor:
                 # follow-up; without this the composer's value is dropped here.
                 if value.get("transitional_reasoning"):
                     results["transitional_reasoning"] = value.get("transitional_reasoning")
+                # Outcome 2 (refinement chips) — extract the search context that
+                # product_compose builds (category, budget, top_prices, product
+                # names, ...) so chat.py can persist it across turns. Without
+                # this, post-results refinement ("Show cheaper options") has no
+                # context to adjust: the field is silently dropped right here.
+                if value.get("last_search_context"):
+                    results["last_search_context"] = value.get("last_search_context")
+                if value.get("search_history"):
+                    results["search_history"] = value.get("search_history")
 
         # Lift affiliate_products from self.state — product_affiliate writes it
         # there via _write_tool_outputs_to_state (in-place mutation) but never
