@@ -912,3 +912,69 @@ async def test_a2_keeps_all_when_disabled():
     cards = [b for b in result.get("ui_blocks", []) if b.get("type") == "product_review"]
     names = [c["data"]["product_name"] for c in cards]
     assert "Phantom Nonexistent Headphone XZ9000" in names, f"phantom should remain when flag off: {names}"
+
+
+def _two_speed_state(msg):
+    return {
+        "user_message": msg,
+        "intent": "product",
+        "slots": {"category": "headphones"},
+        "normalized_products": [{"name": "Sony WH-1000XM5"}],
+        "affiliate_products": {
+            "serper_shopping": [{"product_name": "Sony WH-1000XM5", "offers": [{
+                "title": "Sony WH-1000XM5", "price": 348.0, "currency": "USD",
+                "url": "https://www.google.com/shopping/sony", "merchant": "Walmart",
+                "image_url": "https://img.example.com/sony.jpg", "rating": 4.7,
+                "review_count": 8000, "source": "serper_shopping",
+            }]}],
+        },
+        "review_data": {}, "comparison_html": None, "comparison_data": None,
+        "general_product_info": "", "conversation_history": [],
+        "last_search_context": {}, "search_history": [],
+    }
+
+
+def _blog_call(mock_service):
+    for c in mock_service.generate_compose.call_args_list:
+        if c.kwargs.get("agent_name") == "blog_article_composer":
+            return c
+    return None
+
+
+@pytest.mark.asyncio
+async def test_two_speed_off_uses_default_depth():
+    from app.core.config import settings as _settings
+    svc = MagicMock(); svc.generate_compose = AsyncMock(return_value="text")
+    with patch("app.services.model_service.model_service", svc), \
+         patch.object(_settings, "USE_TWO_SPEED_COMPOSE", False):
+        await product_compose(_two_speed_state("best noise cancelling headphones"))
+    call = _blog_call(svc)
+    assert call is not None and call.kwargs["max_tokens"] == 700
+    assert "LENGTH OVERRIDE" not in call.kwargs["messages"][0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_two_speed_utility_query_is_terser():
+    """A comparison ('vs') query is utility tier -> terser cap + lower max_tokens."""
+    from app.core.config import settings as _settings
+    svc = MagicMock(); svc.generate_compose = AsyncMock(return_value="text")
+    with patch("app.services.model_service.model_service", svc), \
+         patch.object(_settings, "USE_TWO_SPEED_COMPOSE", True):
+        await product_compose(_two_speed_state("Sony WH-1000XM5 vs Bose QuietComfort Ultra"))
+    call = _blog_call(svc)
+    assert call.kwargs["max_tokens"] == 550
+    assert "250 words" in call.kwargs["messages"][0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_two_speed_considered_query_is_richer():
+    """A review-laden query is deep_research tier -> richer cap + higher max_tokens."""
+    from app.core.config import settings as _settings
+    svc = MagicMock(); svc.generate_compose = AsyncMock(return_value="text")
+    msg = "what are the real-world owner complaints and long-term problems with these headphones"
+    with patch("app.services.model_service.model_service", svc), \
+         patch.object(_settings, "USE_TWO_SPEED_COMPOSE", True):
+        await product_compose(_two_speed_state(msg))
+    call = _blog_call(svc)
+    assert call.kwargs["max_tokens"] == 1000
+    assert "550 words" in call.kwargs["messages"][0]["content"]
