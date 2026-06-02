@@ -109,6 +109,16 @@ function ChatPageContent() {
       if (storedSessionId) {
         setCurrentSessionId(storedSessionId)
       }
+      // QA Round 4 F0c — re-arm the ?new=1 handler once the URL is back to a clean
+      // /chat (the post-processing router.replace has landed). Without this, the
+      // one-shot NEW_EMPTY_SESSION sentinel made the "New Chat" button a no-op after
+      // the first ?new=1 navigation on this page instance: the session never rotated,
+      // so old backend context (Redis halt state / last_search_context) leaked into
+      // what the user thought was a fresh chat. The sentinel's double-fire protection
+      // is preserved — it stays set for the whole window where ?new=1 is in the URL.
+      if (processedQueryRef.current === NEW_EMPTY_SESSION) {
+        processedQueryRef.current = null
+      }
     }
   }, [searchParams, router])
 
