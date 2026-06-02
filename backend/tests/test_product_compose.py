@@ -235,6 +235,26 @@ def test_parse_budget_still_parses_qualified_strings():
     assert _parse_budget(None) == (None, None)
 
 
+def test_parse_budget_floor_formats():
+    """The clarifier's top budget chip ("$1,200+") and spoken floor forms must parse
+    as a min bound — previously they parsed to (None, None) = no filtering at all."""
+    assert _parse_budget("$1,200+") == (1200.0, None)
+    assert _parse_budget("500+") == (500.0, None)
+    assert _parse_budget("$500+") == (500.0, None)
+    assert _parse_budget("over $500") == (500.0, None)
+    assert _parse_budget("above $800") == (800.0, None)
+    assert _parse_budget("more than $300") == (300.0, None)
+    assert _parse_budget("at least $1,000") == (1000.0, None)
+
+
+def test_parse_budget_clarifier_chip_range_formats():
+    """The exact strings the clarifier budget chips send (en dash) must parse as ranges."""
+    assert _parse_budget("$500–$800") == (500.0, 800.0)
+    assert _parse_budget("$1,000–$2,000") == (1000.0, 2000.0)
+    # "Under $500" chip (capital U)
+    assert _parse_budget("Under $500") == (None, 500.0)
+
+
 @pytest.mark.asyncio
 async def test_numeric_budget_filters_over_ceiling_offer():
     """slots["budget"] = 100 (int, as the slot extractor produces it) must drop an
@@ -283,6 +303,105 @@ async def test_numeric_budget_filters_over_ceiling_offer():
     prices = [l.get("price") for l in review_cards[0]["data"]["affiliate_links"]]
     assert 59.99 in prices, f"in-budget offer missing: {prices}"
     assert 159.99 not in prices, f"over-budget offer leaked past the ceiling: {prices}"
+
+
+def _budget_filter_state(budget, products_and_prices):
+    """Build a minimal compose state: each (name, price) becomes one product with one
+    serper_shopping offer at that price."""
+    return {
+        "user_message": "best laptop",
+        "intent": "product",
+        "slots": {"category": "laptops", "budget": budget},
+        "normalized_products": [{"name": name} for name, _ in products_and_prices],
+        "affiliate_products": {
+            "serper_shopping": [
+                {
+                    "product_name": name,
+                    "offers": [{
+                        "title": name, "price": price, "currency": "USD",
+                        "url": f"https://www.google.com/shopping/product/{i}",
+                        "merchant": "BestBuy",
+                        "image_url": f"https://img.example.com/{i}.jpg",
+                        "source": "serper_shopping",
+                    }],
+                }
+                for i, (name, price) in enumerate(products_and_prices)
+            ],
+        },
+        "review_data": {},
+        "comparison_html": None,
+        "comparison_data": None,
+        "general_product_info": "",
+        "conversation_history": [],
+        "last_search_context": {},
+        "search_history": [],
+    }
+
+
+@pytest.mark.asyncio
+async def test_floor_budget_drops_under_floor_product():
+    """A "$500+" budget must not surface a $299 product as a pick — the under-floor
+    leak observed in prod (laptop query, $500+ chip, $299.99 top pick)."""
+    fake_service = MagicMock()
+    fake_service.generate_compose = AsyncMock(return_value="mock response text")
+
+    state = _budget_filter_state("$500+", [
+        ("Budget Laptop", 299.99),
+        ("Mid Laptop", 749.00),
+        ("Premium Laptop", 1299.00),
+    ])
+
+    with patch("app.services.model_service.model_service", fake_service):
+        result = await product_compose(state)
+
+    review_cards = [b for b in result.get("ui_blocks", []) if b.get("type") == "product_review"]
+    card_names = [c["data"]["product_name"] for c in review_cards]
+    assert "Mid Laptop" in card_names and "Premium Laptop" in card_names, f"in-budget products missing: {card_names}"
+    assert "Budget Laptop" not in card_names, f"under-floor product leaked into the shortlist: {card_names}"
+
+
+@pytest.mark.asyncio
+async def test_range_budget_keeps_only_in_range_products():
+    """A "$500–$800" chip budget must keep only products priced inside the range."""
+    fake_service = MagicMock()
+    fake_service.generate_compose = AsyncMock(return_value="mock response text")
+
+    state = _budget_filter_state("$500–$800", [
+        ("Too Cheap Laptop", 349.00),
+        ("Just Right Laptop", 649.00),
+        ("Also Right Laptop", 799.00),
+        ("Too Expensive Laptop", 1499.00),
+    ])
+
+    with patch("app.services.model_service.model_service", fake_service):
+        result = await product_compose(state)
+
+    review_cards = [b for b in result.get("ui_blocks", []) if b.get("type") == "product_review"]
+    card_names = [c["data"]["product_name"] for c in review_cards]
+    assert "Just Right Laptop" in card_names and "Also Right Laptop" in card_names, f"in-range products missing: {card_names}"
+    assert "Too Cheap Laptop" not in card_names, f"under-range product leaked: {card_names}"
+    assert "Too Expensive Laptop" not in card_names, f"over-range product leaked: {card_names}"
+
+
+@pytest.mark.asyncio
+async def test_budget_pruning_degrades_gracefully_when_too_few_in_budget():
+    """If pruning would leave <2 products, keep everything (degraded beats empty)."""
+    fake_service = MagicMock()
+    fake_service.generate_compose = AsyncMock(return_value="mock response text")
+
+    state = _budget_filter_state("$500+", [
+        ("Only In-Budget Laptop", 749.00),
+        ("Cheap Laptop A", 299.00),
+        ("Cheap Laptop B", 199.00),
+    ])
+
+    with patch("app.services.model_service.model_service", fake_service):
+        result = await product_compose(state)
+
+    review_cards = [b for b in result.get("ui_blocks", []) if b.get("type") == "product_review"]
+    card_names = [c["data"]["product_name"] for c in review_cards]
+    # Only 1 product is in budget → pruning is skipped entirely → all 3 still render
+    assert len(card_names) == 3, f"graceful degradation failed, expected all 3 products: {card_names}"
 
 
 @pytest.mark.asyncio

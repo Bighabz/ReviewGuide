@@ -297,7 +297,8 @@ def _parse_budget(budget_str: str) -> tuple:
     Handles:
     - numeric input 500 / 500.0 → (None, 500.0)   [slot extractor returns budget as a number]
     - "under $500" / "below $500" / "less than $500" → (None, 500.0)
-    - "$100-$200" / "$100 to $200" → (100.0, 200.0)
+    - "$100-$200" / "$100 to $200" / "$500–$800" (en-dash chips) → (100.0, 200.0)
+    - "$1,200+" / "500+" / "over $500" / "at least $500" → (1200.0, None)   [floor]
     - "around $500" / "about $500" / "roughly $500" → (400.0, 600.0)
     - bare "500" / "$500" / "1,200" → (None, 500.0)   [treated as a max ceiling]
 
@@ -321,6 +322,15 @@ def _parse_budget(budget_str: str) -> tuple:
     m = re.search(r'\$?([\d,]+)\s*[-\u2013to]+\s*\$?([\d,]+)', budget_str, re.I)
     if m:
         return float(m.group(1).replace(',', '')), float(m.group(2).replace(',', ''))
+    # Floor-only budgets — the clarifier's top chip ("$1,200+") and spoken forms
+    # ("over $500", "at least $500"). Without these, a "$500+" budget parses to
+    # (None, None) → no filtering at all → a $299 item can headline a $500+ ask.
+    m = re.search(r'\$?([\d,]+)\s*\+', budget_str)
+    if m:
+        return float(m.group(1).replace(',', '')), None
+    m = re.search(r'(?:over|above|more\s+than|at\s+least|starting\s+at|upwards\s+of)\s*\$?([\d,]+)', budget_str, re.I)
+    if m:
+        return float(m.group(1).replace(',', '')), None
     # "around $500", "about $500", "roughly $500"
     m = re.search(r'(?:around|about|roughly)\s*\$?([\d,]+)', budget_str, re.I)
     if m:
@@ -636,14 +646,31 @@ async def product_compose(state: Dict[str, Any]) -> Dict[str, Any]:
                         if real_image and not o.get("image_url"):
                             o["image_url"] = real_image
 
-                # Apply budget enforcement: filter out offers exceeding the max price.
-                # If all offers exceed the budget, keep them all so the user still sees results.
-                if budget_max is not None:
-                    in_budget = [o for o in all_offers_for_product if _extract_price(o) is not None and _extract_price(o) <= budget_max]
+                # Apply budget enforcement in BOTH directions: drop offers above the
+                # ceiling AND below the floor ("$500+" budgets must not headline a
+                # $299 item). If no offer survives, keep them all so the user still
+                # sees results (degraded beats empty).
+                if budget_max is not None or budget_min is not None:
+                    def _within_budget(o):
+                        p = _extract_price(o)
+                        if p is None:
+                            return False
+                        if budget_max is not None and p > budget_max:
+                            return False
+                        if budget_min is not None and p < budget_min:
+                            return False
+                        return True
+
+                    in_budget = [o for o in all_offers_for_product if _within_budget(o)]
                     if in_budget:
                         removed_count = len(all_offers_for_product) - len(in_budget)
                         if removed_count > 0:
-                            logger.info(f"[product_compose] Budget filter (≤${budget_max:.0f}): removed {removed_count} over-budget offer(s) for {product_name}")
+                            bounds = []
+                            if budget_min is not None:
+                                bounds.append(f"≥${budget_min:.0f}")
+                            if budget_max is not None:
+                                bounds.append(f"≤${budget_max:.0f}")
+                            logger.info(f"[product_compose] Budget filter ({' and '.join(bounds)}): removed {removed_count} out-of-budget offer(s) for {product_name}")
                         all_offers_for_product = in_budget
 
                 # Best offer = first with a real price, or just first
@@ -652,6 +679,36 @@ async def product_compose(state: Dict[str, Any]) -> Dict[str, Any]:
                 product_copy["all_offers"] = all_offers_for_product
 
             products_with_offers.append(product_copy)
+
+        # Product-level budget honesty: a product whose offers are ALL out of budget
+        # survived the offer filter via its keep-all fallback — but it must not
+        # headline the shortlist (the "$299 top pick on a $500+ ask" bug). Prune such
+        # products, but only while ≥2 in-budget products remain, so sparse results
+        # degrade to "show something" rather than nothing.
+        _budget_pruned_names: set = set()
+        if (budget_min is not None or budget_max is not None) and products_with_offers:
+            def _product_in_budget(p):
+                best = p.get("best_offer")
+                if not best:
+                    return True  # no offers → no price signal → keep
+                price = _extract_price(best)
+                if price is None:
+                    return True
+                if budget_max is not None and price > budget_max:
+                    return False
+                if budget_min is not None and price < budget_min:
+                    return False
+                return True
+
+            in_budget_products = [p for p in products_with_offers if _product_in_budget(p)]
+            if len(in_budget_products) >= 2 and len(in_budget_products) < len(products_with_offers):
+                dropped_names = [p.get("name") for p in products_with_offers if p not in in_budget_products]
+                logger.info(f"[product_compose] Budget filter dropped {len(dropped_names)} out-of-budget product(s): {dropped_names}")
+                products_with_offers = in_budget_products
+                # Remember what was pruned so the blog-data loops below (review bundles +
+                # affiliate-only products) don't reintroduce these as prose mentions or
+                # fallback cards — that's how the "$299 pick on a $500+ ask" leaked.
+                _budget_pruned_names.update(n for n in dropped_names if n)
 
         # Assign editorial labels based on review quality + price
         editorial_labels = _assign_editorial_labels(review_data, products_with_offers)
@@ -893,6 +950,12 @@ Products to describe:
                     if any(kw in pname.lower() for kw in ACCESSORY_KEYWORDS):
                         logger.info(f"[product_compose] Suppressed accessory from blog: {pname}")
                         continue
+                # Skip products the budget filter pruned — they must not re-enter via reviews
+                if _budget_pruned_names and any(
+                    _fuzzy_product_match(pname, dropped) for dropped in _budget_pruned_names
+                ):
+                    logger.info(f"[product_compose] Suppressed budget-pruned product from blog: {pname}")
+                    continue
                 label_str = f" ({editorial_labels[pname]})" if pname in editorial_labels else ""
                 rating = bundle.get("avg_rating", 0)
                 total = bundle.get("total_reviews", 0)
@@ -960,6 +1023,19 @@ Products to describe:
                         for bname in blog_product_names
                     )
                     if already_covered or t in seen_titles:
+                        continue
+                    # Budget honesty: affiliate-only products bypass products_with_offers,
+                    # so apply the same budget bounds here — otherwise an out-of-budget
+                    # item re-enters the blog prose and comes back as a fallback card.
+                    _prod_price = prod.get("price", 0) or 0
+                    if _prod_price > 0:
+                        if budget_max is not None and _prod_price > budget_max:
+                            continue
+                        if budget_min is not None and _prod_price < budget_min:
+                            continue
+                    if _budget_pruned_names and any(
+                        _fuzzy_product_match(t, dropped) for dropped in _budget_pruned_names
+                    ):
                         continue
                     seen_titles.add(t)
                     # Gather links from ALL providers for this product
