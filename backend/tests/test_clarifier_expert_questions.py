@@ -655,3 +655,132 @@ async def test_handle_user_answer_dedupes_required_and_optional(agent):
     # The answer was consumed: use_case filled, only budget still missing
     assert result["slots"]["use_case"] == "Office tasks"
     assert result["missing_required_slots"] == ["budget"]
+
+
+# ---------------------------------------------------------------------------
+# QA Round 4 — F6: bare "best X" queries skip the extraction LLM call
+# ---------------------------------------------------------------------------
+# The extraction call costs 3-8s and was pushing the clarifier past its hard
+# stage budget; the timeout fallback then silently skipped clarification.
+# Bare category queries extract product_name heuristically instead.
+
+def _new_plan_state(message: str, history=None):
+    return {
+        "plan": {"steps": [{"tools": ["product_search"]}]},
+        "slots": {},
+        "user_message": message,
+        "sanitized_text": message,
+        "intent": "product",
+        "conversation_history": history or [],
+        "last_search_context": {},
+        "session_id": "test-session",
+    }
+
+
+@pytest.mark.asyncio
+async def test_bare_best_x_query_skips_extraction_llm_call(agent):
+    """'best mattress' → product_name extracted heuristically, NO extraction LLM call,
+    and the expert questions still get injected (substantive query)."""
+    state = _new_plan_state("best mattress")
+
+    extraction_mock = AsyncMock(return_value={})
+    agent._extract_all_slots_from_conversation = extraction_mock
+
+    captured = {}
+
+    async def fake_generate_followups(missing_slots, current_slots, user_message, intent, conversation_history=None):
+        captured["missing_slots"] = list(missing_slots)
+        captured["current_slots"] = dict(current_slots)
+        return {
+            "intro": "x",
+            "questions": [{"slot": s, "question": f"{s}?"} for s in missing_slots],
+            "closing": "",
+        }
+
+    agent._generate_followup_questions = fake_generate_followups
+
+    with patch("app.agents.clarifier_agent.HaltStateManager.update_halt_state", new=AsyncMock()):
+        result = await agent._handle_new_plan(state, "test-session")
+
+    extraction_mock.assert_not_called()
+    assert captured["current_slots"].get("product_name") == "mattress"
+    # The expert flow still fires — questions are asked, not skipped
+    assert result["proceed_to_execution"] is False
+    assert "use_case" in captured["missing_slots"]
+    assert "budget" in captured["missing_slots"]
+
+
+@pytest.mark.asyncio
+async def test_query_with_qualifier_still_uses_llm_extraction(agent):
+    """'best mattress for side sleepers' has extractable content → LLM extraction runs."""
+    state = _new_plan_state("best mattress for side sleepers")
+
+    extraction_mock = AsyncMock(return_value={"product_name": "mattress", "use_case": "side sleepers"})
+    agent._extract_all_slots_from_conversation = extraction_mock
+    agent._generate_followup_questions = AsyncMock(return_value={"intro": "", "questions": [], "closing": ""})
+
+    with patch("app.agents.clarifier_agent.HaltStateManager.update_halt_state", new=AsyncMock()):
+        await agent._handle_new_plan(state, "test-session")
+
+    extraction_mock.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_query_with_budget_number_still_uses_llm_extraction(agent):
+    """'best laptop under $800' contains a number → LLM extraction runs (budget needs parsing)."""
+    state = _new_plan_state("best laptop under $800")
+
+    extraction_mock = AsyncMock(return_value={"product_name": "laptop", "budget": "under $800"})
+    agent._extract_all_slots_from_conversation = extraction_mock
+    agent._generate_followup_questions = AsyncMock(return_value={"intro": "", "questions": [], "closing": ""})
+
+    with patch("app.agents.clarifier_agent.HaltStateManager.update_halt_state", new=AsyncMock()):
+        await agent._handle_new_plan(state, "test-session")
+
+    extraction_mock.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_non_superlative_query_still_uses_llm_extraction(agent):
+    """'hmm' doesn't match the fast path → LLM extraction runs → not substantive → proceed."""
+    state = _new_plan_state("hmm")
+
+    extraction_mock = AsyncMock(return_value={})
+    agent._extract_all_slots_from_conversation = extraction_mock
+
+    with patch("app.agents.clarifier_agent.HaltStateManager.update_halt_state", new=AsyncMock()):
+        result = await agent._handle_new_plan(state, "test-session")
+
+    extraction_mock.assert_called_once()
+    assert result["proceed_to_execution"] is True
+
+
+@pytest.mark.asyncio
+async def test_fast_path_skipped_with_conversation_history(agent):
+    """A 'best X' query mid-conversation still uses LLM extraction (history may hold answers)."""
+    history = [
+        {"role": "user", "content": "best coffee machine"},
+        {"role": "assistant", "content": "..."},
+        {"role": "user", "content": "best espresso machine"},
+    ]
+    state = _new_plan_state("best espresso machine", history=history)
+
+    extraction_mock = AsyncMock(return_value={})
+    agent._extract_all_slots_from_conversation = extraction_mock
+
+    with patch("app.agents.clarifier_agent.HaltStateManager.update_halt_state", new=AsyncMock()):
+        await agent._handle_new_plan(state, "test-session")
+
+    extraction_mock.assert_called_once()
+
+
+def test_clarifier_stage_budget_accommodates_two_llm_calls():
+    """F6 regression: the clarifier hard budget must be ≥ 15s — two sequential LLM calls
+    (extraction + question generation) routinely take 8-12s, and the timeout fallback
+    silently skips clarification."""
+    from app.services.stage_telemetry import STAGE_BUDGETS
+    soft, hard = STAGE_BUDGETS["clarifier"]
+    assert hard >= 15.0, (
+        f"Clarifier hard budget is {hard}s - the timeout fallback skips clarification "
+        "entirely, so this must cover two sequential LLM calls (QA Round 4 F6)"
+    )
