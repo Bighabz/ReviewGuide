@@ -774,6 +774,40 @@ async def product_compose(state: Dict[str, Any]) -> Dict[str, Any]:
                 # fallback cards — that's how the "$299 pick on a $500+ ask" leaked.
                 _budget_pruned_names.update(n for n in dropped_names if n)
 
+        # Tier 5 / A2 anti-hallucination: drop products that the LLM search may have
+        # invented — those with NEITHER a real shopping match (a priced offer with a
+        # non-placeholder image) NOR real review evidence. Without this, gpt-4o-mini's
+        # guessed product names reach the composer and it writes confident prose about
+        # products that don't exist. Keep ≥2 verified products so sparse-but-real
+        # results still render (degrade beats empty). Reuses the suppression set so
+        # dropped names can't sneak back in via prose mentions or fallback cards.
+        if settings.USE_PRODUCT_VERIFICATION and len(products_with_offers) > 2:
+            def _has_real_shopping(p):
+                for o in p.get("all_offers", []):
+                    if _extract_price(o) is not None and "placehold.co" not in (o.get("image_url") or ""):
+                        return True
+                return False
+
+            def _has_review_evidence(p):
+                name = p.get("name", "")
+                for rname, bundle in review_data.items():
+                    if _fuzzy_product_match(name, rname) and (bundle or {}).get("sources"):
+                        return True
+                return False
+
+            verified = [
+                p for p in products_with_offers
+                if _has_real_shopping(p) or _has_review_evidence(p)
+            ]
+            if len(verified) >= 2 and len(verified) < len(products_with_offers):
+                dropped_names = [p.get("name") for p in products_with_offers if p not in verified]
+                logger.info(
+                    f"[product_compose] A2 verification dropped {len(dropped_names)} unverifiable "
+                    f"product(s) (no shopping match, no reviews): {dropped_names}"
+                )
+                products_with_offers = verified
+                _budget_pruned_names.update(n for n in dropped_names if n)
+
         # Assign editorial labels based on review quality + price
         editorial_labels = _assign_editorial_labels(review_data, products_with_offers)
         if editorial_labels:
