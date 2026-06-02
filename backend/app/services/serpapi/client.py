@@ -248,7 +248,11 @@ class SerpAPIClient:
             if shopping_data.get("rating"):
                 ratings.append(shopping_data["rating"])
 
-            avg_rating = round(sum(ratings) / len(ratings), 1) if ratings else 0.0
+            # Normalize mixed scales before averaging: editorial sites rate /10
+            # (RTINGS "8.5"), shopping rates /5. Without this, the average can
+            # exceed 5 and downstream star displays break.
+            normalized_ratings = [r / 2 if r > 5 else r for r in ratings]
+            avg_rating = round(sum(normalized_ratings) / len(normalized_ratings), 1) if normalized_ratings else 0.0
 
             total_reviews = sum(
                 s.review_count for s in unique_sources if s.review_count

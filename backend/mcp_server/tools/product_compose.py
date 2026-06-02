@@ -1050,16 +1050,16 @@ async def product_compose(state: Dict[str, Any]) -> Dict[str, Any]:
 
             # Deterministic template for remaining products (no LLM call)
             # These get injected into result_map after the asyncio.gather below
+            # NOTE: no source names here — tone.md "No source citations. Synthesize."
             _template_consensus = {}
             for product_name, bundle in remaining_products:
                 review_bundles[product_name] = bundle
                 rating = bundle.get("avg_rating", "N/A")
                 total = bundle.get("total_reviews", 0)
-                top_source = bundle.get("sources", [{}])[0].get("site_name", "reviewers")
                 _template_consensus[f'consensus:{product_name}'] = (
                     f"Rated {rating}/5 across {total} reviews. "
-                    f"{top_source} highlights this as a solid option in its category. "
-                    f"See the full reviews for detailed pros and cons."
+                    f"Reviewers consider it a solid option in its category — "
+                    f"a dependable pick if the top choices don't fit your needs."
                 )
 
             # REMOVED (v3): opener LLM call — blog_article already provides intro
@@ -1480,8 +1480,43 @@ TRANSITIONAL RULES (transitional_reasoning field):
                 except (json.JSONDecodeError, Exception) as e:
                     logger.warning(f"[product_compose] Failed to parse top_pick: {e}")
 
-        # Comparison HTML block (keep as structured UI)
-        if comparison_html:
+        # ── Review consensus comparison block ──
+        # One card per product: aggregated rating + review count + synthesized
+        # consensus prose, ranked by quality_score, so users can compare the
+        # shortlist at a glance. No source names surface (tone.md: "No source
+        # citations. Synthesize."). Replaces the HTML comparison table whenever
+        # real review data exists; the table remains as a fallback for queries
+        # where review search returned nothing (e.g. providers out of credits).
+        consensus_products = []
+        if review_bundles:
+            ranked_bundles = sorted(
+                review_bundles.items(),
+                key=lambda kv: kv[1].get("quality_score", 0),
+                reverse=True,
+            )
+            for rank, (pname, bundle) in enumerate(ranked_bundles, 1):
+                consensus_text = _get_result(f'consensus:{pname}', '')
+                if not consensus_text:
+                    continue
+                consensus_products.append({
+                    "name": pname,
+                    "avg_rating": float(bundle.get("avg_rating") or 0),
+                    "total_reviews": int(bundle.get("total_reviews") or 0),
+                    "consensus": consensus_text,
+                    "rank": rank,
+                })
+
+        if consensus_products:
+            ui_blocks.append({
+                "type": "review_consensus",
+                "title": "How They Compare",
+                "data": {"products": consensus_products},
+            })
+            logger.info(
+                f"[product_compose] Added review_consensus block ({len(consensus_products)} products)"
+            )
+        elif comparison_html:
+            # Fallback: old HTML comparison table (no review data this query)
             ui_blocks.append({
                 "type": "comparison_html",
                 "title": "Product Comparison",
