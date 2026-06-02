@@ -978,3 +978,120 @@ async def test_two_speed_considered_query_is_richer():
     call = _blog_call(svc)
     assert call.kwargs["max_tokens"] == 1000
     assert "550 words" in call.kwargs["messages"][0]["content"]
+
+
+# ---------------------------------------------------------------------------
+# Provider-field sanitization: a scraped offer whose url/title/merchant arrives
+# as a dict (not a string) must degrade gracefully, never crash card building.
+# Prod incident 2026-06-02: "'dict' object has no attribute 'lower'" killed the
+# whole response for a headphones query.
+# ---------------------------------------------------------------------------
+
+from mcp_server.tools.product_compose import _str_or
+
+
+def test_str_or_coercion():
+    assert _str_or("https://x.com", "") == "https://x.com"
+    assert _str_or({"nested": "dict"}, "") == ""
+    assert _str_or(["list"], "fallback") == "fallback"
+    assert _str_or(None, "default") == "default"
+    assert _str_or("", "default") == "default"
+    assert _str_or(123, "d") == "d"
+
+
+@pytest.mark.asyncio
+async def test_dict_url_offer_does_not_crash_card_building():
+    """The prod crash: an offer with url as a DICT must not kill the response.
+    The bad field is blanked; the good offer still drives the card."""
+    fake_service = MagicMock()
+    fake_service.generate_compose = AsyncMock(return_value="mock response text")
+
+    state = {
+        "user_message": "best wireless headphones",
+        "intent": "product",
+        "slots": {"category": "headphones"},
+        "normalized_products": [{"name": "Sony WH-1000XM5"}],
+        "affiliate_products": {
+            "amazon": [{
+                "product_name": "Sony WH-1000XM5",
+                "offers": [{
+                    "title": "Sony WH-1000XM5", "price": 0, "currency": "USD",
+                    "url": "https://amzn.to/sonyxm5", "merchant": "Amazon",
+                    "image_url": "",
+                }],
+            }],
+            # The poisoned offer: url is a dict (scraper returned structured data)
+            "serper_shopping": [{
+                "product_name": "Sony WH-1000XM5",
+                "offers": [{
+                    "title": "Sony WH-1000XM5", "price": 348.00, "currency": "USD",
+                    "url": {"link": "https://www.google.com/shopping/product/xm5", "source": "Best Buy"},
+                    "merchant": "Best Buy",
+                    "image_url": "https://img.example.com/xm5.jpg",
+                    "rating": 4.7, "review_count": 30000, "source": "serper_shopping",
+                }],
+            }],
+        },
+        "review_data": {},
+        "comparison_html": None,
+        "comparison_data": None,
+        "general_product_info": "",
+        "conversation_history": [],
+        "last_search_context": {},
+        "search_history": [],
+    }
+
+    with patch("app.services.model_service.model_service", fake_service):
+        result = await product_compose(state)
+
+    # The response must succeed — not the generic error fallback.
+    assert result["success"] is True, f"compose failed: {result.get('error')}"
+    assert "error while formatting" not in result["assistant_text"]
+
+    # The card still renders, driven by the Amazon offer (the dict url was blanked,
+    # but the offer's price/image context still backfills).
+    review_cards = [b for b in result.get("ui_blocks", []) if b.get("type") == "product_review"]
+    assert review_cards, "expected a product_review card despite the poisoned offer"
+    links = review_cards[0]["data"]["affiliate_links"]
+    # No link carries a non-string URL.
+    for link in links:
+        assert isinstance(link.get("affiliate_link") or "", str)
+
+
+@pytest.mark.asyncio
+async def test_dict_title_offer_does_not_crash_blog_path():
+    """A dict title from a provider must not crash _fuzzy_product_match in the
+    blog/affiliate-only path."""
+    fake_service = MagicMock()
+    fake_service.generate_compose = AsyncMock(return_value="mock response text")
+
+    state = {
+        "user_message": "best wireless headphones",
+        "intent": "product",
+        "slots": {"category": "headphones"},
+        "normalized_products": [{"name": "Sony WH-1000XM5"}],
+        "affiliate_products": {
+            "amazon": [{
+                "product_name": "Sony WH-1000XM5",
+                "offers": [{
+                    # Poisoned title (dict) + valid url
+                    "title": {"text": "Sony WH-1000XM5"}, "price": 299.99, "currency": "USD",
+                    "url": "https://amzn.to/sonyxm5", "merchant": "Amazon",
+                    "image_url": "https://img.example.com/xm5.jpg",
+                }],
+            }],
+        },
+        "review_data": {},
+        "comparison_html": None,
+        "comparison_data": None,
+        "general_product_info": "",
+        "conversation_history": [],
+        "last_search_context": {},
+        "search_history": [],
+    }
+
+    with patch("app.services.model_service.model_service", fake_service):
+        result = await product_compose(state)
+
+    assert result["success"] is True, f"compose failed: {result.get('error')}"
+    assert "error while formatting" not in result["assistant_text"]
