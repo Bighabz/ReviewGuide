@@ -1148,3 +1148,105 @@ async def test_dict_title_offer_does_not_crash_blog_path():
 
     assert result["success"] is True, f"compose failed: {result.get('error')}"
     assert "error while formatting" not in result["assistant_text"]
+
+
+# ---------------------------------------------------------------------------
+# QA Round 5 — F1: every card carries a monetizable Amazon link
+# ---------------------------------------------------------------------------
+# eBay links are unmonetized until a real EPN campaign id is set, so a card
+# whose only clickable links are eBay earns nothing (observed: 4 of 5 cards on
+# a running-shoes query, including the top pick).
+
+def _f1_state(affiliate_products):
+    return {
+        "user_message": "best running shoes",
+        "intent": "product",
+        "slots": {"category": "running shoes"},
+        "normalized_products": [{"name": "Hoka Bondi 8"}],
+        "affiliate_products": affiliate_products,
+        "review_data": {},
+        "comparison_html": None,
+        "comparison_data": None,
+        "general_product_info": "",
+        "conversation_history": [],
+        "last_search_context": {},
+        "search_history": [],
+    }
+
+
+@pytest.mark.asyncio
+async def test_ebay_only_product_gets_tagged_amazon_search_link():
+    """F1: a product with ONLY an eBay offer must still get a tagged Amazon search
+    link on its card — otherwise the card is completely unmonetized."""
+    fake_service = MagicMock()
+    fake_service.generate_compose = AsyncMock(return_value="mock response text")
+
+    state = _f1_state({
+        "ebay": [{
+            "product_name": "Hoka Bondi 8",
+            "offers": [{
+                "title": "Hoka Bondi 8", "price": 89.99, "currency": "USD",
+                "url": "https://www.ebay.com/itm/12345?campid=1234567890",
+                "merchant": "eBay (seller123)", "image_url": "https://img.example.com/hoka.jpg",
+                "source": "ebay",
+            }],
+        }],
+    })
+
+    with patch("app.services.model_service.model_service", fake_service):
+        result = await product_compose(state)
+
+    review_cards = [b for b in result.get("ui_blocks", []) if b.get("type") == "product_review"]
+    assert review_cards
+    links = review_cards[0]["data"]["affiliate_links"]
+    urls = [(l.get("affiliate_link") or "").lower() for l in links]
+
+    # The Amazon search link was ADDED (monetizable)...
+    assert any("amazon.com/s" in u and "tag=revguide-20" in u for u in urls), (
+        f"eBay-only card has no Amazon link: {urls}"
+    )
+    # ...and the eBay offer is still there (real listing, real price)
+    assert any("ebay.com" in u for u in urls), f"eBay offer was lost: {urls}"
+    # Amazon sorts first (monetization priority)
+    assert "amazon" in urls[0], f"Amazon link must lead the card: {urls}"
+
+
+@pytest.mark.asyncio
+async def test_product_with_real_amazon_offer_gets_no_duplicate_search_link():
+    """A product that already has a real Amazon offer must NOT get an extra
+    Amazon search URL appended (one Amazon link per card, the real one)."""
+    fake_service = MagicMock()
+    fake_service.generate_compose = AsyncMock(return_value="mock response text")
+
+    state = _f1_state({
+        "amazon": [{
+            "product_name": "Hoka Bondi 8",
+            "offers": [{
+                "title": "Hoka Bondi 8", "price": 99.99, "currency": "USD",
+                "url": "https://amzn.to/hoka-bondi", "merchant": "Amazon",
+                "image_url": "https://img.example.com/hoka.jpg",
+            }],
+        }],
+        "ebay": [{
+            "product_name": "Hoka Bondi 8",
+            "offers": [{
+                "title": "Hoka Bondi 8", "price": 89.99, "currency": "USD",
+                "url": "https://www.ebay.com/itm/12345?campid=1234567890",
+                "merchant": "eBay (seller123)", "image_url": "",
+                "source": "ebay",
+            }],
+        }],
+    })
+
+    with patch("app.services.model_service.model_service", fake_service):
+        result = await product_compose(state)
+
+    review_cards = [b for b in result.get("ui_blocks", []) if b.get("type") == "product_review"]
+    assert review_cards
+    links = review_cards[0]["data"]["affiliate_links"]
+    urls = [(l.get("affiliate_link") or "").lower() for l in links]
+
+    amazon_links = [u for u in urls if "amazon" in u or "amzn.to" in u]
+    assert len(amazon_links) == 1, f"expected exactly one Amazon link, got: {urls}"
+    # And it's the REAL offer, not the search fallback
+    assert "amzn.to/hoka-bondi" in amazon_links[0]

@@ -1657,16 +1657,29 @@ TRANSITIONAL RULES (transitional_reasoning field):
             link_offers = [
                 o for o in real_offers if o.get("source", "").lower() != "serper_shopping"
             ]
-            # If Shopping was the ONLY priced source (no Amazon/eBay offer), keep the
-            # card but point the buy-link at a tagged Amazon SEARCH url, carrying the
-            # real price/image as display context — rather than dropping the card or
-            # linking out to a non-affiliate merchant.
-            if not link_offers:
+            # F1 (QA Round 5): every card must carry a monetizable AMAZON link.
+            # eBay links are unmonetized until a real EPN campaign id is set, and
+            # Google Shopping is context-only — so a card whose only clickable links
+            # are eBay earns nothing (observed: 4 of 5 running-shoe cards, incl. the
+            # top pick). Whenever the product has no real Amazon offer, add the
+            # tagged Amazon SEARCH url alongside whatever marketplace offers exist.
+            # This subsumes the old "Shopping was the only source" fallback (empty
+            # link_offers → also no Amazon offer → fallback fires).
+            has_amazon_offer = any(
+                "amazon" in o.get("url", "").lower()
+                or "amzn.to" in o.get("url", "").lower()
+                or o.get("source", "").lower() == "amazon"
+                for o in link_offers
+            )
+            if not has_amazon_offer:
+                # Price/image context comes from Google Shopping when available (real
+                # market data); otherwise price 0 → the card renders "Check price →"
+                # rather than borrowing another merchant's price for an Amazon label.
                 shop = next(
                     (o for o in real_offers if o.get("source", "").lower() == "serper_shopping"),
                     {},
                 )
-                link_offers = [{
+                link_offers = link_offers + [{
                     "source": "amazon",
                     "merchant": "Amazon",
                     "url": f"https://www.amazon.com/s?k={quote_plus(pname)}&tag=revguide-20",
