@@ -978,3 +978,56 @@ async def test_two_speed_considered_query_is_richer():
     call = _blog_call(svc)
     assert call.kwargs["max_tokens"] == 1000
     assert "550 words" in call.kwargs["messages"][0]["content"]
+
+
+_VP_DRAFT = '{"body": "DRAFT body text", "follow_up_question": "draft q?", "transitional_reasoning": ""}'
+_VP_REVISED = '{"body": "REVISED tighter body", "follow_up_question": "revised q?", "transitional_reasoning": ""}'
+
+
+def _vp_service(reviser_return):
+    """Mock model_service whose blog call returns a draft and whose voice-pass
+    call returns reviser_return; everything else returns a stub."""
+    def gen(*a, **kw):
+        name = kw.get("agent_name")
+        if name == "blog_article_composer":
+            return _VP_DRAFT
+        if name == "voice_pass_reviser":
+            return reviser_return
+        return "x"
+    svc = MagicMock()
+    svc.generate_compose = AsyncMock(side_effect=gen)
+    return svc
+
+
+@pytest.mark.asyncio
+async def test_voice_pass_off_keeps_draft_and_skips_call():
+    from app.core.config import settings as _settings
+    svc = _vp_service(_VP_REVISED)
+    with patch("app.services.model_service.model_service", svc), \
+         patch.object(_settings, "USE_VOICE_PASS", False):
+        result = await product_compose(_two_speed_state("best noise cancelling headphones"))
+    assert "DRAFT body text" in result.get("assistant_text", "")
+    assert not any(c.kwargs.get("agent_name") == "voice_pass_reviser"
+                   for c in svc.generate_compose.call_args_list)
+
+
+@pytest.mark.asyncio
+async def test_voice_pass_on_replaces_body_with_revision():
+    from app.core.config import settings as _settings
+    svc = _vp_service(_VP_REVISED)
+    with patch("app.services.model_service.model_service", svc), \
+         patch.object(_settings, "USE_VOICE_PASS", True):
+        result = await product_compose(_two_speed_state("best noise cancelling headphones"))
+    assert "REVISED tighter body" in result.get("assistant_text", "")
+    assert any(c.kwargs.get("agent_name") == "voice_pass_reviser"
+               for c in svc.generate_compose.call_args_list)
+
+
+@pytest.mark.asyncio
+async def test_voice_pass_falls_back_to_draft_on_garbage():
+    from app.core.config import settings as _settings
+    svc = _vp_service("not json at all")
+    with patch("app.services.model_service.model_service", svc), \
+         patch.object(_settings, "USE_VOICE_PASS", True):
+        result = await product_compose(_two_speed_state("best noise cancelling headphones"))
+    assert "DRAFT body text" in result.get("assistant_text", "")

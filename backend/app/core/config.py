@@ -257,6 +257,13 @@ class Settings(BaseSettings):
     # matter; recommendations keep the standard 400-word default. Default off.
     USE_TWO_SPEED_COMPOSE: bool = Field(default=False, description="Vary blog compose depth (word cap + max_tokens) by query complexity tier")
 
+    # Tier 3 compose redesign (Option B): a draft→revise voice pass. After the blog
+    # article is generated, run ONE more LLM call that polishes the assembled body
+    # for maximum voice adherence (rank-and-commit, no glaze, position-by-fit)
+    # without inventing facts. Adds ~one compose round-trip of latency; graceful
+    # fallback to the draft on any failure. Default off.
+    USE_VOICE_PASS: bool = Field(default=False, description="Run a draft→revise voice pass over the assembled blog body (Tier 3)")
+
     # Agent-specific Max Tokens
     PLANNER_MAX_TOKENS: int = Field(default=2000, description="Max tokens for planner agent")
     INTENT_MAX_TOKENS: int = Field(default=50, description="Max tokens for intent agent")
