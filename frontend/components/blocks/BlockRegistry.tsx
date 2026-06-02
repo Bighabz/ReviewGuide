@@ -24,7 +24,9 @@ import CarRentalCard from '@/components/CarRentalCard'
 // NOTE: ReviewSources + SourceCitations removed (PR #9). They rendered
 // review-site names as user-visible badges, contradicting tone.md's
 // "No source citations. Synthesize." rule. Backend no longer emits
-// `review_sources` ui_blocks.
+// `review_sources` ui_blocks. ReviewConsensus is their tone-compliant
+// successor: synthesized comparison prose + aggregate ratings, no sources.
+import ReviewConsensus from '@/components/ReviewConsensus'
 import PriceComparison from '@/components/PriceComparison'
 import InlineProductCard from '@/components/InlineProductCard'
 import ProductReviewCarousel from '@/components/ProductReviewCarousel'
@@ -80,6 +82,9 @@ const BLOCK_RENDERERS: Record<string, BlockRenderer> = {
         <ItineraryView days={(b.data as any[]) ?? []} />
     ),
     product_comparison: (b) => <ComparisonTable data={b.data as any} title={b.title} />,
+    // Review-grounded comparison rows (rating + review count + consensus per
+    // product). Emitted instead of comparison_html when review data exists.
+    review_consensus: (b) => <ReviewConsensus data={(b.data as any) ?? { products: [] }} title={b.title} />,
     comparison_html: (b) => {
         const html = DOMPurify.sanitize((b.data as any)?.html ?? '', {
             ADD_TAGS: ['style'],
