@@ -662,15 +662,28 @@ class ClarifierAgent(BaseAgent):
                     if contract:
                         if "optional_slots" in contract:
                             for slot in contract["optional_slots"]:
-                                if slot not in current_slots and slot not in optional_slot_names:
+                                # A slot already being asked as REQUIRED must not also be
+                                # listed as optional — duplicate slot names make the LLM
+                                # extractor emit duplicate JSON keys, and json.loads keeps
+                                # the LAST occurrence, so the real extracted value gets
+                                # overwritten by the optional duplicate's null. That's the
+                                # "Extracted 0/13 slots" clarifier loop seen in prod
+                                # (2026-06-02): the user answers, extraction silently
+                                # discards it, and the same questions come back forever.
+                                if (
+                                    slot not in current_slots
+                                    and slot not in optional_slot_names
+                                    and slot not in required_slot_names
+                                ):
                                     optional_slot_names.append(slot)
                         # Collect slot replacements
                         if "slot_replacements" in contract:
                             for slot_name, replacement_slot in contract["slot_replacements"].items():
                                 slot_replacements[slot_name] = replacement_slot
 
-        # Combine required and optional slots for extraction
-        slot_names = required_slot_names + optional_slot_names
+        # Combine required and optional slots for extraction (dedupe defensively —
+        # see the duplicate-JSON-key trap documented above)
+        slot_names = list(dict.fromkeys(required_slot_names + optional_slot_names))
         logger.info(f"[Clarifier Agent] Extracting {len(slot_names)} slots from user answer: {slot_names} (required: {required_slot_names}, optional: {optional_slot_names})")
 
         extracted_slots = await self._extract_all_slots_from_answer(
@@ -964,6 +977,12 @@ Return ONLY valid JSON:
             Dict mapping slot_name -> extracted_value (or None if not found)
         """
         optional_slots = optional_slots or []
+
+        # Defense in depth: duplicate slot names make the LLM emit duplicate JSON
+        # keys, and json.loads keeps the LAST occurrence — so a real value extracted
+        # for the first occurrence is silently overwritten by the duplicate's null.
+        # Dedupe here regardless of what the caller passed.
+        slot_names = list(dict.fromkeys(slot_names))
 
         # Build questions context for the LLM (only for required slots that have questions).
         # Include the offered chip options so a tapped chip ("Student / everyday")

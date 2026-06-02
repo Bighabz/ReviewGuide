@@ -560,3 +560,98 @@ async def test_extraction_context_omits_multi_select_note_for_single_select(agen
 
     system_prompt = agent.generate.call_args.kwargs["messages"][0]["content"]
     assert "multi-select" not in system_prompt
+
+
+# ---------------------------------------------------------------------------
+# Duplicate-slot extraction loop (prod 2026-06-02): required slots also listed
+# as optional produced duplicate JSON keys in the extractor template; json.loads
+# keeps the LAST key, so the real answer was overwritten by null and the
+# clarifier re-asked the same questions forever.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_extraction_slot_names_are_deduped(agent):
+    """_extract_all_slots_from_answer must never put duplicate slot names in its
+    prompt template — duplicates become duplicate JSON keys and the answer is lost."""
+    captured = {}
+
+    async def fake_generate(**kwargs):
+        captured["system"] = kwargs["messages"][0]["content"]
+        return json.dumps({"use_case": "Office tasks", "features": None, "budget": None})
+
+    agent.generate = fake_generate
+
+    followups = [
+        {"slot": "use_case", "question": "What for?", "options": ["Office tasks", "Gaming"]},
+        {"slot": "features", "question": "Which features?", "options": ["Light", "Fast"]},
+        {"slot": "budget", "question": "How much?", "options": ["$500", "$1000"]},
+    ]
+    # Caller passes duplicates (required + optional overlap) — the prod trigger
+    extracted = await agent._extract_all_slots_from_answer(
+        slot_names=["use_case", "features", "budget", "brand", "budget", "features", "use_case"],
+        user_message="You chose: Office tasks",
+        followups=followups,
+        optional_slots=["brand", "budget", "features", "use_case"],
+    )
+
+    # The template line '"<slot>": <value or null>' must appear exactly once per slot
+    assert captured["system"].count('"use_case":') == 1, "duplicate use_case key in extractor template"
+    assert captured["system"].count('"budget":') == 1, "duplicate budget key in extractor template"
+    assert extracted.get("use_case") == "Office tasks"
+
+
+@pytest.mark.asyncio
+async def test_handle_user_answer_dedupes_required_and_optional(agent):
+    """_handle_user_answer must not list a required slot as optional too — the
+    chip answer must be consumed, not re-asked."""
+    halt_state = {
+        "intent": "product",
+        "slots": {"category": "laptop", "country_code": "US"},
+        "followups": [
+            {"slot": "use_case", "question": "What will you mainly use the laptop for?",
+             "options": ["Schoolwork", "Office tasks", "Creative work"]},
+            {"slot": "budget", "question": "What is your budget?",
+             "options": ["Under $500", "$500–$800"]},
+        ],
+        "missing_required_slots": ["use_case", "budget"],
+        # product_search's contract lists use_case/budget/features as OPTIONAL too —
+        # this overlap is what created the duplicates in prod
+        "plan": {"steps": [{"id": "s1", "tools": ["product_search"]}]},
+        "tools_by_required_slot": {},
+    }
+    state = {
+        "session_id": "test-session",
+        "user_message": "You chose: Office tasks",
+        "sanitized_text": "You chose: Office tasks",
+        "intent": "product",
+        "slots": {},
+        "conversation_history": [],
+        "last_search_context": {},
+        "search_history": [],
+    }
+
+    captured = {}
+
+    async def fake_extract(slot_names, user_message, followups, optional_slots=None):
+        captured["slot_names"] = list(slot_names)
+        # Simulate successful extraction of the answered slot
+        return {s: ("Office tasks" if s == "use_case" else None) for s in slot_names}
+
+    agent._extract_all_slots_from_answer = fake_extract
+    # Question regeneration for the still-missing budget slot
+    agent._generate_followup_questions = AsyncMock(return_value={
+        "intro": "x",
+        "questions": [{"slot": "budget", "question": "Budget?", "options": ["Under $500"]}],
+        "closing": "",
+    })
+
+    with patch("app.agents.clarifier_agent.HaltStateManager.update_halt_state", new=AsyncMock()):
+        result = await agent._handle_user_answer(state, halt_state, "test-session")
+
+    # No duplicates went into extraction
+    assert len(captured["slot_names"]) == len(set(captured["slot_names"])), (
+        f"duplicate slot names passed to extraction: {captured['slot_names']}"
+    )
+    # The answer was consumed: use_case filled, only budget still missing
+    assert result["slots"]["use_case"] == "Office tasks"
+    assert result["missing_required_slots"] == ["budget"]
