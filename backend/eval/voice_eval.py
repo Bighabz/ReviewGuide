@@ -172,11 +172,21 @@ TRANSITIONAL RULES (transitional_reasoning field):
 # Prompt assembly (faithful to production)
 # ---------------------------------------------------------------------------
 
-def assemble_messages(case: GoldenCase) -> List[dict]:
-    """Build the exact (system, user) messages production sends for blog_article."""
+def assemble_messages(case: GoldenCase, ungrounded: bool = False) -> List[dict]:
+    """Build the (system, user) messages production sends for blog_article.
+
+    When ``ungrounded`` is True, the product/review evidence is stripped from the
+    user message — only the "User asked: ..." line remains — so the writer must
+    rely on parametric knowledge. The judge still scores claim_support against the
+    full evidence (case.blog_data), so the grounded-vs-ungrounded delta on that
+    dimension measures how much real evidence improves claim accuracy (A1's premise).
+    """
+    user_content = case.blog_data
+    if ungrounded:
+        user_content = case.blog_data.splitlines()[0]  # just the 'User asked: "..."' line
     return [
         {"role": "system", "content": build_system_prompt(role_prompt=BLOG_ROLE, kind="response")},
-        {"role": "user", "content": case.blog_data},
+        {"role": "user", "content": user_content},
     ]
 
 
@@ -312,10 +322,10 @@ async def call_chat(client, model: str, messages: List[dict], json_mode: bool = 
     return completion.choices[0].message.content or ""
 
 
-async def generate_one(client, model: str, case: GoldenCase, sem: asyncio.Semaphore) -> CaseResult:
+async def generate_one(client, model: str, case: GoldenCase, sem: asyncio.Semaphore, ungrounded: bool = False) -> CaseResult:
     """Generate one (model × case) output and run deterministic checks."""
     result = CaseResult(model=model, case_id=case.id)
-    messages = assemble_messages(case)
+    messages = assemble_messages(case, ungrounded=ungrounded)
 
     async with sem:
         start = time.monotonic()
@@ -608,7 +618,7 @@ async def run(args: argparse.Namespace) -> int:
     sem = asyncio.Semaphore(MAX_CONCURRENCY)
 
     # Generate all (model × case) outputs concurrently.
-    gen_tasks = [generate_one(client, model, case, sem) for model in models for case in cases]
+    gen_tasks = [generate_one(client, model, case, sem, ungrounded=args.ungrounded) for model in models for case in cases]
     print(f"Generating {len(gen_tasks)} outputs across {len(models)} models...")
     results: List[CaseResult] = list(await asyncio.gather(*gen_tasks))
 
@@ -656,6 +666,7 @@ def main() -> None:
     parser.add_argument("--judge-model", default=DEFAULT_JUDGE_MODEL, help=f"Judge model slug (default: {DEFAULT_JUDGE_MODEL})")
     parser.add_argument("--no-judge", action="store_true", help="Deterministic checks only, skip the LLM judge")
     parser.add_argument("--dry-run", action="store_true", help="Assemble prompts and estimate cost without any API calls")
+    parser.add_argument("--ungrounded", action="store_true", help="Strip product/review evidence from the writer's input (parametric-only) — for the grounded-vs-ungrounded claim_support A/B")
     args = parser.parse_args()
 
     sys.exit(asyncio.run(run(args)))
