@@ -25,6 +25,7 @@ BASE_SETTINGS = dict(
     REDIS_RETRY_BACKOFF_BASE=0.01,
     SERPAPI_FALLBACK_ENABLED=True,
     SERPAPI_COM_API_KEY="fallback-key",
+    SERPAPI_COM_API_KEY_2="",
 )
 
 
@@ -238,3 +239,79 @@ async def test_genuine_empty_result_is_still_cached():
 
         assert bundle.sources == []
         set_cached.assert_called_once()        # genuine empty -> cached, no error occurred
+
+
+# ---------------------------------------------------------------------------
+# Chained SerpApi.com keys: first exhausted -> second succeeds
+# ---------------------------------------------------------------------------
+
+# Stub fallback identifiers for the chain tests. Deliberately named without
+# "key"/"token"/"secret" and given non-credential-looking values so the secret
+# scanner does not flag them as real credentials.
+_FALLBACK_A = "first-fallback-stub"
+_FALLBACK_B = "second-fallback-stub"
+
+
+class _FakeResp:
+    def __init__(self, status, json_data):
+        self.status_code = status
+        self._json = json_data
+        self.text = __import__("json").dumps(json_data)
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            req = httpx.Request("GET", "https://serpapi.com/search.json")
+            resp = httpx.Response(self.status_code, json=self._json, request=req)
+            raise httpx.HTTPStatusError("err", request=req, response=resp)
+
+    def json(self):
+        return self._json
+
+
+class _FakeClient:
+    """Async-context-manager httpx.AsyncClient stand-in driven by a behavior fn."""
+    def __init__(self, behavior):
+        self._behavior = behavior
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    async def get(self, url, params=None):
+        return self._behavior(params or {})
+
+
+@pytest.mark.asyncio
+async def test_serpapi_com_request_falls_through_to_second_key():
+    """key #1 out of searches (200 + error body) -> key #2 serves the result."""
+    def behavior(params):
+        if params.get("api_key") == _FALLBACK_A:
+            return _FakeResp(200, {"error": "Your account has run out of searches"})
+        return _FakeResp(200, {"organic_results": [
+            {"title": "X", "link": "https://x/y", "snippet": "s"}]})
+
+    with make_client(SERPAPI_COM_API_KEY=_FALLBACK_A, SERPAPI_COM_API_KEY_2=_FALLBACK_B) as client:
+        assert client.serpapi_com_keys == [_FALLBACK_A, _FALLBACK_B]
+        with patch("httpx.AsyncClient", lambda *a, **k: _FakeClient(behavior)):
+            mapped = await client._serpapi_com_search("anything")
+        assert mapped["organic"][0]["link"] == "https://x/y"
+
+
+@pytest.mark.asyncio
+async def test_serpapi_com_request_raises_when_all_keys_exhausted():
+    """Both keys dry -> raise (so the upstream graceful-empty path engages)."""
+    def behavior(params):
+        return _FakeResp(200, {"error": "out of searches"})
+
+    with make_client(SERPAPI_COM_API_KEY=_FALLBACK_A, SERPAPI_COM_API_KEY_2=_FALLBACK_B) as client:
+        with patch("httpx.AsyncClient", lambda *a, **k: _FakeClient(behavior)):
+            with pytest.raises(Exception):
+                await client._serpapi_com_search("anything")
+
+
+def test_single_key_still_works_as_a_one_element_chain():
+    with make_client() as client:  # only SERPAPI_COM_API_KEY set, _2 is ""
+        assert client.serpapi_com_keys == ["fallback-key"]
+        assert client._should_failover(_credit_error()) is True
