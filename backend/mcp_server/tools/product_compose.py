@@ -500,6 +500,53 @@ def _profile_inject(user_prefs: Optional[dict]) -> Optional[str]:
     return f"Returning user who {' and '.join(parts)}."
 
 
+async def _voice_revise_body(body: str, follow_up: str, transitional: str, user_message: str) -> Optional[dict]:
+    """Tier 3 (Option B) draft→revise voice pass: one extra LLM call that polishes
+    the assembled draft for maximum voice adherence (rank-and-commit, no glaze,
+    position-by-fit) WITHOUT inventing new facts. Returns the revised
+    ``{body, follow_up_question, transitional_reasoning}``, or None on any failure
+    so the caller keeps the original draft."""
+    import json as _json
+    from app.core.centralized_logger import get_logger
+    from app.services.model_service import model_service
+    from app.services.prompts.voice import build_system_prompt
+    logger = get_logger(__name__)
+
+    revise_role = """You are the senior editor doing a FINAL VOICE PASS on a draft buying-guide response.
+Rewrite the draft body to maximize voice adherence:
+- Commit to a ranked #1 and #2 with a clear WHY the #1 wins for the default buyer.
+- Cut every trace of glaze, empty affirmation, or hedging.
+- Position alternatives by who they fit — never call anything "bad".
+- Keep it tight and skimmable; preserve the draft's length and EVERY concrete fact.
+- Do NOT add products, specs, prices, numbers, or URLs not already in the draft.
+Return ONLY a JSON object: {"body": "...", "follow_up_question": "...", "transitional_reasoning": "..."}.
+Keep follow_up_question to exactly one specific question; leave transitional_reasoning unchanged unless it breaks its one-sentence rule."""
+    draft = _json.dumps({
+        "body": body,
+        "follow_up_question": follow_up,
+        "transitional_reasoning": transitional,
+    })
+    try:
+        messages = [
+            {"role": "system", "content": build_system_prompt(role_prompt=revise_role, kind="response")},
+            {"role": "user", "content": f'User asked: "{user_message}"\n\nDraft to revise:\n{draft}'},
+        ]
+        raw = await model_service.generate_compose(
+            messages=messages,
+            temperature=0.4,
+            max_tokens=900,
+            response_format={"type": "json_object"},
+            agent_name="voice_pass_reviser",
+        )
+        parsed = _json.loads(raw)
+        if isinstance(parsed, dict) and (parsed.get("body") or "").strip():
+            return parsed
+        logger.warning("[product_compose] Voice pass returned no usable body; keeping draft")
+    except Exception as e:
+        logger.warning(f"[product_compose] Voice pass failed ({e}); keeping draft")
+    return None
+
+
 @tool_error_handler(tool_name="product_compose", error_message="Failed to compose product response")
 async def product_compose(state: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -1760,6 +1807,15 @@ TRANSITIONAL RULES (transitional_reasoning field):
                     f"[product_compose] LLM blog article: body={len(body)} chars, "
                     f"follow_up={len(follow_up_text)} chars"
                 )
+                # Tier 3 (Option B): draft→revise voice pass over the assembled body.
+                if getattr(settings, "USE_VOICE_PASS", False) and body:
+                    _revised = await _voice_revise_body(body, follow_up_text, transitional_text, user_message)
+                    if _revised:
+                        body = (_revised.get("body") or body).strip()
+                        follow_up_text = (_revised.get("follow_up_question") or follow_up_text).strip()
+                        transitional_text = (_revised.get("transitional_reasoning") or transitional_text).strip()
+                        assistant_text = body
+                        logger.info("[product_compose] Voice pass applied (Tier 3)")
             except (json.JSONDecodeError, TypeError, AttributeError) as e:
                 logger.warning(
                     f"[product_compose] Blog JSON parse failed ({e}); "
