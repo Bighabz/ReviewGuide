@@ -433,7 +433,17 @@ Use these phrasings freely in any AI-voice copy. They're the substitute for cita
 
 Confidence framing: *"This is the easy call."* / *"Two options are very close. Here's the tradeoff."* / *"You're overthinking this one — the gap is smaller than the price difference suggests."*
 
-Rule: **budget is the default first question** on any non-trivial purchase. The Results screen demonstrates this.
+Rule: **clarification follows the specialist flow — use case first, budget last.** On any
+non-trivial purchase the AI asks what a knowledgeable salesperson in that department would
+ask, in this order: (1) **use case** translated for the category ("How do you usually
+sleep?" for mattresses, "What kind of riding will you do?" for bikes), (2) the category's
+most **differentiating feature** (firmness, terrain, performance level — multi-select chips
+when several answers can apply, always with a "No strong preference" escape), and
+(3) **budget last**, with category-realistic brackets — never generic tiers. Every question
+renders tappable chips with a free-text affordance underneath. After results land, a row of
+slot-aware refinement chips ("Show cheaper options" / "Only [brand]" / "More premium picks" /
+"Different use case") lets the user reshape the shortlist in one tap without being re-asked
+anything. (Supersedes the earlier budget-first rule; implemented in PRs #62/#64/#69/#77.)
 
 ---
 
