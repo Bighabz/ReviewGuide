@@ -60,3 +60,20 @@ def test_ungrounded_prompt_omits_empty_slots():
     assert "ABOUT THIS USER" not in system
     assert "CONVERSATION SO FAR" not in system
     assert "RESEARCH FOR THIS TURN" not in system
+
+
+def test_profile_inject_surfaces_richer_signal():
+    """Tier 5b: use-cases, budget tier, and favored features (already stored by
+    preference_service) now reach the profile, not just categories + brands."""
+    prefs = {
+        "categories": {"headphones": 3},
+        "brands": {"Sony": 2},
+        "use_cases": {"travel": 2, "gym": 1},
+        "budget_ranges": ["under $200", "under $350"],
+        "features": ["noise cancelling", "long battery"],
+    }
+    out = _profile_inject(prefs)
+    assert out is not None
+    assert "travel" in out                      # use-case surfaced
+    assert "under $350" in out                  # most-recent budget surfaced
+    assert "noise cancelling" in out            # feature surfaced
