@@ -332,3 +332,63 @@ async def test_query_with_use_case_and_budget_skips_clarification(agent):
 
     assert result["proceed_to_execution"] is True
     assert result["followups"] == []
+
+
+# ---------------------------------------------------------------------------
+# Round 2 — features slot rides along; prompt translates slots per category
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_features_rides_along_between_use_case_and_budget(agent):
+    """'best laptop' (nothing but category) → three questions ordered
+    use_case → features → budget."""
+    state = {
+        "plan": {"steps": [{"tools": ["product_search"]}]},
+        "slots": {},
+        "user_message": "best laptop",
+        "sanitized_text": "best laptop",
+        "intent": "product",
+        "conversation_history": [],
+        "last_search_context": {},
+        "session_id": "test-session",
+    }
+
+    captured = {}
+
+    async def fake_generate_followups(missing_slots, current_slots, user_message, intent, conversation_history=None):
+        captured["missing_slots"] = list(missing_slots)
+        return {
+            "intro": "x",
+            "questions": [{"slot": s, "question": f"{s}?"} for s in missing_slots],
+            "closing": "",
+        }
+
+    agent._extract_all_slots_from_conversation = AsyncMock(
+        return_value={"category": "laptops", "use_case": None, "features": None, "budget": None}
+    )
+    agent._generate_followup_questions = fake_generate_followups
+
+    with patch("app.agents.clarifier_agent.HaltStateManager.update_halt_state", new=AsyncMock()):
+        result = await agent._handle_new_plan(state, "test-session")
+
+    assert result["proceed_to_execution"] is False
+    assert captured["missing_slots"] == ["use_case", "features", "budget"]
+
+
+@pytest.mark.asyncio
+async def test_product_prompt_translates_slots_to_specialist_questions(agent):
+    """The prompt teaches slot translation: mattress use_case = 'How do you usually sleep?',
+    and the features question carries a 'No strong preference' escape hatch."""
+    agent.generate = AsyncMock(return_value=LAPTOP_LLM_RESPONSE)
+
+    await agent._generate_followup_questions(
+        missing_slots=["use_case", "features", "budget"],
+        current_slots={"category": "mattresses"},
+        user_message="best mattress",
+        intent="product",
+    )
+
+    system_prompt = agent.generate.call_args.kwargs["messages"][0]["content"]
+    assert "How do you usually sleep?" in system_prompt, "category-translation examples missing"
+    assert "No strong preference" in system_prompt, "features escape-hatch instruction missing"
+    assert "mattresses specialist" in system_prompt
