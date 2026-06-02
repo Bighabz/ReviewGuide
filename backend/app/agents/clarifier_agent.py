@@ -422,7 +422,38 @@ class ClarifierAgent(BaseAgent):
         # Combine both lists
         slots_to_extract = required_slots_to_extract + optional_slots_to_extract
 
-        if slots_to_extract:
+        # ── F6 fast path (QA Round 4): bare "best X" queries skip the extraction LLM call ──
+        # The extraction call costs 3-8s; for a pure category ask ("best mattress",
+        # "top wireless earbuds") there is nothing else to extract — every other word
+        # is generic. That latency was pushing the clarifier past its hard stage budget,
+        # and the timeout fallback silently skips clarification (no questions, straight
+        # to search). Extract the product noun directly and save the whole LLM call.
+        fast_path_noun = None
+        if intent == "product" and slots_to_extract and not current_slots.get("product_name"):
+            user_turns = [m for m in conversation_history if m.get("role") == "user"]
+            is_first_turn = len(user_turns) <= 1
+            query_clean = user_message.lower().strip().rstrip("?.!")
+            has_digits = any(ch.isdigit() for ch in query_clean)
+            m = re.match(
+                r"^(?:the\s+)?(?:best|top|good|great|cheapest)\s+([a-z0-9][a-z0-9 \-&']{2,40})$",
+                query_clean,
+            )
+            if m and is_first_turn and not has_digits:
+                noun = m.group(1).strip()
+                noun_words = noun.split()
+                # A trailing qualifier ("for travel", "under budget") means there IS
+                # something to extract — let the LLM handle those.
+                breakers = {"for", "with", "under", "over", "in", "to", "that", "around"}
+                if len(noun_words) <= 4 and not any(w in breakers for w in noun_words):
+                    fast_path_noun = noun
+
+        if fast_path_noun:
+            current_slots["product_name"] = fast_path_noun
+            logger.info(
+                f"[Clarifier Agent] F6 fast path: bare category query — product_name="
+                f"'{fast_path_noun}' extracted heuristically, skipping the extraction LLM call"
+            )
+        elif slots_to_extract:
             logger.info(f"[Clarifier Agent] Attempting to extract {len(slots_to_extract)} slots in one LLM call: {slots_to_extract} (required: {required_slots_to_extract}, optional: {optional_slots_to_extract})")
 
             extracted_slots = await self._extract_all_slots_from_conversation(

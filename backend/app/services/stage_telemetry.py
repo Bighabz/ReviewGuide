@@ -49,7 +49,13 @@ class StageTelemetry:
 STAGE_BUDGETS: dict[str, tuple[float, float]] = {
     "safety":       (2.0,   4.0),
     "intent":       (3.0,   6.0),
-    "clarifier":    (4.0,   8.0),
+    # Clarifier needs up to TWO sequential LLM calls (slot extraction + question
+    # generation). The old 8s hard budget raced against LLM latency: when extraction
+    # alone took ~7s, the timeout fallback fired and SILENTLY SKIPPED clarification —
+    # the flagship specialist-question flow disappeared at random (QA Round 4 — F6).
+    # 20s keeps a hard bound while making questions reliable; the common "best X"
+    # query shape also gets a no-LLM extraction fast path (see clarifier_agent.py).
+    "clarifier":    (6.0,  20.0),
     "planner":      (5.0,  10.0),
     "tool":         (8.0,  15.0),
     "plan_exec":    (25.0, 45.0),
