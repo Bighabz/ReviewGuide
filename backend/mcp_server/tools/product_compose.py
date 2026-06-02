@@ -1227,6 +1227,33 @@ TRANSITIONAL RULES (transitional_reasoning field):
   than skip it.
 - Never restate the question back; never list options; never exceed one sentence."""
 
+        # Tier 5c two-speed routing: vary blog depth by query complexity. The
+        # classifier is a <5ms pure heuristic, so we re-derive it here rather than
+        # threading complexity through the GraphState passthrough. Utility queries
+        # get terser/faster/cheaper prose; considered purchases get room for the
+        # tradeoffs that matter; recommendations keep the 400-word default. The
+        # length directive is appended to the role prompt at the CALL SITE only —
+        # the blog_role string itself is unchanged (the eval prod-sync test pins it).
+        blog_role_effective = blog_role
+        blog_max_tokens = 700
+        if getattr(settings, "USE_TWO_SPEED_COMPOSE", False):
+            from app.agents.query_complexity import classify_query_complexity
+            _complexity, _ = classify_query_complexity(user_message, state.get("slots") or {}, "product")
+            if _complexity in ("factoid", "comparison"):
+                blog_role_effective = blog_role + (
+                    "\n\nLENGTH OVERRIDE: This is a quick query — keep the body to about "
+                    "250 words, tighter than the 400-word default."
+                )
+                blog_max_tokens = 550
+            elif _complexity == "deep_research":
+                blog_role_effective = blog_role + (
+                    "\n\nLENGTH OVERRIDE: This is a considered, high-involvement purchase — "
+                    "you may run longer than the 400-word default, up to about 550 words, "
+                    "to cover the tradeoffs that matter."
+                )
+                blog_max_tokens = 1000
+            logger.info(f"[product_compose] Two-speed: complexity={_complexity}, blog_max_tokens={blog_max_tokens}")
+
         if getattr(settings, "USE_GROUNDED_COMPOSE", False):
             # Tier 2.2/2.3: product facts → RESEARCH slot, conversation → history
             # slot, accumulated prefs → profile slot; the user message is just the
@@ -1234,7 +1261,7 @@ TRANSITIONAL RULES (transitional_reasoning field):
             # parsing one undifferentiated string with no memory.
             blog_messages = [
                 {"role": "system", "content": build_system_prompt(
-                    role_prompt=blog_role,
+                    role_prompt=blog_role_effective,
                     kind="response",
                     profile_inject=_profile_inject((state.get("metadata") or {}).get("user_preferences")),
                     history=_format_history(state.get("conversation_history")),
@@ -1244,13 +1271,13 @@ TRANSITIONAL RULES (transitional_reasoning field):
             ]
         else:
             blog_messages = [
-                {"role": "system", "content": build_system_prompt(role_prompt=blog_role, kind="response")},
+                {"role": "system", "content": build_system_prompt(role_prompt=blog_role_effective, kind="response")},
                 {"role": "user", "content": blog_data},
             ]
         llm_tasks['blog_article'] = model_service.generate_compose(
             messages=blog_messages,
             temperature=0.7,
-            max_tokens=700,
+            max_tokens=blog_max_tokens,
             response_format={"type": "json_object"},
             agent_name="blog_article_composer"
         )

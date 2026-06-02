@@ -250,6 +250,13 @@ class Settings(BaseSettings):
     # so sparse results still render. Default off.
     USE_PRODUCT_VERIFICATION: bool = Field(default=False, description="Drop products with no real shopping match and no review evidence (anti-hallucination) before compose")
 
+    # Tier 5 / C two-speed routing: vary blog-compose depth by query complexity
+    # (re-derived in compose via the cheap heuristic classifier — no GraphState
+    # passthrough). Utility queries (factoid/comparison) get terser, faster, cheaper
+    # prose; considered purchases (deep_research) get room for the tradeoffs that
+    # matter; recommendations keep the standard 400-word default. Default off.
+    USE_TWO_SPEED_COMPOSE: bool = Field(default=False, description="Vary blog compose depth (word cap + max_tokens) by query complexity tier")
+
     # Agent-specific Max Tokens
     PLANNER_MAX_TOKENS: int = Field(default=2000, description="Max tokens for planner agent")
     INTENT_MAX_TOKENS: int = Field(default=50, description="Max tokens for intent agent")
