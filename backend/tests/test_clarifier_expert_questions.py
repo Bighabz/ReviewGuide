@@ -75,7 +75,8 @@ async def test_options_pass_through_and_budget_ordered_last(agent):
 
     use_case_q = result["questions"][0]
     assert use_case_q["options"] == ["Student / everyday", "Gaming", "Creative / video editing", "Business / office"]
-    assert use_case_q["free_text_hint"] == "or describe your own use"
+    # QA5 bug 3: microcopy is deterministic — the LLM's per-category hint is replaced
+    assert use_case_q["free_text_hint"] == "or type your own answer"
 
     budget_q = result["questions"][1]
     assert "Under $500" in budget_q["options"]
@@ -103,7 +104,9 @@ async def test_options_normalization_caps_and_defaults(agent):
     result = await agent._generate_followup_questions(
         missing_slots=["use_case"],
         current_slots={},
-        user_message="best laptop",
+        # No question pack matches "best widget" — pack enforcement must not
+        # replace the LLM options, so the capping logic is what's under test.
+        user_message="best widget",
         intent="product",
     )
 
@@ -240,7 +243,9 @@ async def test_extraction_without_options_unchanged(agent):
 
     assert extracted == {"destination": "Tokyo"}
     system_prompt = agent.generate.call_args.kwargs["messages"][0]["content"]
-    assert "offered choices" not in system_prompt
+    # No per-question choice list is rendered when the question has no options.
+    # (The generic combined-answer rule may mention choices — that's fine.)
+    assert "(offered choices:" not in system_prompt
 
 
 # ---------------------------------------------------------------------------
@@ -784,3 +789,126 @@ def test_clarifier_stage_budget_accommodates_two_llm_calls():
         f"Clarifier hard budget is {hard}s - the timeout fallback skips clarification "
         "entirely, so this must cover two sequential LLM calls (QA Round 4 F6)"
     )
+
+
+# ---------------------------------------------------------------------------
+# QA Round 5 (external bugs 2+3) — pack data and microcopy are deterministic
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_pack_multi_select_enforced_even_when_llm_drops_it(agent):
+    """Office chairs' features question is multi_select in the pack; the LLM dropping
+    the flag must not make it single-select (external QA bug 2)."""
+    response = json.dumps({
+        "intro": "ok",
+        "questions": [
+            {
+                "slot": "features",
+                "question": "Which features matter to you?",
+                # LLM echoed the question but DROPPED the multi_select type + reworded options
+                "options": ["Lumbar support", "Headrest", "Armrests"],
+            },
+        ],
+        "closing": "",
+    })
+    agent.generate = AsyncMock(return_value=response)
+
+    result = await agent._generate_followup_questions(
+        missing_slots=["features"],
+        current_slots={"category": "office chair"},
+        user_message="best office chair",
+        intent="product",
+    )
+
+    q = result["questions"][0]
+    # Pack enforcement: chairs pack says multi_select=True and defines the options
+    assert q.get("type") == "multi_select"
+    from app.agents.category_question_packs import CATEGORY_QUESTION_PACKS
+    assert q["options"] == CATEGORY_QUESTION_PACKS["chairs"]["features"]["options"]
+    # Deterministic microcopy for multi-select
+    assert q["free_text_hint"] == "Select all that apply — or type your own"
+
+
+@pytest.mark.asyncio
+async def test_pack_single_select_enforced_when_llm_invents_multi(agent):
+    """Laptops' performance question is single-select in the pack; the LLM marking it
+    multi_select must be stripped."""
+    response = json.dumps({
+        "intro": "ok",
+        "questions": [
+            {
+                "slot": "features",
+                "question": "What performance level do you need?",
+                "options": ["Just the basics", "Mid-range power"],
+                "type": "multi_select",  # LLM invented this — pack says False
+            },
+        ],
+        "closing": "",
+    })
+    agent.generate = AsyncMock(return_value=response)
+
+    result = await agent._generate_followup_questions(
+        missing_slots=["features"],
+        current_slots={"category": "laptops"},
+        user_message="best laptop",
+        intent="product",
+    )
+
+    q = result["questions"][0]
+    assert q.get("type") is None, "laptop features must stay single-select per the pack"
+    assert q["free_text_hint"] == "or type your own answer"
+
+
+@pytest.mark.asyncio
+async def test_budget_microcopy_and_brackets_enforced_from_pack(agent):
+    """Budget question: pack brackets + 'or type an amount' hint, regardless of LLM output."""
+    response = json.dumps({
+        "intro": "ok",
+        "questions": [
+            {
+                "slot": "budget",
+                "question": "What's your budget range?",
+                "options": ["Cheap", "Mid", "Expensive"],  # LLM ignored the pack brackets
+                "free_text_hint": "or specify other amount",
+            },
+        ],
+        "closing": "",
+    })
+    agent.generate = AsyncMock(return_value=response)
+
+    result = await agent._generate_followup_questions(
+        missing_slots=["budget"],
+        current_slots={"category": "headphones"},
+        user_message="best headphones",
+        intent="product",
+    )
+
+    q = result["questions"][0]
+    from app.agents.category_question_packs import CATEGORY_QUESTION_PACKS
+    assert q["options"] == CATEGORY_QUESTION_PACKS["headphones"]["budget_brackets"]
+    assert q["free_text_hint"] == "or type an amount"
+
+
+@pytest.mark.asyncio
+async def test_extraction_prompt_handles_combined_card_answer(agent):
+    """The extraction prompt documents the combined multi-question answer format the
+    form-style card sends ('use case; features; budget')."""
+    agent.generate = AsyncMock(return_value=json.dumps({
+        "use_case": "Road running", "features": "Max cushion", "budget": "$80–$130",
+    }))
+
+    followups = [
+        {"slot": "use_case", "question": "What kind of running?", "options": ["Road running", "Trail running"]},
+        {"slot": "features", "question": "What feel?", "options": ["Max cushion", "Stability"], "type": "multi_select"},
+        {"slot": "budget", "question": "Budget?", "options": ["Under $80", "$80–$130"]},
+    ]
+    extracted = await agent._extract_all_slots_from_answer(
+        slot_names=["use_case", "features", "budget"],
+        user_message="Road running; Max cushion; $80–$130",
+        followups=followups,
+    )
+
+    assert extracted["use_case"] == "Road running"
+    assert extracted["budget"] == "$80–$130"
+    system_prompt = agent.generate.call_args.kwargs["messages"][0]["content"]
+    assert "SEVERAL questions in ONE message" in system_prompt

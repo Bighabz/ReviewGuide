@@ -59,40 +59,53 @@ function trackSuggestionClick(suggestion: NextSuggestion, messageId: string, ind
   })
 }
 
-/**
- * Multi-select clarifier question — chips toggle (terracotta when selected) and a
- * "Done" button submits the joined answer. The backend marks a question
- * `type: "multi_select"` when several answers are sensible at once (e.g. the
- * features question: "Noise cancelling" + "Waterproof" both apply).
- * Single-select questions keep the tap-to-send chips.
- */
-function MultiSelectQuestion({
+// ─── Clarifier card (QA Round 5, external bugs 1+2) ─────────────────────────
+//
+// The clarifying questions render as ONE card that behaves like a form:
+//   - every question group accumulates a selection (radio for single-select,
+//     checkboxes for multi-select) WITHOUT sending anything
+//   - one "Get recommendations →" button submits all answers as a single turn
+//     ("Road running; Max cushion, Lightweight; $80–$130") — one round-trip
+//     instead of one per question
+//   - single-question cards keep the lighter interactions: single-select chips
+//     send on tap; a lone multi-select keeps its "Done →" button
+// After submit the whole card locks (QA Round 4 F0b — feedback + no duplicates).
+
+const CHIP_SELECTED =
+  'inline-flex items-center gap-2 rounded-[12px] border border-[var(--terra)] bg-[var(--terra)] transition-all px-3.5 py-2 text-[14px] font-medium text-white'
+const CHIP_LOCKED =
+  'inline-flex items-center gap-2 rounded-[12px] border border-[var(--line-2)] bg-[var(--paper-hi)] transition-all px-3.5 py-2 text-[14px] font-medium text-[var(--ink-3)] opacity-60'
+const CHIP_IDLE =
+  'inline-flex items-center gap-2 rounded-[12px] border border-[var(--line-2)] bg-[var(--paper-hi)] hover:border-[var(--terra)] hover:bg-[var(--terra-soft)] transition-all px-3.5 py-2 text-[14px] font-medium text-[var(--ink)]'
+
+/** One question's chip row. Fully controlled — selection lives in ClarifierCard. */
+function ClarifierQuestionGroup({
   question,
   options,
   hint,
-  onSubmit,
+  multiSelect,
+  selected,
+  onSelect,
+  locked,
 }: {
   question: string
   options: string[]
   hint: string
-  onSubmit: (joined: string) => void
+  multiSelect: boolean
+  selected: string[]
+  onSelect: (next: string[]) => void
+  locked: boolean
 }) {
-  const [selected, setSelected] = useState<string[]>([])
-  // QA Round 4 F0b — once Done is tapped the question locks: chips and the Done
-  // button go inert so a double-click can't submit the same answer twice.
-  const [submitted, setSubmitted] = useState(false)
-
   const toggle = (option: string) => {
-    if (submitted) return
-    setSelected((prev) =>
-      prev.includes(option) ? prev.filter((o) => o !== option) : [...prev, option]
-    )
-  }
-
-  const submit = () => {
-    if (submitted || selected.length === 0) return
-    setSubmitted(true)
-    onSubmit(selected.join(', '))
+    if (locked) return
+    if (multiSelect) {
+      onSelect(
+        selected.includes(option) ? selected.filter((o) => o !== option) : [...selected, option]
+      )
+    } else {
+      // Radio behavior: tap selects, tapping the same chip again deselects
+      onSelect(selected.includes(option) ? [] : [option])
+    }
   }
 
   return (
@@ -105,16 +118,10 @@ function MultiSelectQuestion({
             <button
               key={option}
               onClick={() => toggle(option)}
-              disabled={submitted}
+              disabled={locked}
               data-testid="clarifier-option-chip"
               aria-pressed={isSelected}
-              className={
-                isSelected
-                  ? 'inline-flex items-center gap-2 rounded-[12px] border border-[var(--terra)] bg-[var(--terra)] transition-all px-3.5 py-2 text-[14px] font-medium text-white'
-                  : submitted
-                    ? 'inline-flex items-center gap-2 rounded-[12px] border border-[var(--line-2)] bg-[var(--paper-hi)] transition-all px-3.5 py-2 text-[14px] font-medium text-[var(--ink-3)] opacity-60'
-                    : 'inline-flex items-center gap-2 rounded-[12px] border border-[var(--line-2)] bg-[var(--paper-hi)] hover:border-[var(--terra)] hover:bg-[var(--terra-soft)] transition-all px-3.5 py-2 text-[14px] font-medium text-[var(--ink)]'
-              }
+              className={isSelected ? CHIP_SELECTED : locked ? CHIP_LOCKED : CHIP_IDLE}
             >
               <span
                 className="w-1 h-1 rounded-full flex-shrink-0"
@@ -124,82 +131,140 @@ function MultiSelectQuestion({
             </button>
           )
         })}
-        {selected.length > 0 && !submitted && (
-          <button
-            onClick={submit}
-            data-testid="clarifier-multiselect-done"
-            className="inline-flex items-center gap-2 rounded-[12px] border border-[var(--terra)] bg-[var(--paper-hi)] hover:bg-[var(--terra-soft)] transition-all px-3.5 py-2 text-[14px] font-semibold text-[var(--terra)]"
-          >
-            Done
-            <ArrowRight size={14} strokeWidth={1.5} />
-          </button>
-        )}
       </div>
       <p className="text-[12px] italic text-[var(--ink-3)]">{hint}</p>
     </div>
   )
 }
 
-/**
- * Single-select clarifier question — tapping a chip submits it as the answer.
- *
- * QA Round 4 F0b — after one tap the question LOCKS: the tapped chip turns
- * terracotta (instant visual feedback that the answer registered) and every
- * chip in the question goes inert. Without this, chips gave no feedback and
- * stayed clickable forever, so users re-clicked (thinking the tap didn't
- * register) and rapid clicks raced past ChatContainer's async isStreaming
- * guard — committing phantom duplicate turns.
- */
-function SingleSelectQuestion({
-  question,
-  options,
-  hint,
+interface ClarifierQuestion {
+  slot: string
+  question: string
+  options?: string[]
+  free_text_hint?: string
+  type?: string
+}
+
+/** The whole clarifying-questions card: question groups + one submit. */
+function ClarifierCard({
+  intro,
+  questions,
+  closing,
   onSubmit,
 }: {
-  question: string
-  options: string[]
-  hint: string
-  onSubmit: (option: string) => void
+  intro?: string
+  questions: ClarifierQuestion[]
+  closing?: string
+  onSubmit: (text: string) => void
 }) {
-  const [answered, setAnswered] = useState<string | null>(null)
+  // selections: slot -> chosen option(s)
+  const [selections, setSelections] = useState<Record<string, string[]>>({})
+  const [submitted, setSubmitted] = useState(false)
 
-  const pick = (option: string) => {
-    if (answered !== null) return // locked — this question was already answered
-    setAnswered(option)
-    onSubmit(option)
+  // Resolve each question's chips (legacy budget payloads fall back to generic tiers).
+  const resolved = questions.map((q) => {
+    const isBudget = q.slot === 'budget' || /budget|price range|how much|spend/i.test(q.question)
+    const options =
+      q.options && q.options.length > 0
+        ? q.options
+        : isBudget
+          ? ['Under $50', '$50–$100', '$100–$250', '$250–$500', '$500+']
+          : null
+    const hint = q.free_text_hint || (isBudget ? 'or just type a number' : 'or just type your answer')
+    return { ...q, resolvedOptions: options, resolvedHint: hint }
+  })
+
+  const chipQuestions = resolved.filter((q) => q.resolvedOptions !== null)
+  const isSingleQuestionCard = chipQuestions.length === 1
+  const answeredSlots = chipQuestions.filter((q) => (selections[q.slot] ?? []).length > 0)
+
+  // Combined answer: each answered question's value(s), question order preserved.
+  // Multi-select values join with ", " inside a part; parts join with "; ".
+  const buildCombinedAnswer = (sel: Record<string, string[]>) =>
+    chipQuestions
+      .map((q) => (sel[q.slot] ?? []).join(', '))
+      .filter(Boolean)
+      .join('; ')
+
+  const submitCard = () => {
+    if (submitted || answeredSlots.length === 0) return
+    setSubmitted(true)
+    onSubmit(buildCombinedAnswer(selections))
   }
 
+  const handleSelect = (q: (typeof resolved)[number], next: string[]) => {
+    if (submitted) return
+    const nextSelections = { ...selections, [q.slot]: next }
+    setSelections(nextSelections)
+    // Single-question card + single-select → keep the one-tap-sends UX
+    if (isSingleQuestionCard && q.type !== 'multi_select' && next.length === 1) {
+      setSubmitted(true)
+      onSubmit(next[0])
+    }
+  }
+
+  // Submit button: multi-question cards always get one; a lone multi-select
+  // question keeps its "Done" (same behavior, familiar label + testid).
+  const needsSubmitButton = !isSingleQuestionCard || chipQuestions[0]?.type === 'multi_select'
+
   return (
-    <div className="space-y-2" data-testid="clarifier-question">
-      <p className="text-[14px] leading-[20px] text-[var(--ink)]">{question}</p>
-      <div className="flex flex-wrap gap-2">
-        {options.map((option) => {
-          const isSelected = answered === option
-          return (
-            <button
-              key={option}
-              onClick={() => pick(option)}
-              disabled={answered !== null}
-              data-testid="clarifier-option-chip"
-              aria-pressed={isSelected}
-              className={
-                isSelected
-                  ? 'inline-flex items-center gap-2 rounded-[12px] border border-[var(--terra)] bg-[var(--terra)] transition-all px-3.5 py-2 text-[14px] font-medium text-white'
-                  : answered !== null
-                    ? 'inline-flex items-center gap-2 rounded-[12px] border border-[var(--line-2)] bg-[var(--paper-hi)] transition-all px-3.5 py-2 text-[14px] font-medium text-[var(--ink-3)] opacity-60'
-                    : 'inline-flex items-center gap-2 rounded-[12px] border border-[var(--line-2)] bg-[var(--paper-hi)] hover:border-[var(--terra)] hover:bg-[var(--terra-soft)] transition-all px-3.5 py-2 text-[14px] font-medium text-[var(--ink)]'
-              }
-            >
-              <span
-                className="w-1 h-1 rounded-full flex-shrink-0"
-                style={{ background: isSelected ? '#fff' : 'var(--terra)' }}
-              />
-              {option}
-            </button>
-          )
-        })}
+    <div className="w-full mt-5">
+      <div className="rounded-[14px] p-4">
+        {intro && (
+          <p className="text-[15px] font-medium text-[var(--ink)] mb-3">{intro}</p>
+        )}
+        <div className="space-y-3">
+          {resolved.map((q, idx) => {
+            if (q.resolvedOptions) {
+              return (
+                <ClarifierQuestionGroup
+                  key={idx}
+                  question={q.question}
+                  options={q.resolvedOptions}
+                  hint={q.resolvedHint}
+                  multiSelect={q.type === 'multi_select'}
+                  selected={selections[q.slot] ?? []}
+                  onSelect={(next) => handleSelect(q, next)}
+                  locked={submitted}
+                />
+              )
+            }
+            // Legacy payloads without options: plain tap-to-reply button
+            return (
+              <button
+                key={idx}
+                className="w-full text-left px-3.5 py-2.5 rounded-[12px] border border-[var(--line-2)] bg-[var(--paper-hi)] hover:border-[var(--terra)] hover:bg-[var(--terra-soft)] transition-all text-[14px] leading-[20px] font-medium text-[var(--ink)] flex items-center gap-2.5 group"
+                onClick={() => onSubmit(q.question)}
+              >
+                {/* 4px terracotta leading dot — reads as "tap to reply" */}
+                <span className="w-1 h-1 rounded-full flex-shrink-0" style={{ background: 'var(--terra)' }} />
+                <span className="flex-1">{q.question}</span>
+                <ArrowRight size={14} strokeWidth={1.5} className="opacity-0 group-hover:opacity-100 transition-opacity text-[var(--terra)]" />
+              </button>
+            )
+          })}
+        </div>
+        {/* The card's single submit */}
+        {needsSubmitButton && answeredSlots.length > 0 && !submitted && (
+          <button
+            onClick={submitCard}
+            data-testid={isSingleQuestionCard ? 'clarifier-multiselect-done' : 'clarifier-card-submit'}
+            className="mt-4 inline-flex items-center gap-2 rounded-[12px] border border-[var(--terra)] bg-[var(--terra)] hover:opacity-90 transition-all px-4 py-2.5 text-[14px] font-semibold text-white"
+          >
+            {isSingleQuestionCard ? 'Done' : 'Get recommendations'}
+            <ArrowRight size={14} strokeWidth={1.5} />
+          </button>
+        )}
+        {/* Progress nudge: answered some but not all, submit available */}
+        {needsSubmitButton && !submitted && answeredSlots.length > 0 && answeredSlots.length < chipQuestions.length && (
+          <p className="mt-2 text-[12px] italic text-[var(--ink-3)]">
+            You can answer the rest or submit now — I&apos;ll work with what you give me.
+          </p>
+        )}
+        {closing && (
+          <p className="mt-3 text-[12px] italic text-[var(--ink-3)]">{closing}</p>
+        )}
       </div>
-      <p className="text-[12px] italic text-[var(--ink-3)]">{hint}</p>
     </div>
   )
 }
@@ -454,79 +519,18 @@ export default function Message({ message, isLast = false }: MessageProps) {
                   itinerary={message.itinerary}
                 />
 
-                {/* 3. Render clarifier follow-up questions (structured slot-filling) */}
+                {/* 3. Render clarifier follow-up questions as ONE form-style card:
+                    all question groups accumulate selections, a single submit sends
+                    the combined answer (QA Round 5, external bugs 1+2). */}
                 {message.followups && typeof message.followups === 'object' && !Array.isArray(message.followups) && (
-                  <div className="w-full mt-5">
-                    <div className="rounded-[14px] p-4">
-                      {message.followups.intro && (
-                        <p className="text-[15px] font-medium text-[var(--ink)] mb-3">
-                          {message.followups.intro}
-                        </p>
-                      )}
-                      <div className="space-y-3">
-                        {message.followups.questions && message.followups.questions.map((q: { slot: string; question: string; options?: string[]; free_text_hint?: string; type?: string }, idx: number) => {
-                          const send = (text: string) =>
-                            window.dispatchEvent(new CustomEvent('sendSuggestion', { detail: { question: text } }))
-                          // Any question with backend-provided options → question as a prompt
-                          // + tappable answer chips (category-aware quiz path: use case, specs,
-                          // realistic budget brackets — all generated by the clarifier).
-                          // Legacy payloads without options: budget questions fall back to the
-                          // old hardcoded tiers; everything else falls through to the plain
-                          // tap-to-reply button below. Free text in the chat input always works.
-                          const isBudget = q.slot === 'budget' || /budget|price range|how much|spend/i.test(q.question)
-                          const options =
-                            q.options && q.options.length > 0
-                              ? q.options
-                              : isBudget
-                                ? ['Under $50', '$50–$100', '$100–$250', '$250–$500', '$500+']
-                                : null
-                          if (options) {
-                            const hint = q.free_text_hint || (isBudget ? 'or just type a number' : 'or just type your answer')
-                            // Multi-select question: chips toggle, "Done" submits the joined answer
-                            if (q.type === 'multi_select') {
-                              return (
-                                <MultiSelectQuestion
-                                  key={idx}
-                                  question={q.question}
-                                  options={options}
-                                  hint={hint}
-                                  onSubmit={send}
-                                />
-                              )
-                            }
-                            // Single-select question: chips submit on tap, then the
-                            // question locks (selected highlight + inert chips).
-                            return (
-                              <SingleSelectQuestion
-                                key={idx}
-                                question={q.question}
-                                options={options}
-                                hint={hint}
-                                onSubmit={send}
-                              />
-                            )
-                          }
-                          return (
-                            <button
-                              key={idx}
-                              className="w-full text-left px-3.5 py-2.5 rounded-[12px] border border-[var(--line-2)] bg-[var(--paper-hi)] hover:border-[var(--terra)] hover:bg-[var(--terra-soft)] transition-all text-[14px] leading-[20px] font-medium text-[var(--ink)] flex items-center gap-2.5 group"
-                              onClick={() => send(q.question)}
-                            >
-                              {/* 4px terracotta leading dot — reads as "tap to reply" */}
-                              <span className="w-1 h-1 rounded-full flex-shrink-0" style={{ background: 'var(--terra)' }} />
-                              <span className="flex-1">{q.question}</span>
-                              <ArrowRight size={14} strokeWidth={1.5} className="opacity-0 group-hover:opacity-100 transition-opacity text-[var(--terra)]" />
-                            </button>
-                          )
-                        })}
-                      </div>
-                      {message.followups.closing && (
-                        <p className="mt-3 text-[12px] italic text-[var(--ink-3)]">
-                          {message.followups.closing}
-                        </p>
-                      )}
-                    </div>
-                  </div>
+                  <ClarifierCard
+                    intro={message.followups.intro}
+                    questions={(message.followups.questions ?? []) as ClarifierQuestion[]}
+                    closing={message.followups.closing}
+                    onSubmit={(text: string) =>
+                      window.dispatchEvent(new CustomEvent('sendSuggestion', { detail: { question: text } }))
+                    }
+                  />
                 )}
 
                 {/* RFC §2.3: degraded completeness indicator */}

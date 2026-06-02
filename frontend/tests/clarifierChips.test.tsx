@@ -360,7 +360,100 @@ describe('Clarifier chips — question locking after an answer (QA4 F0b)', () =>
     spy.mockRestore()
   })
 
-  it('answering one question does not lock a different question in the same block', () => {
+  it('multi-question card: chips accumulate without sending; one submit sends the combined answer (QA5 bugs 1+2)', () => {
+    const dispatched: any[] = []
+    const spy = vi
+      .spyOn(window, 'dispatchEvent')
+      .mockImplementation((event: Event) => {
+        dispatched.push(event)
+        return true
+      })
+
+    render(
+      <Message
+        message={makeClarifierMessage([LAPTOP_USE_CASE_QUESTION, LAPTOP_BUDGET_QUESTION]) as any}
+      />
+    )
+    // Selecting answers in both groups does NOT send anything — they accumulate
+    fireEvent.click(screen.getByText('Gaming'))
+    fireEvent.click(screen.getByText('Under $500'))
+    expect(dispatched.filter((e) => e.type === 'sendSuggestion')).toHaveLength(0)
+
+    // Both chips show selected state
+    expect(screen.getByText('Gaming').closest('button')?.getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByText('Under $500').closest('button')?.getAttribute('aria-pressed')).toBe('true')
+
+    // ONE submit button sends the combined answer in question order
+    fireEvent.click(screen.getByTestId('clarifier-card-submit'))
+    const sendEvents = dispatched.filter((e) => e.type === 'sendSuggestion')
+    expect(sendEvents).toHaveLength(1)
+    expect((sendEvents[0] as CustomEvent).detail.question).toBe('Gaming; Under $500')
+    spy.mockRestore()
+  })
+
+  it('multi-question card: radio behavior — picking a different option replaces the selection', () => {
+    render(
+      <Message
+        message={makeClarifierMessage([LAPTOP_USE_CASE_QUESTION, LAPTOP_BUDGET_QUESTION]) as any}
+      />
+    )
+    fireEvent.click(screen.getByText('Gaming'))
+    fireEvent.click(screen.getByText('Business / office'))
+
+    expect(screen.getByText('Gaming').closest('button')?.getAttribute('aria-pressed')).toBe('false')
+    expect(screen.getByText('Business / office').closest('button')?.getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('multi-question card: partial answers can be submitted', () => {
+    const dispatched: any[] = []
+    const spy = vi
+      .spyOn(window, 'dispatchEvent')
+      .mockImplementation((event: Event) => {
+        dispatched.push(event)
+        return true
+      })
+
+    render(
+      <Message
+        message={makeClarifierMessage([LAPTOP_USE_CASE_QUESTION, LAPTOP_BUDGET_QUESTION]) as any}
+      />
+    )
+    // Answer only the budget question, then submit
+    fireEvent.click(screen.getByText('$800–$1,200'))
+    fireEvent.click(screen.getByTestId('clarifier-card-submit'))
+
+    const sendEvents = dispatched.filter((e) => e.type === 'sendSuggestion')
+    expect(sendEvents).toHaveLength(1)
+    expect((sendEvents[0] as CustomEvent).detail.question).toBe('$800–$1,200')
+    spy.mockRestore()
+  })
+
+  it('multi-question card with a multi-select group: combined answer joins multi values with commas', () => {
+    const dispatched: any[] = []
+    const spy = vi
+      .spyOn(window, 'dispatchEvent')
+      .mockImplementation((event: Event) => {
+        dispatched.push(event)
+        return true
+      })
+
+    render(
+      <Message
+        message={makeClarifierMessage([HEADPHONES_FEATURES_MULTISELECT, LAPTOP_BUDGET_QUESTION]) as any}
+      />
+    )
+    fireEvent.click(screen.getByText('Noise cancelling'))
+    fireEvent.click(screen.getByText('Wireless'))
+    fireEvent.click(screen.getByText('Under $500'))
+    fireEvent.click(screen.getByTestId('clarifier-card-submit'))
+
+    const sendEvents = dispatched.filter((e) => e.type === 'sendSuggestion')
+    expect(sendEvents).toHaveLength(1)
+    expect((sendEvents[0] as CustomEvent).detail.question).toBe('Noise cancelling, Wireless; Under $500')
+    spy.mockRestore()
+  })
+
+  it('multi-question card locks everything after submit — no second submission possible', () => {
     const dispatched: any[] = []
     const spy = vi
       .spyOn(window, 'dispatchEvent')
@@ -375,12 +468,16 @@ describe('Clarifier chips — question locking after an answer (QA4 F0b)', () =>
       />
     )
     fireEvent.click(screen.getByText('Gaming'))
-    // The budget question is its own component instance — still answerable
-    fireEvent.click(screen.getByText('Under $500'))
+    fireEvent.click(screen.getByTestId('clarifier-card-submit'))
 
-    const sendEvents = dispatched.filter((e) => e.type === 'sendSuggestion')
-    expect(sendEvents).toHaveLength(2)
-    expect((sendEvents[1] as CustomEvent).detail.question).toBe('Under $500')
+    // Submit button gone, every chip disabled
+    expect(screen.queryByTestId('clarifier-card-submit')).toBeNull()
+    screen.getAllByTestId('clarifier-option-chip').forEach((c) => {
+      expect((c as HTMLButtonElement).disabled).toBe(true)
+    })
+    // Further taps do nothing
+    fireEvent.click(screen.getByText('Under $500'))
+    expect(dispatched.filter((e) => e.type === 'sendSuggestion')).toHaveLength(1)
     spy.mockRestore()
   })
 
