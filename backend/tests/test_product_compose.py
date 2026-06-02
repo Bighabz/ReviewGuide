@@ -23,7 +23,7 @@ os.environ.setdefault("OPENAI_API_KEY", "test-api-key")
 os.environ.setdefault("RATE_LIMIT_ENABLED", "false")
 os.environ.setdefault("LOG_ENABLED", "false")
 
-from mcp_server.tools.product_compose import product_compose, _parse_budget
+from mcp_server.tools.product_compose import product_compose, _parse_budget, _drop_price_outliers
 
 
 # ---------------------------------------------------------------------------
@@ -706,3 +706,135 @@ async def test_shopping_only_product_falls_back_to_tagged_amazon_search():
         url = (link.get("affiliate_link") or "").lower()
         assert "google.com/shopping" not in url
         assert "amazon.com/s" in url and "tag=revguide-20" in url, f"expected tagged Amazon search, got {url}"
+
+
+# ---------------------------------------------------------------------------
+# Marketplace price hygiene: offers whose price is wildly inconsistent with
+# the product's median market price across providers (accessory/scam listings,
+# bundles) must be dropped before card building.
+# ---------------------------------------------------------------------------
+
+def _offer(price, merchant="Store", source="ebay", image="https://img.example.com/x.jpg"):
+    return {
+        "merchant": merchant, "price": price, "currency": "USD",
+        "url": f"https://example.com/{merchant.lower()}", "image_url": image,
+        "source": source,
+    }
+
+
+def test_price_outliers_drops_scam_low_offer():
+    """The $12-iPhone case: a $12 'iPhone 15' listing (a phone case) among real
+    ~$999 offers must be dropped."""
+    offers = [_offer(999.00, "Amazon", "amazon"), _offer(12.00, "eBay (scamstore)"), _offer(1049.00, "Walmart", "serper_shopping")]
+    kept, dropped = _drop_price_outliers(offers)
+    kept_prices = [o["price"] for o in kept]
+    assert 12.00 not in kept_prices, f"scam listing survived: {kept_prices}"
+    assert 999.00 in kept_prices and 1049.00 in kept_prices
+    assert [o["price"] for o in dropped] == [12.00]
+
+
+def test_price_outliers_drops_bundle_high_offer():
+    """A $4,500 '10-pack bundle' listing among ~$1,000 offers must be dropped."""
+    offers = [_offer(999.00, "Amazon", "amazon"), _offer(1049.00, "Walmart", "serper_shopping"), _offer(4500.00, "eBay (bulkseller)")]
+    kept, dropped = _drop_price_outliers(offers)
+    kept_prices = [o["price"] for o in kept]
+    assert 4500.00 not in kept_prices, f"bundle listing survived: {kept_prices}"
+    assert 999.00 in kept_prices and 1049.00 in kept_prices
+
+
+def test_price_outliers_keeps_all_when_consistent():
+    """The keep-all fallback: when all offers look consistent, nothing is dropped."""
+    offers = [_offer(279.00, "Amazon", "amazon"), _offer(299.00, "eBay (goodstore)"), _offer(310.00, "BestBuy", "serper_shopping")]
+    kept, dropped = _drop_price_outliers(offers)
+    assert len(kept) == 3 and not dropped
+
+
+def test_price_outliers_no_market_signal_keeps_all():
+    """With fewer than 2 priced offers there is no market consensus — keep all."""
+    offers = [_offer(999.00, "Amazon", "amazon"), _offer(0, "Amazon mock", "amazon")]
+    kept, dropped = _drop_price_outliers(offers)
+    assert len(kept) == 2 and not dropped
+    # And a single offer is trivially kept
+    kept, dropped = _drop_price_outliers([_offer(12.00)])
+    assert len(kept) == 1 and not dropped
+
+
+def test_price_outliers_keeps_unpriced_offers():
+    """Unpriced (price=0 mock) offers carry affiliate links, not price signal —
+    they must never be dropped by hygiene."""
+    offers = [_offer(0, "Amazon", "amazon", image=""), _offer(999.00, "Walmart", "serper_shopping"), _offer(1049.00, "eBay (realstore)")]
+    kept, dropped = _drop_price_outliers(offers)
+    assert len(kept) == 3 and not dropped
+
+
+def test_price_outliers_legit_sale_pricing_survives():
+    """A genuine discount (~40% off) must NOT be treated as noise."""
+    offers = [_offer(599.00, "Amazon", "amazon"), _offer(999.00, "BestBuy", "serper_shopping")]
+    kept, dropped = _drop_price_outliers(offers)
+    assert len(kept) == 2 and not dropped
+
+
+@pytest.mark.asyncio
+async def test_price_hygiene_scam_offer_never_reaches_card():
+    """End-to-end through product_compose: a $12 eBay 'iPhone 15' listing must not
+    surface on the card, and must NOT become the backfill price for the $0 Amazon
+    offer — the real Serper price must."""
+    fake_service = MagicMock()
+    fake_service.generate_compose = AsyncMock(return_value="mock response text")
+
+    state = {
+        "user_message": "best smartphone",
+        "intent": "product",
+        "slots": {"category": "phones"},
+        "normalized_products": [{"name": "iPhone 15"}],
+        "affiliate_products": {
+            # $0 Amazon mock offer (affiliate link, no price)
+            "amazon": [{
+                "product_name": "iPhone 15",
+                "offers": [{
+                    "title": "iPhone 15", "price": 0, "currency": "USD",
+                    "url": "https://amzn.to/iphone15", "merchant": "Amazon",
+                    "image_url": "",
+                }],
+            }],
+            # $12 scraped eBay listing — actually a phone case, titled like the phone
+            "ebay": [{
+                "product_name": "iPhone 15",
+                "offers": [{
+                    "title": "iPhone 15", "price": 12.00, "currency": "USD",
+                    "url": "https://www.ebay.com/itm/scam123", "merchant": "eBay (scamstore)",
+                    "image_url": "https://i.ebayimg.com/images/g/scam/s-l500.jpg",
+                    "source": "ebay",
+                }],
+            }],
+            # Real market price from Google Shopping
+            "serper_shopping": [{
+                "product_name": "iPhone 15",
+                "offers": [{
+                    "title": "iPhone 15", "price": 799.00, "currency": "USD",
+                    "url": "https://www.google.com/shopping/product/iphone15",
+                    "merchant": "Best Buy", "image_url": "https://img.example.com/iphone15.jpg",
+                    "rating": 4.8, "review_count": 12000, "source": "serper_shopping",
+                }],
+            }],
+        },
+        "review_data": {},
+        "comparison_html": None,
+        "comparison_data": None,
+        "general_product_info": "",
+        "conversation_history": [],
+        "last_search_context": {},
+        "search_history": [],
+    }
+
+    with patch("app.services.model_service.model_service", fake_service):
+        result = await product_compose(state)
+
+    review_cards = [b for b in result.get("ui_blocks", []) if b.get("type") == "product_review"]
+    assert review_cards, "expected a product_review card"
+    links = review_cards[0]["data"]["affiliate_links"]
+    prices = [l.get("price") for l in links]
+    assert 12.00 not in prices, f"$12 scam listing surfaced on the card: {prices}"
+    assert 0 not in prices and 0.0 not in prices, f"a $0 offer survived: {prices}"
+    # The Amazon offer's backfilled price is the REAL one, not the scam one.
+    assert 799.00 in prices, f"real market price missing from card: {prices}"
