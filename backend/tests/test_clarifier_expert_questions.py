@@ -392,3 +392,171 @@ async def test_product_prompt_translates_slots_to_specialist_questions(agent):
     assert "How do you usually sleep?" in system_prompt, "category-translation examples missing"
     assert "No strong preference" in system_prompt, "features escape-hatch instruction missing"
     assert "mattresses specialist" in system_prompt
+
+
+# ---------------------------------------------------------------------------
+# Multi-select questions — "type": "multi_select" flag
+# ---------------------------------------------------------------------------
+
+HEADPHONES_MULTISELECT_RESPONSE = json.dumps({
+    "intro": "Let's find your headphones.",
+    "questions": [
+        {
+            "slot": "use_case",
+            "question": "Where will you use them most?",
+            "options": ["Commute & travel", "Gym & runs", "At a desk"],
+            "free_text_hint": "or describe your own use",
+            "type": "single_select",
+        },
+        {
+            "slot": "features",
+            "question": "Which features matter to you?",
+            "options": ["Noise cancelling", "Waterproof", "Wireless", "No strong preference"],
+            "free_text_hint": "or type your own",
+            "type": "multi_select",
+        },
+        {
+            "slot": "budget",
+            "question": "What's your budget?",
+            "options": ["Under $100", "$100–$250", "$250+"],
+            "free_text_hint": "or type an amount",
+        },
+    ],
+    "closing": "Then I'll pull a shortlist together.",
+})
+
+
+@pytest.mark.asyncio
+async def test_multi_select_type_preserved_on_features_question(agent):
+    """A question the LLM marks multi_select keeps the flag through normalization."""
+    agent.generate = AsyncMock(return_value=HEADPHONES_MULTISELECT_RESPONSE)
+
+    result = await agent._generate_followup_questions(
+        missing_slots=["use_case", "features", "budget"],
+        current_slots={"category": "headphones"},
+        user_message="best headphones",
+        intent="product",
+    )
+
+    by_slot = {q["slot"]: q for q in result["questions"]}
+    assert by_slot["features"].get("type") == "multi_select"
+
+
+@pytest.mark.asyncio
+async def test_single_select_type_stays_implicit(agent):
+    """"single_select" (or no type at all) is the default — never emitted as a key."""
+    agent.generate = AsyncMock(return_value=HEADPHONES_MULTISELECT_RESPONSE)
+
+    result = await agent._generate_followup_questions(
+        missing_slots=["use_case", "features", "budget"],
+        current_slots={"category": "headphones"},
+        user_message="best headphones",
+        intent="product",
+    )
+
+    by_slot = {q["slot"]: q for q in result["questions"]}
+    assert "type" not in by_slot["use_case"], "single_select must stay implicit"
+    assert "type" not in by_slot["budget"], "absent type must stay implicit"
+
+
+@pytest.mark.asyncio
+async def test_multi_select_stripped_from_budget_and_use_case(agent):
+    """budget/use_case are always single-answer, even if the LLM marks them multi_select."""
+    response = json.dumps({
+        "intro": "ok",
+        "questions": [
+            {
+                "slot": "use_case",
+                "question": "What for?",
+                "options": ["A", "B"],
+                "type": "multi_select",  # wrong — must be stripped
+            },
+            {
+                "slot": "budget",
+                "question": "How much?",
+                "options": ["Under $100", "$100+"],
+                "type": "multi_select",  # wrong — must be stripped
+            },
+        ],
+        "closing": "",
+    })
+    agent.generate = AsyncMock(return_value=response)
+
+    result = await agent._generate_followup_questions(
+        missing_slots=["use_case", "budget"],
+        current_slots={"category": "headphones"},
+        user_message="best headphones",
+        intent="product",
+    )
+
+    for q in result["questions"]:
+        assert "type" not in q, f"multi_select must never survive on {q['slot']}"
+
+
+@pytest.mark.asyncio
+async def test_product_prompt_carries_multi_select_instruction(agent):
+    """The product prompt teaches the LLM when to emit multi_select."""
+    agent.generate = AsyncMock(return_value=LAPTOP_LLM_RESPONSE)
+
+    await agent._generate_followup_questions(
+        missing_slots=["use_case", "features", "budget"],
+        current_slots={"category": "headphones"},
+        user_message="best headphones",
+        intent="product",
+    )
+
+    system_prompt = agent.generate.call_args.kwargs["messages"][0]["content"]
+    assert "multi_select" in system_prompt
+    assert "Never make budget or use_case multi-select" in system_prompt
+
+
+@pytest.mark.asyncio
+async def test_extraction_context_labels_multi_select_questions(agent):
+    """The slot extractor is told which questions were multi-select, so a combined
+    answer ("Noise cancelling, Waterproof") maps to that ONE slot."""
+    agent.generate = AsyncMock(
+        return_value=json.dumps({"features": "Noise cancelling, Waterproof"})
+    )
+
+    followups = [
+        {
+            "slot": "features",
+            "question": "Which features matter to you?",
+            "options": ["Noise cancelling", "Waterproof", "Wireless"],
+            "free_text_hint": "or type your own",
+            "type": "multi_select",
+        }
+    ]
+    extracted = await agent._extract_all_slots_from_answer(
+        slot_names=["features"],
+        user_message="Noise cancelling, Waterproof",
+        followups=followups,
+    )
+
+    assert extracted == {"features": "Noise cancelling, Waterproof"}
+    system_prompt = agent.generate.call_args.kwargs["messages"][0]["content"]
+    assert "multi-select" in system_prompt
+    assert "ONE slot's value" in system_prompt
+
+
+@pytest.mark.asyncio
+async def test_extraction_context_omits_multi_select_note_for_single_select(agent):
+    """Single-select questions don't get the multi-select note in the extraction prompt."""
+    agent.generate = AsyncMock(return_value=json.dumps({"use_case": "Gaming"}))
+
+    followups = [
+        {
+            "slot": "use_case",
+            "question": "What will you mainly use it for?",
+            "options": ["Student / everyday", "Gaming"],
+            "free_text_hint": "or describe your own use",
+        }
+    ]
+    await agent._extract_all_slots_from_answer(
+        slot_names=["use_case"],
+        user_message="Gaming",
+        followups=followups,
+    )
+
+    system_prompt = agent.generate.call_args.kwargs["messages"][0]["content"]
+    assert "multi-select" not in system_prompt

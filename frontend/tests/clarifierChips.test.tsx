@@ -205,3 +205,115 @@ describe('Clarifier chips — legacy fallbacks (no options from backend)', () =>
     expect(screen.getByText("Then I'll pull together a shortlist.")).toBeTruthy()
   })
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 3. Multi-select questions — chips toggle, "Done" submits the joined answer
+// ─────────────────────────────────────────────────────────────────────────────
+
+const HEADPHONES_FEATURES_MULTISELECT = {
+  slot: 'features',
+  question: 'Which features matter to you?',
+  options: ['Noise cancelling', 'Waterproof', 'Wireless', 'No strong preference'],
+  free_text_hint: 'or type your own',
+  type: 'multi_select',
+}
+
+describe('Clarifier chips — multi-select questions', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('tapping a multi-select chip toggles selection instead of sending', () => {
+    const dispatched: any[] = []
+    const spy = vi
+      .spyOn(window, 'dispatchEvent')
+      .mockImplementation((event: Event) => {
+        dispatched.push(event)
+        return true
+      })
+
+    render(<Message message={makeClarifierMessage([HEADPHONES_FEATURES_MULTISELECT]) as any} />)
+    const chip = screen.getByText('Noise cancelling')
+    fireEvent.click(chip)
+
+    // No send event — the chip is now selected (aria-pressed)
+    expect(dispatched.filter((e) => e.type === 'sendSuggestion')).toHaveLength(0)
+    expect(chip.closest('button')?.getAttribute('aria-pressed')).toBe('true')
+    spy.mockRestore()
+  })
+
+  it('tapping a selected chip deselects it', () => {
+    render(<Message message={makeClarifierMessage([HEADPHONES_FEATURES_MULTISELECT]) as any} />)
+    const chip = screen.getByText('Waterproof')
+    fireEvent.click(chip)
+    expect(chip.closest('button')?.getAttribute('aria-pressed')).toBe('true')
+    fireEvent.click(chip)
+    expect(chip.closest('button')?.getAttribute('aria-pressed')).toBe('false')
+  })
+
+  it('shows no Done button until something is selected', () => {
+    render(<Message message={makeClarifierMessage([HEADPHONES_FEATURES_MULTISELECT]) as any} />)
+    expect(screen.queryByTestId('clarifier-multiselect-done')).toBeNull()
+    fireEvent.click(screen.getByText('Wireless'))
+    expect(screen.getByTestId('clarifier-multiselect-done')).toBeTruthy()
+  })
+
+  it('Done submits the joined answer of all selected chips', () => {
+    const dispatched: any[] = []
+    const spy = vi
+      .spyOn(window, 'dispatchEvent')
+      .mockImplementation((event: Event) => {
+        dispatched.push(event)
+        return true
+      })
+
+    render(<Message message={makeClarifierMessage([HEADPHONES_FEATURES_MULTISELECT]) as any} />)
+    fireEvent.click(screen.getByText('Noise cancelling'))
+    fireEvent.click(screen.getByText('Waterproof'))
+    fireEvent.click(screen.getByTestId('clarifier-multiselect-done'))
+
+    const sendEvents = dispatched.filter((e) => e.type === 'sendSuggestion')
+    expect(sendEvents).toHaveLength(1)
+    expect((sendEvents[0] as CustomEvent).detail.question).toBe('Noise cancelling, Waterproof')
+    spy.mockRestore()
+  })
+
+  it('selected chips render in terracotta (filled bg)', () => {
+    render(<Message message={makeClarifierMessage([HEADPHONES_FEATURES_MULTISELECT]) as any} />)
+    const chip = screen.getByText('Noise cancelling').closest('button')!
+    expect(chip.className).not.toContain('bg-[var(--terra)]')
+    fireEvent.click(chip)
+    expect(chip.className).toContain('bg-[var(--terra)]')
+  })
+
+  it('single-select questions still send on first tap (regression)', () => {
+    const dispatched: any[] = []
+    const spy = vi
+      .spyOn(window, 'dispatchEvent')
+      .mockImplementation((event: Event) => {
+        dispatched.push(event)
+        return true
+      })
+
+    // Same question WITHOUT type: multi_select → tap sends immediately
+    render(<Message message={makeClarifierMessage([LAPTOP_USE_CASE_QUESTION]) as any} />)
+    fireEvent.click(screen.getByText('Gaming'))
+
+    const sendEvents = dispatched.filter((e) => e.type === 'sendSuggestion')
+    expect(sendEvents).toHaveLength(1)
+    expect((sendEvents[0] as CustomEvent).detail.question).toBe('Gaming')
+    spy.mockRestore()
+  })
+
+  it('renders a multi-select and single-select question side by side', () => {
+    render(
+      <Message
+        message={makeClarifierMessage([HEADPHONES_FEATURES_MULTISELECT, LAPTOP_BUDGET_QUESTION]) as any}
+      />
+    )
+    const questions = screen.getAllByTestId('clarifier-question')
+    expect(questions).toHaveLength(2)
+    // 4 multi-select chips + 4 budget chips
+    expect(screen.getAllByTestId('clarifier-option-chip')).toHaveLength(8)
+  })
+})

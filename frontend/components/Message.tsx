@@ -59,6 +59,73 @@ function trackSuggestionClick(suggestion: NextSuggestion, messageId: string, ind
   })
 }
 
+/**
+ * Multi-select clarifier question — chips toggle (terracotta when selected) and a
+ * "Done" button submits the joined answer. The backend marks a question
+ * `type: "multi_select"` when several answers are sensible at once (e.g. the
+ * features question: "Noise cancelling" + "Waterproof" both apply).
+ * Single-select questions keep the tap-to-send chips.
+ */
+function MultiSelectQuestion({
+  question,
+  options,
+  hint,
+  onSubmit,
+}: {
+  question: string
+  options: string[]
+  hint: string
+  onSubmit: (joined: string) => void
+}) {
+  const [selected, setSelected] = useState<string[]>([])
+
+  const toggle = (option: string) =>
+    setSelected((prev) =>
+      prev.includes(option) ? prev.filter((o) => o !== option) : [...prev, option]
+    )
+
+  return (
+    <div className="space-y-2" data-testid="clarifier-question">
+      <p className="text-[14px] leading-[20px] text-[var(--ink)]">{question}</p>
+      <div className="flex flex-wrap gap-2">
+        {options.map((option) => {
+          const isSelected = selected.includes(option)
+          return (
+            <button
+              key={option}
+              onClick={() => toggle(option)}
+              data-testid="clarifier-option-chip"
+              aria-pressed={isSelected}
+              className={
+                isSelected
+                  ? 'inline-flex items-center gap-2 rounded-[12px] border border-[var(--terra)] bg-[var(--terra)] transition-all px-3.5 py-2 text-[14px] font-medium text-white'
+                  : 'inline-flex items-center gap-2 rounded-[12px] border border-[var(--line-2)] bg-[var(--paper-hi)] hover:border-[var(--terra)] hover:bg-[var(--terra-soft)] transition-all px-3.5 py-2 text-[14px] font-medium text-[var(--ink)]'
+              }
+            >
+              <span
+                className="w-1 h-1 rounded-full flex-shrink-0"
+                style={{ background: isSelected ? '#fff' : 'var(--terra)' }}
+              />
+              {option}
+            </button>
+          )
+        })}
+        {selected.length > 0 && (
+          <button
+            onClick={() => onSubmit(selected.join(', '))}
+            data-testid="clarifier-multiselect-done"
+            className="inline-flex items-center gap-2 rounded-[12px] border border-[var(--terra)] bg-[var(--paper-hi)] hover:bg-[var(--terra-soft)] transition-all px-3.5 py-2 text-[14px] font-semibold text-[var(--terra)]"
+          >
+            Done
+            <ArrowRight size={14} strokeWidth={1.5} />
+          </button>
+        )}
+      </div>
+      <p className="text-[12px] italic text-[var(--ink-3)]">{hint}</p>
+    </div>
+  )
+}
+
 interface MessageProps {
   message: MessageType
   isLast?: boolean
@@ -319,7 +386,7 @@ export default function Message({ message, isLast = false }: MessageProps) {
                         </p>
                       )}
                       <div className="space-y-3">
-                        {message.followups.questions && message.followups.questions.map((q: { slot: string; question: string; options?: string[]; free_text_hint?: string }, idx: number) => {
+                        {message.followups.questions && message.followups.questions.map((q: { slot: string; question: string; options?: string[]; free_text_hint?: string; type?: string }, idx: number) => {
                           const send = (text: string) =>
                             window.dispatchEvent(new CustomEvent('sendSuggestion', { detail: { question: text } }))
                           // Any question with backend-provided options → question as a prompt
@@ -337,6 +404,18 @@ export default function Message({ message, isLast = false }: MessageProps) {
                                 : null
                           if (options) {
                             const hint = q.free_text_hint || (isBudget ? 'or just type a number' : 'or just type your answer')
+                            // Multi-select question: chips toggle, "Done" submits the joined answer
+                            if (q.type === 'multi_select') {
+                              return (
+                                <MultiSelectQuestion
+                                  key={idx}
+                                  question={q.question}
+                                  options={options}
+                                  hint={hint}
+                                  onSubmit={send}
+                                />
+                              )
+                            }
                             return (
                               <div key={idx} className="space-y-2" data-testid="clarifier-question">
                                 <p className="text-[14px] leading-[20px] text-[var(--ink)]">{q.question}</p>
