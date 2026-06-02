@@ -243,6 +243,13 @@ class Settings(BaseSettings):
     # is opt-in and A/B-able; flip on in prod once the eval confirms the accuracy gain.
     USE_REVIEW_GROUNDING: bool = Field(default=False, description="Insert review_search into the standard product plan so real review evidence reaches the composer (editorial path). Self-gates on ENABLE_SERPAPI; ~+8s latency.")
 
+    # Tier 5 / A2 anti-hallucination: drop products that have NEITHER a real
+    # shopping match (priced offer with a non-placeholder image) NOR real review
+    # evidence — i.e. likely invented product names from the LLM search — so the
+    # composer never writes about non-existent products. Keeps ≥2 verified products
+    # so sparse results still render. Default off.
+    USE_PRODUCT_VERIFICATION: bool = Field(default=False, description="Drop products with no real shopping match and no review evidence (anti-hallucination) before compose")
+
     # Agent-specific Max Tokens
     PLANNER_MAX_TOKENS: int = Field(default=2000, description="Max tokens for planner agent")
     INTENT_MAX_TOKENS: int = Field(default=50, description="Max tokens for intent agent")

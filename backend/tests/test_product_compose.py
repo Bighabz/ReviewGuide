@@ -838,3 +838,77 @@ async def test_price_hygiene_scam_offer_never_reaches_card():
     assert 0 not in prices and 0.0 not in prices, f"a $0 offer survived: {prices}"
     # The Amazon offer's backfilled price is the REAL one, not the scam one.
     assert 799.00 in prices, f"real market price missing from card: {prices}"
+
+
+def _a2_state():
+    """3 products: two with real Serper shopping matches, one 'fake' with only a
+    mock (price-0, imageless) Amazon offer and no review evidence."""
+    return {
+        "user_message": "best noise cancelling headphones",
+        "intent": "product",
+        "slots": {"category": "headphones"},
+        "normalized_products": [
+            {"name": "Sony WH-1000XM5"},
+            {"name": "Bose QuietComfort Ultra"},
+            {"name": "Phantom Nonexistent Headphone XZ9000"},
+        ],
+        "affiliate_products": {
+            "amazon": [
+                {"product_name": "Phantom Nonexistent Headphone XZ9000", "offers": [{
+                    "title": "Phantom Nonexistent Headphone XZ9000", "price": 0, "currency": "USD",
+                    "url": "https://amzn.to/phantom", "merchant": "Amazon", "image_url": "",
+                }]},
+            ],
+            "serper_shopping": [
+                {"product_name": "Sony WH-1000XM5", "offers": [{
+                    "title": "Sony WH-1000XM5", "price": 348.00, "currency": "USD",
+                    "url": "https://www.google.com/shopping/sony", "merchant": "Walmart",
+                    "image_url": "https://img.example.com/sony.jpg", "rating": 4.7,
+                    "review_count": 8000, "source": "serper_shopping",
+                }]},
+                {"product_name": "Bose QuietComfort Ultra", "offers": [{
+                    "title": "Bose QuietComfort Ultra", "price": 429.00, "currency": "USD",
+                    "url": "https://www.google.com/shopping/bose", "merchant": "BestBuy",
+                    "image_url": "https://img.example.com/bose.jpg", "rating": 4.6,
+                    "review_count": 5000, "source": "serper_shopping",
+                }]},
+            ],
+        },
+        "review_data": {},
+        "comparison_html": None, "comparison_data": None, "general_product_info": "",
+        "conversation_history": [], "last_search_context": {}, "search_history": [],
+    }
+
+
+@pytest.mark.asyncio
+async def test_a2_drops_unverifiable_product_when_enabled():
+    """With USE_PRODUCT_VERIFICATION on, the fake product (no real shopping match,
+    no reviews) is dropped — no card and not mentioned."""
+    from app.core.config import settings as _settings
+    fake_service = MagicMock()
+    fake_service.generate_compose = AsyncMock(return_value="The Sony WH-1000XM5 leads; Bose QuietComfort Ultra is the alternative.")
+
+    with patch("app.services.model_service.model_service", fake_service), \
+         patch.object(_settings, "USE_PRODUCT_VERIFICATION", True):
+        result = await product_compose(_a2_state())
+
+    cards = [b for b in result.get("ui_blocks", []) if b.get("type") == "product_review"]
+    names = [c["data"]["product_name"] for c in cards]
+    assert "Phantom Nonexistent Headphone XZ9000" not in names, f"unverifiable product survived: {names}"
+    assert any("Sony" in n for n in names) and any("Bose" in n for n in names)
+
+
+@pytest.mark.asyncio
+async def test_a2_keeps_all_when_disabled():
+    """Default off -> the fake product is NOT pruned (behavior unchanged)."""
+    from app.core.config import settings as _settings
+    fake_service = MagicMock()
+    fake_service.generate_compose = AsyncMock(return_value="mock response text")
+
+    with patch("app.services.model_service.model_service", fake_service), \
+         patch.object(_settings, "USE_PRODUCT_VERIFICATION", False):
+        result = await product_compose(_a2_state())
+
+    cards = [b for b in result.get("ui_blocks", []) if b.get("type") == "product_review"]
+    names = [c["data"]["product_name"] for c in cards]
+    assert "Phantom Nonexistent Headphone XZ9000" in names, f"phantom should remain when flag off: {names}"
