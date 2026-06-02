@@ -490,14 +490,26 @@ def _profile_inject(user_prefs: Optional[dict]) -> Optional[str]:
     user_prefs = user_prefs or {}
     cats = list(user_prefs.get("categories", {}).keys())[:2]
     brands = list(user_prefs.get("brands", {}).keys())[:2]
+    # Tier 5b: surface the richer signal preference_service already stores
+    # (use-cases, budget tier, favored features) — not just categories + brands —
+    # so the composer can calibrate the pick to who this returning buyer is.
+    use_cases = list((user_prefs.get("use_cases") or {}).keys())[:2]
+    budgets = list(user_prefs.get("budget_ranges") or [])[-1:]  # most recent budget
+    features = list(user_prefs.get("features") or [])[:3]
     parts = []
     if cats:
-        parts.append(f"often searches for {', '.join(cats)}")
+        parts.append(f"often shops for {', '.join(cats)}")
     if brands:
         parts.append(f"favors {', '.join(brands)}")
+    if use_cases:
+        parts.append(f"typically buying for {', '.join(use_cases)}")
+    if budgets:
+        parts.append(f"usually budgets around {budgets[0]}")
+    if features:
+        parts.append(f"cares about {', '.join(features)}")
     if not parts:
         return None
-    return f"Returning user who {' and '.join(parts)}."
+    return f"Returning user who {'; '.join(parts)}."
 
 
 async def _voice_revise_body(body: str, follow_up: str, transitional: str, user_message: str) -> Optional[dict]:
