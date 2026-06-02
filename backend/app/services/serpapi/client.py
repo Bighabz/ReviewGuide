@@ -173,9 +173,13 @@ class SerpAPIClient:
         self.max_sources = settings.SERPAPI_MAX_SOURCES
         self.cache_ttl = settings.SERPAPI_CACHE_TTL
         self.timeout = settings.SERPAPI_TIMEOUT
-        # Cross-provider failover (Serper.dev primary → SerpApi.com on error/credit-exhaustion)
+        # Cross-provider failover (Serper.dev primary → SerpApi.com on error/credit-exhaustion).
+        # SerpApi.com keys are tried in order: the second covers the first running dry
+        # (free-tier accounts cap at 250 searches/mo, so chaining extends headroom).
         self.fallback_enabled = settings.SERPAPI_FALLBACK_ENABLED
-        self.serpapi_com_key = settings.SERPAPI_COM_API_KEY
+        self.serpapi_com_keys = [
+            k for k in (settings.SERPAPI_COM_API_KEY, settings.SERPAPI_COM_API_KEY_2) if k
+        ]
 
     async def search_reviews(
         self,
@@ -493,7 +497,7 @@ class SerpAPIClient:
         if self._is_credit_exhaustion(exc):
             logger.warning(
                 "[serper] OUT OF CREDITS on Serper.dev — review/price evidence degraded. "
-                "%s", "Failing over to SerpApi.com." if (self.fallback_enabled and self.serpapi_com_key)
+                "%s", "Failing over to SerpApi.com." if (self.fallback_enabled and self.serpapi_com_keys)
                 else "No SerpApi.com fallback configured (SERPAPI_FALLBACK_ENABLED / SERPAPI_COM_API_KEY)."
             )
         else:
@@ -503,7 +507,7 @@ class SerpAPIClient:
         """Fail over to SerpApi.com only when configured AND the error is a provider
         error worth retrying elsewhere (HTTP status — credits/auth/rate-limit — or a
         network/timeout error). Non-provider bugs re-raise unchanged."""
-        if not (self.fallback_enabled and self.serpapi_com_key):
+        if not (self.fallback_enabled and self.serpapi_com_keys):
             return False
         import httpx
 
@@ -548,19 +552,32 @@ class SerpAPIClient:
         return {"shopping": shopping}
 
     async def _serpapi_com_request(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Make async GET request to SerpApi.com (api_key as a query param)."""
+        """Make async GET request to SerpApi.com, trying each configured key in
+        order. A key that errors or is out of credits falls through to the next;
+        only when every key fails does this raise (→ graceful empty upstream)."""
         import httpx
 
-        full_params = {**params, "api_key": self.serpapi_com_key}
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await client.get(SERPAPI_COM_URL, params=full_params)
-            response.raise_for_status()
-            data = response.json()
-        # SerpApi.com signals failures (bad key, exhausted plan) via an "error" body
-        # with HTTP 200 — surface it as an exception so the dual-failure path stays graceful.
-        if isinstance(data, dict) and data.get("error"):
-            raise RuntimeError(f"SerpApi.com error: {data['error']}")
-        return data
+        last_exc: Exception = RuntimeError("No SerpApi.com keys configured")
+        total = len(self.serpapi_com_keys)
+        for idx, key in enumerate(self.serpapi_com_keys):
+            try:
+                full_params = {**params, "api_key": key}
+                async with httpx.AsyncClient(timeout=self.timeout) as client:
+                    response = await client.get(SERPAPI_COM_URL, params=full_params)
+                    response.raise_for_status()
+                    data = response.json()
+                # SerpApi.com signals failures (bad key, exhausted plan) via an "error"
+                # body with HTTP 200 — treat it as a failure so we try the next key.
+                if isinstance(data, dict) and data.get("error"):
+                    raise RuntimeError(f"SerpApi.com error: {data['error']}")
+                return data
+            except (httpx.HTTPStatusError, httpx.RequestError, RuntimeError) as e:
+                last_exc = e
+                if idx + 1 < total:
+                    logger.warning(f"[serpapi.com] key #{idx + 1}/{total} failed ({type(e).__name__}); trying next key")
+                else:
+                    logger.warning(f"[serpapi.com] all {total} key(s) exhausted ({type(e).__name__})")
+        raise last_exc
 
     def _parse_organic_results(self, results: Dict[str, Any]) -> List[ReviewSource]:
         """Parse Serper organic results into ReviewSource objects."""

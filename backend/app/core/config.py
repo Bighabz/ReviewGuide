@@ -161,6 +161,7 @@ class Settings(BaseSettings):
     # SerpApi.com key is set and the flag is flipped in prod.
     SERPAPI_FALLBACK_ENABLED: bool = Field(default=False, description="On Serper.dev error/credit-exhaustion, fail over to SerpApi.com")
     SERPAPI_COM_API_KEY: str = Field(default="", description="SerpApi.com API key (fallback provider; different service from Serper.dev)")
+    SERPAPI_COM_API_KEY_2: str = Field(default="", description="Second SerpApi.com key — tried when the first is credit-exhausted/erroring (chained fallback)")
     ENABLE_REDDIT_API: bool = Field(
         default=False,
         description="Enable Reddit API (Tier 3) - Requires commercial license and user consent"
