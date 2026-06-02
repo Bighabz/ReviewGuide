@@ -68,3 +68,47 @@ describe('ChatContainer (blueprint)', () => {
     })
   })
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// QA5 bug 4 — brand-new sessions skip the history fetch + spinner
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('ChatContainer — brand-new external session (QA5 bug 4)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    ;(localStorage.getItem as Mock).mockReturnValue(null)
+    ;(chatApi.fetchConversationHistory as Mock).mockResolvedValue({ success: true, messages: [] })
+    ;(chatApi.streamChat as Mock).mockResolvedValue(undefined)
+  })
+
+  it('does NOT fetch history and does NOT show the spinner for a new session', async () => {
+    render(
+      <ChatContainer
+        externalSessionId="22222222-2222-4222-a222-222222222222"
+        externalSessionIsNew={true}
+      />
+    )
+
+    // Welcome screen renders without a loading phase stealing the mount
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText(/ask anything/i)).toBeInTheDocument()
+    })
+    // The guaranteed-401 history fetch for anonymous users never fires
+    expect(chatApi.fetchConversationHistory).not.toHaveBeenCalled()
+  })
+
+  it('still fetches history for existing sessions (sidebar switches)', async () => {
+    render(
+      <ChatContainer
+        externalSessionId="33333333-3333-4333-a333-333333333333"
+        externalSessionIsNew={false}
+      />
+    )
+
+    await waitFor(() => {
+      expect(chatApi.fetchConversationHistory).toHaveBeenCalledWith(
+        '33333333-3333-4333-a333-333333333333'
+      )
+    })
+  })
+})
