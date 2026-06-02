@@ -367,6 +367,53 @@ def _extract_price(offer: dict) -> float | None:
     return None
 
 
+# Marketplace price hygiene thresholds: an offer priced below LOW × median is
+# treated as scraped noise (accessory/scam listing — the "$12 iPhone 15" case);
+# above HIGH × median as a bundle/listing error. Deliberately loose so sales,
+# refurb and open-box pricing survive.
+PRICE_OUTLIER_LOW_RATIO = 0.25
+PRICE_OUTLIER_HIGH_RATIO = 4.0
+
+
+def _drop_price_outliers(offers: list) -> tuple:
+    """
+    Marketplace price hygiene: drop offers whose price is wildly inconsistent
+    with the product's median market price across providers.
+
+    Returns (kept_offers, dropped_offers). Unpriced offers are always kept —
+    they carry affiliate links, not price signal. With fewer than 2 priced
+    offers there is no market consensus to compare against, so everything is
+    kept. If filtering would drop every priced offer, everything is kept
+    (degraded beats empty).
+    """
+    import statistics
+
+    priced = [(o, _extract_price(o)) for o in offers]
+    prices = [p for _, p in priced if p is not None]
+    if len(prices) < 2:
+        return offers, []
+
+    median_price = statistics.median(prices)
+    if median_price <= 0:
+        return offers, []
+
+    kept, dropped = [], []
+    for offer, price in priced:
+        if price is None:
+            kept.append(offer)
+            continue
+        ratio = price / median_price
+        if ratio < PRICE_OUTLIER_LOW_RATIO or ratio > PRICE_OUTLIER_HIGH_RATIO:
+            dropped.append(offer)
+        else:
+            kept.append(offer)
+
+    # Never drop every priced offer — keep-all fallback.
+    if not any(_extract_price(o) is not None for o in kept):
+        return offers, []
+    return kept, dropped
+
+
 def _synthesize_transitional(user_message: str, slots: Optional[dict]) -> str:
     """E2: deterministically frame the shortlist when the query carries a real
     constraint but the LLM declined to emit transitional_reasoning.
@@ -605,6 +652,23 @@ async def product_compose(state: Dict[str, Any]) -> Dict[str, Any]:
                     })
 
             if all_offers_for_product:
+                # Marketplace price hygiene: drop scraped-noise offers (accessory/scam
+                # listings, bundles) whose price is wildly inconsistent with the
+                # product's median market price across providers — BEFORE the backfill
+                # below, so a "$12 iPhone 15" case listing can never become the card's
+                # headline price or the backfill source.
+                clean_offers, outlier_offers = _drop_price_outliers(all_offers_for_product)
+                if outlier_offers:
+                    dropped_desc = [
+                        f"${_extract_price(o):.2f} ({o.get('merchant', '?')})"
+                        for o in outlier_offers
+                    ]
+                    logger.info(
+                        f"[product_compose] Price hygiene: dropped {len(outlier_offers)} "
+                        f"outlier offer(s) for {product_name}: {dropped_desc}"
+                    )
+                    all_offers_for_product = clean_offers
+
                 # Backfill a REAL price/image from the Serper Google Shopping offer
                 # onto offers that lack them. Affiliate providers run in mock mode
                 # (Amazon price=0 without PA-API), and the Amazon offer sorts first —
