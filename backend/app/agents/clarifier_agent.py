@@ -24,6 +24,7 @@ from tool_contracts import get_tool_contracts_dict  # noqa: E402
 
 from ..schemas.graph_state import GraphState
 from .base_agent import BaseAgent
+from .category_question_packs import format_pack_hint, get_category_pack
 from ..services.halt_state_manager import HaltStateManager
 from ..services.prompts.voice import build_system_prompt
 from app.lib.toon_python import encode
@@ -851,6 +852,17 @@ Question ORDER: use case / purpose first, then specifics, budget LAST.
 For EVERY question, also generate "options": 3-5 short tappable answer choices covering the most common realistic answers (e.g. travel companions: "Solo", "Couple", "Family with kids", "Friends"; trip length: "Weekend", "4-5 days", "1 week", "2+ weeks").
 Each option is 1-4 words. Also generate "free_text_hint": a short affordance like "or type your own".
 """
+
+        # Outcome 4: category question packs. When the category matches one of the
+        # top ~20 curated packs, inject it as the authoritative question set — the
+        # specialist questions, options, multi-select flags, and budget brackets are
+        # pinned rather than improvised. Unlisted categories keep the generic expert
+        # framing above and generalize via the LLM.
+        if intent == "product" and category:
+            pack = get_category_pack(category)
+            if pack:
+                expert_hint += format_pack_hint(pack)
+                logger.info(f"[Clarifier Agent] Using curated question pack for category '{category}'")
 
         role_prompt = f"""You collect missing information from the user before downstream tools run.
 
