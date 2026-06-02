@@ -71,6 +71,10 @@ ACCESSORY_KEYWORDS = {
 
 def _fuzzy_product_match(query_name: str, candidate_name: str, threshold: float = 0.35) -> bool:
     """Token-overlap Jaccard similarity for fuzzy product matching."""
+    # Defensive: scraped provider data can put non-strings (dicts) where product
+    # names/titles belong — treat as no match rather than crash on .lower().
+    if not isinstance(query_name, str) or not isinstance(candidate_name, str):
+        return False
     q_tokens = set(query_name.lower().split())
     c_tokens = set(candidate_name.lower().split())
     if not q_tokens or not c_tokens:
@@ -264,7 +268,9 @@ def _filter_relevant_products(
 
             clean_offers = []
             for offer in offers:
-                title_lower = (offer.get("title") or "").lower()
+                # _str_or: a scraped title can arrive as a dict — treat as no title
+                # rather than crash (same bug class as the dict-url prod incident).
+                title_lower = _str_or(offer.get("title"), "").lower()
                 is_accessory = any(kw in title_lower for kw in ACCESSORY_KEYWORDS)
                 if not is_accessory:
                     clean_offers.append(offer)
@@ -342,6 +348,19 @@ def _parse_budget(budget_str: str) -> tuple:
         val = float(m.group(1).replace(',', ''))
         return (None, val) if val > 0 else (None, None)
     return None, None
+
+
+def _str_or(value, default: str = "") -> str:
+    """Coerce a provider-supplied field to a usable string.
+
+    Marketplace/scraper APIs (Serper, SerpApi.com, eBay) occasionally return a
+    structured value (dict/list) or None where a plain string is expected. Card
+    building does string ops (`.lower()`, `in`) on these fields, so a non-string
+    must never pass through — return the default instead.
+    """
+    if isinstance(value, str) and value:
+        return value
+    return default
 
 
 def _extract_price(offer: dict) -> float | None:
@@ -687,12 +706,26 @@ async def product_compose(state: Dict[str, Any]) -> Dict[str, Any]:
                 if _fuzzy_product_match(product_name, a.get("product_name", "")) and a.get("offers"):
                     provider = a.get("provider", "")
                     offer = a["offers"][0]
+                    # Sanitize provider text fields at the single entry point into card
+                    # building. Scraped/marketplace APIs occasionally return structured
+                    # values (a dict/list) where a plain string is expected — a dict url
+                    # crashed every downstream `.lower()` call and killed the whole
+                    # response (prod incident 2026-06-02: "'dict' object has no
+                    # attribute 'lower'"). Blank the bad value, log which provider sent
+                    # it, and let the card degrade gracefully instead.
+                    for _field, _default in (("merchant", provider.title()), ("currency", "USD"), ("url", ""), ("image_url", "")):
+                        _raw = offer.get(_field, _default)
+                        if not isinstance(_raw, str):
+                            logger.warning(
+                                f"[product_compose] Non-string '{_field}' from provider "
+                                f"'{provider}' for {product_name}: {type(_raw).__name__}({str(_raw)[:120]}) — blanked"
+                            )
                     all_offers_for_product.append({
-                        "merchant": offer.get("merchant", provider.title()),
+                        "merchant": _str_or(offer.get("merchant"), provider.title()),
                         "price": offer.get("price", 0),
-                        "currency": offer.get("currency", "USD"),
-                        "url": offer.get("url", ""),
-                        "image_url": offer.get("image_url", ""),
+                        "currency": _str_or(offer.get("currency"), "USD"),
+                        "url": _str_or(offer.get("url"), ""),
+                        "image_url": _str_or(offer.get("image_url"), ""),
                         "rating": offer.get("rating"),
                         "review_count": offer.get("review_count"),
                         "source": provider
@@ -885,13 +918,17 @@ async def product_compose(state: Dict[str, Any]) -> Dict[str, Any]:
             for affiliate_group in provider_data:
                 if affiliate_group.get("offers"):
                     for offer in affiliate_group["offers"][:5]:
+                        # Same provider-field sanitization as the card path above:
+                        # these items feed the carousel ui_block, the blog data, and
+                        # _fuzzy_product_match (string ops) — a dict title/url from a
+                        # scraper must degrade to "" rather than crash or leak to the UI.
                         product_item = {
-                            "title": offer.get("title", ""),
+                            "title": _str_or(offer.get("title"), ""),
                             "price": offer.get("price", 0),
-                            "currency": offer.get("currency", "USD"),
-                            "url": offer.get("url", ""),
-                            "image_url": offer.get("image_url", ""),
-                            "merchant": offer.get("merchant", provider_name.title()),
+                            "currency": _str_or(offer.get("currency"), "USD"),
+                            "url": _str_or(offer.get("url"), ""),
+                            "image_url": _str_or(offer.get("image_url"), ""),
+                            "merchant": _str_or(offer.get("merchant"), provider_name.title()),
                             "rating": offer.get("rating"),
                             "review_count": offer.get("review_count"),
                             "source": provider_name
