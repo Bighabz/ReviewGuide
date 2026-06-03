@@ -106,7 +106,8 @@ OUTPUT FORMAT — return a JSON object with these string fields:
 {
   "body": "<3-5 paragraphs of markdown, no per-product headings>",
   "follow_up_question": "<exactly one contextual curious question that references something specific from the body — a product name, a tradeoff just mentioned, or the user's stated situation>",
-  "transitional_reasoning": "<OPTIONAL — exactly one short sentence, OR an empty string. See TRANSITIONAL RULES.>"
+  "transitional_reasoning": "<OPTIONAL — exactly one short sentence, OR an empty string. See TRANSITIONAL RULES.>",
+  "top_pick": "<the EXACT product name of your #1 pick, copied verbatim from the product list — the same product your body names first>"
 }
 
 RANK AND COMMIT (load-bearing — read first):

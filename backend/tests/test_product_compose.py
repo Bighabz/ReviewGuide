@@ -1292,3 +1292,172 @@ async def test_product_with_real_amazon_offer_gets_no_duplicate_search_link():
     assert len(amazon_links) == 1, f"expected exactly one Amazon link, got: {urls}"
     # And it's the REAL offer, not the search fallback
     assert "amzn.to/hoka-bondi" in amazon_links[0]
+
+
+# ---------------------------------------------------------------------------
+# QA Round 6 — prose/consensus/cards agreement
+# ---------------------------------------------------------------------------
+
+def _prose_pick_state():
+    """Two reviewed, purchasable products where review quality_score ranks the
+    Roomba #1 — but the prose (blog JSON) names the Shark as its top pick."""
+    import json as _json
+    blog_json = _json.dumps({
+        "body": (
+            "For most homes, the Shark AI Ultra is the pick — it maps reliably and "
+            "the self-empty base actually works. Skip the Roomba j7+ unless obstacle "
+            "avoidance is your single biggest need."
+        ),
+        "follow_up_question": "Do you have mostly carpet or hard floors?",
+        "transitional_reasoning": "",
+        "top_pick": "Shark AI Ultra",
+    })
+
+    def _sources(n):
+        return [
+            {"snippet": f"Review snippet {i} praising the vacuum.", "site_name": f"site{i}", "url": f"https://example.com/{i}"}
+            for i in range(n)
+        ]
+
+    return blog_json, {
+        "user_message": "best robot vacuum",
+        "intent": "product",
+        "slots": {"category": "robot vacuums"},
+        # Search order also puts the Roomba first → without the fix, card #1
+        # ("Top pick · for you") is the Roomba too.
+        "normalized_products": [{"name": "Roomba j7+"}, {"name": "Shark AI Ultra"}],
+        "affiliate_products": {
+            "serper_shopping": [
+                {
+                    "product_name": "Roomba j7+",
+                    "offers": [{
+                        "title": "Roomba j7+", "price": 599.00, "currency": "USD",
+                        "url": "https://www.google.com/shopping/product/roomba",
+                        "merchant": "BestBuy",
+                        "image_url": "https://img.example.com/roomba.jpg",
+                        "source": "serper_shopping",
+                    }],
+                },
+                {
+                    "product_name": "Shark AI Ultra",
+                    "offers": [{
+                        "title": "Shark AI Ultra", "price": 449.00, "currency": "USD",
+                        "url": "https://www.google.com/shopping/product/shark",
+                        "merchant": "Walmart",
+                        "image_url": "https://img.example.com/shark.jpg",
+                        "source": "serper_shopping",
+                    }],
+                },
+            ],
+        },
+        # Review consensus ranks the Roomba above the Shark (higher quality_score)
+        "review_data": {
+            "Roomba j7+": {
+                "quality_score": 95, "avg_rating": 4.6, "total_reviews": 2100,
+                "sources": _sources(3),
+            },
+            "Shark AI Ultra": {
+                "quality_score": 80, "avg_rating": 4.4, "total_reviews": 900,
+                "sources": _sources(3),
+            },
+        },
+        "comparison_html": None,
+        "comparison_data": None,
+        "general_product_info": "",
+        "conversation_history": [],
+        "last_search_context": {},
+        "search_history": [],
+    }
+
+
+@pytest.mark.asyncio
+async def test_consensus_block_pins_prose_top_pick_to_rank_1():
+    """QA Round 6: the prose said "skip the Roomba" while "How They Compare"
+    ranked the Roomba #1. The consensus block must pin the prose's named top
+    pick to rank 1 (with an editors_pick marker); review score orders the rest."""
+    blog_json, state = _prose_pick_state()
+    fake_service = MagicMock()
+    fake_service.generate_compose = AsyncMock(return_value=blog_json)
+
+    with patch("app.services.model_service.model_service", fake_service):
+        result = await product_compose(state)
+
+    consensus_blocks = [b for b in result.get("ui_blocks", []) if b.get("type") == "review_consensus"]
+    assert consensus_blocks, "expected a review_consensus block"
+    products = consensus_blocks[0]["data"]["products"]
+
+    assert products[0]["name"] == "Shark AI Ultra", (
+        f"prose top pick must rank #1 in consensus, got: {[p['name'] for p in products]}"
+    )
+    assert products[0]["rank"] == 1
+    assert products[0].get("editors_pick") is True
+    # The review-score leader is still present, just not #1
+    assert products[1]["name"] == "Roomba j7+"
+    assert products[1]["rank"] == 2
+    assert not products[1].get("editors_pick")
+
+
+@pytest.mark.asyncio
+async def test_first_card_is_prose_top_pick():
+    """Card #1 carries the "Top pick · for you" label — it must be the product
+    the prose names, not whatever order search returned."""
+    blog_json, state = _prose_pick_state()
+    fake_service = MagicMock()
+    fake_service.generate_compose = AsyncMock(return_value=blog_json)
+
+    with patch("app.services.model_service.model_service", fake_service):
+        result = await product_compose(state)
+
+    review_cards = [b for b in result.get("ui_blocks", []) if b.get("type") == "product_review"]
+    card_names = [c["data"]["product_name"] for c in review_cards]
+    assert card_names and card_names[0] == "Shark AI Ultra", (
+        f"first card must be the prose top pick, got order: {card_names}"
+    )
+    assert review_cards[0]["data"]["rank"] == 1
+    # Both products still get cards
+    assert "Roomba j7+" in card_names
+
+
+@pytest.mark.asyncio
+async def test_consensus_unchanged_when_prose_pick_matches_review_leader():
+    """When the prose agrees with the review-score #1 (the common case), the
+    order is untouched and the leader gets the editors_pick marker."""
+    import json as _json
+    blog_json, state = _prose_pick_state()
+    # Prose now picks the same product the review score ranks #1
+    agree_json = _json.loads(blog_json)
+    agree_json["top_pick"] = "Roomba j7+"
+    fake_service = MagicMock()
+    fake_service.generate_compose = AsyncMock(return_value=_json.dumps(agree_json))
+
+    with patch("app.services.model_service.model_service", fake_service):
+        result = await product_compose(state)
+
+    consensus_blocks = [b for b in result.get("ui_blocks", []) if b.get("type") == "review_consensus"]
+    assert consensus_blocks
+    products = consensus_blocks[0]["data"]["products"]
+    assert products[0]["name"] == "Roomba j7+"
+    assert products[0].get("editors_pick") is True
+    assert products[1]["name"] == "Shark AI Ultra"
+
+
+@pytest.mark.asyncio
+async def test_consensus_order_intact_when_blog_has_no_top_pick():
+    """Robustness: if the blog JSON omits top_pick (older prompt cached, JSON
+    parse failure), the consensus block keeps pure review-score order with no
+    editors_pick markers — never crash, never mis-pin."""
+    import json as _json
+    blog_json, state = _prose_pick_state()
+    no_pick = _json.loads(blog_json)
+    del no_pick["top_pick"]
+    fake_service = MagicMock()
+    fake_service.generate_compose = AsyncMock(return_value=_json.dumps(no_pick))
+
+    with patch("app.services.model_service.model_service", fake_service):
+        result = await product_compose(state)
+
+    consensus_blocks = [b for b in result.get("ui_blocks", []) if b.get("type") == "review_consensus"]
+    assert consensus_blocks
+    products = consensus_blocks[0]["data"]["products"]
+    assert products[0]["name"] == "Roomba j7+"  # review-score order preserved
+    assert all(not p.get("editors_pick") for p in products)
