@@ -83,7 +83,8 @@ export default function CategorySidebar({ isOpen = true, onClose }: CategorySide
         {/* Close button (mobile) */}
         <button
           onClick={onClose}
-          className="lg:hidden absolute top-3 right-3 p-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] z-[70]"
+          aria-label="Close categories"
+          className="lg:hidden absolute top-1 right-1 min-w-[40px] min-h-[40px] flex items-center justify-center rounded-lg text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] z-[70]"
         >
           <X size={16} strokeWidth={1.5} />
         </button>

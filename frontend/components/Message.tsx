@@ -72,11 +72,11 @@ function trackSuggestionClick(suggestion: NextSuggestion, messageId: string, ind
 // After submit the whole card locks (QA Round 4 F0b — feedback + no duplicates).
 
 const CHIP_SELECTED =
-  'inline-flex items-center gap-2 rounded-[12px] border border-[var(--terra)] bg-[var(--terra)] transition-all px-3.5 py-2 text-[14px] font-medium text-white'
+  'inline-flex min-h-[40px] items-center gap-2 rounded-[12px] border border-[var(--terra)] bg-[var(--terra)] transition-all px-3.5 py-2 text-[14px] font-medium text-white'
 const CHIP_LOCKED =
-  'inline-flex items-center gap-2 rounded-[12px] border border-[var(--line-2)] bg-[var(--paper-hi)] transition-all px-3.5 py-2 text-[14px] font-medium text-[var(--ink-3)] opacity-60'
+  'inline-flex min-h-[40px] items-center gap-2 rounded-[12px] border border-[var(--line-2)] bg-[var(--paper-hi)] transition-all px-3.5 py-2 text-[14px] font-medium text-[var(--ink-3)] opacity-60'
 const CHIP_IDLE =
-  'inline-flex items-center gap-2 rounded-[12px] border border-[var(--line-2)] bg-[var(--paper-hi)] hover:border-[var(--terra)] hover:bg-[var(--terra-soft)] transition-all px-3.5 py-2 text-[14px] font-medium text-[var(--ink)]'
+  'inline-flex min-h-[40px] items-center gap-2 rounded-[12px] border border-[var(--line-2)] bg-[var(--paper-hi)] hover:border-[var(--terra)] hover:bg-[var(--terra-soft)] transition-all px-3.5 py-2 text-[14px] font-medium text-[var(--ink)]'
 
 /** One question's chip row. Fully controlled — selection lives in ClarifierCard. */
 function ClarifierQuestionGroup({
@@ -286,7 +286,7 @@ function ClarifierCard({
                 onSubmit('Just show me the best overall')
               }}
               data-testid="clarifier-skip-all"
-              className="inline-flex items-center gap-1.5 text-[13px] font-medium text-[var(--ink-2)] hover:text-[var(--terra)] transition-colors"
+              className="inline-flex min-h-[40px] items-center gap-1.5 text-[13px] font-medium text-[var(--ink-2)] hover:text-[var(--terra)] transition-colors"
             >
               <span className="underline underline-offset-4 decoration-[var(--line-2)]">
                 Just show me the best overall
@@ -413,7 +413,7 @@ export default function Message({ message, isLast = false }: MessageProps) {
               // Suggestion click: show as subtle pill
               <div className="w-full flex justify-end">
                 <div className="text-xs sm:text-sm py-2 px-4 rounded-full border border-[var(--border)] bg-[var(--surface)] text-[var(--text-secondary)]">
-                  <span className="opacity-60">{SUGGESTION_CLICK_PREFIX}</span>{' '}
+                  <span style={{ color: 'var(--ink-2)' }}>{SUGGESTION_CLICK_PREFIX}</span>{' '}
                   <span className="font-medium text-[var(--text)]">
                     {message.content.startsWith(SUGGESTION_CLICK_PREFIX)
                       ? message.content.slice(SUGGESTION_CLICK_PREFIX.length).trim()

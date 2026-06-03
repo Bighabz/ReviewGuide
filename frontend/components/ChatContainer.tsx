@@ -866,6 +866,9 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
       {/* Messages */}
       {messages.length > 0 && (
         <>
+          {/* axe page-has-heading-one: the welcome h1 unmounts once a conversation
+              starts, so the conversation view carries a visually-hidden h1. */}
+          <h1 className="sr-only">ReviewGuide chat results</h1>
           <MessageList messages={messages} isStreaming={isStreaming} />
 
           {/* RFC §2.2: Block skeleton — shown while a tool is running, before artifact arrives */}
