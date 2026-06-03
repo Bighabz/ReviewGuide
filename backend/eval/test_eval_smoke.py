@@ -14,7 +14,12 @@ from eval.fixtures import GOLDEN_CASES, CASES_BY_ID
 from eval.judge import JUDGE_DIMENSIONS, build_judge_messages, parse_judge_response, mean_judge_score
 from eval.voice_eval import (
     BLOG_ROLE,
+    CONSOLIDATED_MAX_TOKENS,
+    CONSOLIDATED_ROLE,
+    GENERATION_MAX_TOKENS,
     assemble_messages,
+    compute_cost,
+    count_case_products,
     deterministic_checks,
     parse_output,
 )
@@ -193,6 +198,125 @@ def test_judge_scores_claim_support_against_evidence():
     scores = parse_judge_response(fake_response)
     assert scores is not None
     assert "claim_support" in scores
+
+
+# ---------------------------------------------------------------------------
+# Consolidated single-call mode (Tier 3 prototype)
+# ---------------------------------------------------------------------------
+
+def test_consolidated_role_extends_blog_role_without_modifying_it():
+    """CONSOLIDATED_ROLE must carry the new schema fields + rules sections, and
+    must be a real extension of BLOG_ROLE (the .replace() actually fired) —
+    while BLOG_ROLE itself stays untouched (the prod-sync pin covers that)."""
+    # New fields are in the consolidated schema...
+    assert '"consensus"' in CONSOLIDATED_ROLE
+    assert '"descriptions"' in CONSOLIDATED_ROLE
+    assert "CONSENSUS RULES" in CONSOLIDATED_ROLE
+    assert "DESCRIPTIONS RULES" in CONSOLIDATED_ROLE
+    # ...but NOT in the production blog role.
+    assert '"consensus"' not in BLOG_ROLE
+    assert "CONSENSUS RULES" not in BLOG_ROLE
+    # The schema tail replacement fired (top_pick is followed by the new fields,
+    # not by the closing brace).
+    assert '"top_pick": "<the EXACT product name of your #1 pick, copied verbatim from the product list — the same product your body names first>",' in CONSOLIDATED_ROLE
+    # Everything load-bearing from BLOG_ROLE survives in the consolidated role.
+    for section in ["RANK AND COMMIT", "BODY RULES", "FOLLOW-UP RULES", "TRANSITIONAL RULES"]:
+        assert section in CONSOLIDATED_ROLE
+    # Bigger output budget.
+    assert CONSOLIDATED_MAX_TOKENS > GENERATION_MAX_TOKENS
+
+
+def test_consolidated_assembly_uses_consolidated_role():
+    case = CASES_BY_ID["earbuds_under_100"]
+    normal = assemble_messages(case)
+    consolidated = assemble_messages(case, consolidated=True)
+    assert "CONSENSUS RULES" not in normal[0]["content"]
+    assert "CONSENSUS RULES" in consolidated[0]["content"]
+    # User payload identical in both modes — only the role changes.
+    assert normal[1]["content"] == consolidated[1]["content"]
+
+
+def test_count_case_products():
+    assert count_case_products(CASES_BY_ID["earbuds_under_100"]) == 4
+    assert count_case_products(CASES_BY_ID["xm5_vs_qc_looks"]) == 2
+
+
+KNOWN_GOOD_CONSOLIDATED_OUTPUT = json.dumps({
+    **json.loads(KNOWN_GOOD_OUTPUT),
+    "top_pick": "Soundcore Liberty 4 NC",
+    "consensus": {
+        "Soundcore Liberty 4 NC": "Reviewers consistently praise the ANC and battery life. The case is chunky. Best for commuters who want flagship features under $100.",
+        "JLab JBuds ANC 3": "Praised for punchy bass and gym fit. ANC lets voices through. Best for budget gym-goers.",
+        "Nothing Ear (a)": "Praised for design and clean sound. Over the $100 budget. Best for design-conscious buyers.",
+    },
+    "descriptions": {
+        "Soundcore Liberty 4 NC": "Effective ANC, 50-hour battery, and real app EQ make it the standout commuter pick under $100.",
+        "JLab JBuds ANC 3": "Bass-forward earbuds built for workouts, with decent ANC at a sixty-dollar price.",
+        "Nothing Ear (a)": "Transparent design and balanced sound for buyers who care how their earbuds look.",
+        "EarFun Air Pro 4": "aptX Lossless and multipoint connectivity at an unexpectedly low price for spec-focused listeners.",
+    },
+})
+
+
+def test_consolidated_checks_pass_on_complete_output():
+    parsed = parse_output(KNOWN_GOOD_CONSOLIDATED_OUTPUT)
+    checks = deterministic_checks(parsed, consolidated=True, n_products=4)
+
+    assert checks.json_ok
+    assert not checks.missing_fields
+    assert checks.consensus_count == 3
+    assert checks.consensus_complete is True
+    assert checks.descriptions_count == 4
+    assert checks.descriptions_complete is True
+
+
+def test_consolidated_checks_flag_missing_and_incomplete_fields():
+    # Blog-only output run through consolidated checks → consensus/descriptions missing.
+    parsed = parse_output(KNOWN_GOOD_OUTPUT)
+    checks = deterministic_checks(parsed, consolidated=True, n_products=4)
+    assert "consensus" in checks.missing_fields
+    assert "descriptions" in checks.missing_fields
+    assert checks.consensus_complete is False
+    assert checks.descriptions_complete is False
+
+    # Output with too few entries → incomplete, not missing.
+    partial = json.loads(KNOWN_GOOD_CONSOLIDATED_OUTPUT)
+    partial["consensus"] = {"Soundcore Liberty 4 NC": "Good."}
+    partial["descriptions"] = {"Soundcore Liberty 4 NC": "Good earbuds."}
+    checks = deterministic_checks(partial, consolidated=True, n_products=4)
+    assert not checks.missing_fields
+    assert checks.consensus_complete is False
+    assert checks.descriptions_complete is False
+
+
+def test_consolidated_checks_do_not_affect_normal_mode():
+    parsed = parse_output(KNOWN_GOOD_OUTPUT)
+    checks = deterministic_checks(parsed)
+    assert checks.consensus_count is None
+    assert checks.consensus_complete is None
+    assert checks.descriptions_count is None
+    assert checks.descriptions_complete is None
+
+
+def test_consolidated_checks_catch_banned_phrases_in_new_fields():
+    bad = json.loads(KNOWN_GOOD_CONSOLIDATED_OUTPUT)
+    bad["consensus"]["Soundcore Liberty 4 NC"] = "Great choice! Reviewers love it."
+    checks = deterministic_checks(bad, consolidated=True, n_products=4)
+    assert "Great choice!" in checks.voice_violations
+
+
+# ---------------------------------------------------------------------------
+# Cost computation
+# ---------------------------------------------------------------------------
+
+def test_compute_cost():
+    pricing = {"test/model": {"prompt": 0.000003, "completion": 0.000015}}
+    # 1000 prompt + 500 completion tokens → 0.003 + 0.0075 = 0.0105
+    assert abs(compute_cost(pricing, "test/model", 1000, 500) - 0.0105) < 1e-9
+    # Unknown model or missing usage → None, not a crash.
+    assert compute_cost(pricing, "other/model", 1000, 500) is None
+    assert compute_cost(pricing, "test/model", None, 500) is None
+    assert compute_cost({}, "test/model", 1000, 500) is None
 
 
 def test_judge_response_parsing_round_trip():

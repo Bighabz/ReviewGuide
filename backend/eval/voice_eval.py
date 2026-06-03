@@ -170,10 +170,60 @@ TRANSITIONAL RULES (transitional_reasoning field):
 
 
 # ---------------------------------------------------------------------------
+# Consolidated single-call mode (Tier 3 prototype)
+# ---------------------------------------------------------------------------
+# Production today fans out one blog_article call + up to 3 review-consensus
+# calls + one descriptions call per response. The consolidation plan (Tier 3a)
+# folds all of that into the blog call's JSON schema. This mode measures
+# whether a candidate model can carry that full single-call workload — bigger
+# output, more fields — without the prose quality dropping.
+#
+# BLOG_ROLE itself is never modified: it stays byte-identical to production
+# (test_blog_role_in_sync_with_production). The consolidated role is BLOG_ROLE
+# with an extended OUTPUT FORMAT plus two extra rules sections that mirror the
+# production consensus_role and desc_system prompts in product_compose.py.
+
+_BLOG_SCHEMA_TAIL = '''  "top_pick": "<the EXACT product name of your #1 pick, copied verbatim from the product list — the same product your body names first>"
+}'''
+
+_CONSOLIDATED_SCHEMA_TAIL = '''  "top_pick": "<the EXACT product name of your #1 pick, copied verbatim from the product list — the same product your body names first>",
+  "consensus": {"<product name>": "<3-5 sentence review consensus summary>", "...": "..."},
+  "descriptions": {"<product name>": "<15-25 word factual description>", "...": "..."}
+}'''
+
+_CONSOLIDATED_EXTRA_RULES = """
+
+CONSENSUS RULES (consensus field):
+- One entry for EACH of the top 3 products in your ranking (all products if fewer than 3)
+- Keys are the EXACT product names copied verbatim from the product list
+- Each value: a 3-5 sentence summary covering (1) what reviewers consistently praise,
+  (2) any notable criticisms or caveats, and (3) who this product is best suited for,
+  ending with a sentence describing the ideal buyer
+- Do NOT describe your process or mention how many sources were searched
+
+DESCRIPTIONS RULES (descriptions field):
+- One entry for EVERY product in the product list
+- Keys are the EXACT product names copied verbatim from the product list
+- Each value: a factual 15-25 word description — key features, best use case, who it's ideal for
+- NEVER invent or assume personal details; write objectively about the product's strengths
+- Vary the descriptions — don't repeat the same sentence pattern"""
+
+CONSOLIDATED_ROLE = BLOG_ROLE.replace(_BLOG_SCHEMA_TAIL, _CONSOLIDATED_SCHEMA_TAIL) + _CONSOLIDATED_EXTRA_RULES
+
+# Output budget for the consolidated call (handoff: blog 700 → ~1400 consolidated).
+CONSOLIDATED_MAX_TOKENS = 1400
+
+
+def count_case_products(case: GoldenCase) -> int:
+    """Number of products in a case's blog_data payload."""
+    return sum(1 for line in case.blog_data.splitlines() if line.startswith("Product:"))
+
+
+# ---------------------------------------------------------------------------
 # Prompt assembly (faithful to production)
 # ---------------------------------------------------------------------------
 
-def assemble_messages(case: GoldenCase, ungrounded: bool = False) -> List[dict]:
+def assemble_messages(case: GoldenCase, ungrounded: bool = False, consolidated: bool = False) -> List[dict]:
     """Build the (system, user) messages production sends for blog_article.
 
     When ``ungrounded`` is True, the product/review evidence is stripped from the
@@ -181,12 +231,16 @@ def assemble_messages(case: GoldenCase, ungrounded: bool = False) -> List[dict]:
     rely on parametric knowledge. The judge still scores claim_support against the
     full evidence (case.blog_data), so the grounded-vs-ungrounded delta on that
     dimension measures how much real evidence improves claim accuracy (A1's premise).
+
+    When ``consolidated`` is True, the role prompt is the Tier-3 single-call
+    prototype (blog + consensus + descriptions in one response).
     """
     user_content = case.blog_data
     if ungrounded:
         user_content = case.blog_data.splitlines()[0]  # just the 'User asked: "..."' line
+    role = CONSOLIDATED_ROLE if consolidated else BLOG_ROLE
     return [
-        {"role": "system", "content": build_system_prompt(role_prompt=BLOG_ROLE, kind="response")},
+        {"role": "system", "content": build_system_prompt(role_prompt=role, kind="response")},
         {"role": "user", "content": user_content},
     ]
 
@@ -206,6 +260,11 @@ class DeterministicResult:
     generic_follow_up: Optional[str] = None
     body_word_count: int = 0
     over_word_cap: bool = False
+    # Consolidated-mode structure checks (None = mode not active)
+    consensus_count: Optional[int] = None
+    consensus_complete: Optional[bool] = None
+    descriptions_count: Optional[int] = None
+    descriptions_complete: Optional[bool] = None
 
 
 def parse_output(raw_text: str) -> Optional[dict]:
@@ -226,12 +285,22 @@ def parse_output(raw_text: str) -> Optional[dict]:
     return parsed if isinstance(parsed, dict) else None
 
 
-def deterministic_checks(parsed: Optional[dict]) -> DeterministicResult:
-    """Run the production compliance checks against one parsed output."""
-    if parsed is None:
-        return DeterministicResult(json_ok=False, missing_fields=list(REQUIRED_FIELDS))
+def deterministic_checks(
+    parsed: Optional[dict],
+    consolidated: bool = False,
+    n_products: int = 0,
+) -> DeterministicResult:
+    """Run the production compliance checks against one parsed output.
 
-    missing = [f for f in REQUIRED_FIELDS if f not in parsed]
+    In consolidated mode the output must additionally carry well-formed
+    ``consensus`` (one entry per top-3 product) and ``descriptions`` (one entry
+    per product) objects — the structural contract Tier 3a will rely on.
+    """
+    required = list(REQUIRED_FIELDS) + (["consensus", "descriptions"] if consolidated else [])
+    if parsed is None:
+        return DeterministicResult(json_ok=False, missing_fields=required)
+
+    missing = [f for f in required if f not in parsed]
     body = parsed.get("body") or ""
     follow_up = parsed.get("follow_up_question") or ""
     transitional = parsed.get("transitional_reasoning") or ""
@@ -242,7 +311,7 @@ def deterministic_checks(parsed: Optional[dict]) -> DeterministicResult:
 
     word_count = len(body.split())
 
-    return DeterministicResult(
+    result = DeterministicResult(
         json_ok=True,
         missing_fields=missing,
         voice_violations=violations,
@@ -250,6 +319,29 @@ def deterministic_checks(parsed: Optional[dict]) -> DeterministicResult:
         body_word_count=word_count,
         over_word_cap=word_count > BODY_WORD_CAP,
     )
+
+    if consolidated:
+        consensus = parsed.get("consensus")
+        descriptions = parsed.get("descriptions")
+
+        consensus_entries = (
+            [v for v in consensus.values() if isinstance(v, str) and v.strip()]
+            if isinstance(consensus, dict) else []
+        )
+        description_entries = (
+            [v for v in descriptions.values() if isinstance(v, str) and v.strip()]
+            if isinstance(descriptions, dict) else []
+        )
+        # Voice compliance applies to the new prose surfaces too.
+        for text in consensus_entries + description_entries:
+            result.voice_violations += check_voice_compliance(text)
+
+        result.consensus_count = len(consensus_entries)
+        result.consensus_complete = len(consensus_entries) >= min(3, n_products) if n_products else bool(consensus_entries)
+        result.descriptions_count = len(description_entries)
+        result.descriptions_complete = len(description_entries) >= n_products if n_products else bool(description_entries)
+
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -268,6 +360,10 @@ class CaseResult:
     checks: DeterministicResult = field(default_factory=lambda: DeterministicResult(json_ok=False))
     judge_scores: Optional[dict] = None
     judge_error: Optional[str] = None
+    # Token usage + cost (generation call only; judge overhead is not the model's cost)
+    prompt_tokens: Optional[int] = None
+    completion_tokens: Optional[int] = None
+    cost_usd: Optional[float] = None
 
     @property
     def mean_judge(self) -> Optional[float]:
@@ -281,12 +377,14 @@ def make_client(api_key: str):
     return AsyncOpenAI(base_url=OPENROUTER_BASE_URL, api_key=api_key)
 
 
-async def validate_models(models: List[str], api_key: str) -> List[str]:
-    """Check candidate slugs against OpenRouter's model list.
+async def validate_models(models: List[str], api_key: str) -> tuple:
+    """Check candidate slugs against OpenRouter's model list and fetch pricing.
 
-    Unknown slugs are reported and dropped. If the listing call itself fails
-    (network policy, transient error) all slugs are kept and a warning printed
-    — validation is best-effort, not a gate.
+    Returns (valid_models, pricing) where pricing maps slug ->
+    {"prompt": $/token, "completion": $/token}. Unknown slugs are reported and
+    dropped. If the listing call itself fails (network policy, transient error)
+    all slugs are kept, pricing comes back empty, and a warning is printed —
+    validation is best-effort, not a gate.
     """
     try:
         import httpx
@@ -297,46 +395,81 @@ async def validate_models(models: List[str], api_key: str) -> List[str]:
                 headers={"Authorization": f"Bearer {api_key}"},
             )
             resp.raise_for_status()
-            available = {m["id"] for m in resp.json().get("data", [])}
+            listing = {m["id"]: m for m in resp.json().get("data", [])}
     except Exception as exc:  # noqa: BLE001 — best-effort validation
         print(f"[warn] Could not validate model slugs against OpenRouter ({type(exc).__name__}); proceeding with all.")
-        return models
+        return models, {}
 
-    valid = [m for m in models if m in available]
+    valid = [m for m in models if m in listing]
     for m in models:
-        if m not in available:
+        if m not in listing:
             print(f"[warn] Model slug not found on OpenRouter, skipping: {m}")
-    return valid
+
+    pricing = {}
+    for m in valid:
+        p = listing[m].get("pricing") or {}
+        try:
+            pricing[m] = {
+                "prompt": float(p.get("prompt", 0)),
+                "completion": float(p.get("completion", 0)),
+            }
+        except (TypeError, ValueError):
+            pass  # pricing missing/non-numeric → cost shows as — for this model
+    return valid, pricing
 
 
-async def call_chat(client, model: str, messages: List[dict], json_mode: bool = True) -> str:
-    """One chat completion with production parameters."""
+def compute_cost(pricing: dict, model: str, prompt_tokens: Optional[int], completion_tokens: Optional[int]) -> Optional[float]:
+    """Dollar cost of one generation, from OpenRouter per-token pricing."""
+    rates = pricing.get(model)
+    if not rates or prompt_tokens is None or completion_tokens is None:
+        return None
+    return prompt_tokens * rates["prompt"] + completion_tokens * rates["completion"]
+
+
+async def call_chat(
+    client,
+    model: str,
+    messages: List[dict],
+    json_mode: bool = True,
+    max_tokens: int = GENERATION_MAX_TOKENS,
+) -> tuple:
+    """One chat completion with production parameters. Returns (text, usage)."""
     kwargs = dict(
         model=model,
         messages=messages,
         temperature=GENERATION_TEMPERATURE,
-        max_tokens=GENERATION_MAX_TOKENS,
+        max_tokens=max_tokens,
     )
     if json_mode:
         kwargs["response_format"] = {"type": "json_object"}
     completion = await client.chat.completions.create(**kwargs)
-    return completion.choices[0].message.content or ""
+    return completion.choices[0].message.content or "", getattr(completion, "usage", None)
 
 
-async def generate_one(client, model: str, case: GoldenCase, sem: asyncio.Semaphore, ungrounded: bool = False) -> CaseResult:
+async def generate_one(
+    client,
+    model: str,
+    case: GoldenCase,
+    sem: asyncio.Semaphore,
+    ungrounded: bool = False,
+    consolidated: bool = False,
+    max_tokens: int = GENERATION_MAX_TOKENS,
+    pricing: Optional[dict] = None,
+) -> CaseResult:
     """Generate one (model × case) output and run deterministic checks."""
     result = CaseResult(model=model, case_id=case.id)
-    messages = assemble_messages(case, ungrounded=ungrounded)
+    messages = assemble_messages(case, ungrounded=ungrounded, consolidated=consolidated)
+    usage = None
 
     async with sem:
         start = time.monotonic()
         try:
-            result.raw_text = await call_chat(client, model, messages, json_mode=True)
+            result.raw_text, usage = await call_chat(client, model, messages, json_mode=True, max_tokens=max_tokens)
         except Exception as first_exc:  # noqa: BLE001
             # Some models reject response_format; retry once without it so the
             # prose can still be compared (the deviation is recorded).
             try:
-                result.raw_text = await call_chat(client, model, messages, json_mode=False)
+                result.raw_text, usage = await call_chat(client, model, messages, json_mode=False, max_tokens=max_tokens)
                 result.notes.append("retried without response_format (model rejected json_object mode)")
             except Exception as second_exc:  # noqa: BLE001
                 result.error = f"{type(first_exc).__name__}: {first_exc} | retry: {type(second_exc).__name__}: {second_exc}"
@@ -344,8 +477,13 @@ async def generate_one(client, model: str, case: GoldenCase, sem: asyncio.Semaph
                 return result
         result.latency_s = time.monotonic() - start
 
+    if usage is not None:
+        result.prompt_tokens = getattr(usage, "prompt_tokens", None)
+        result.completion_tokens = getattr(usage, "completion_tokens", None)
+        result.cost_usd = compute_cost(pricing or {}, model, result.prompt_tokens, result.completion_tokens)
+
     result.parsed = parse_output(result.raw_text)
-    result.checks = deterministic_checks(result.parsed)
+    result.checks = deterministic_checks(result.parsed, consolidated=consolidated, n_products=count_case_products(case))
     return result
 
 
@@ -358,7 +496,7 @@ async def judge_one(client, judge_model: str, case: GoldenCase, result: CaseResu
     messages = build_judge_messages(case, result.parsed)
     async with sem:
         try:
-            raw = await call_chat(client, judge_model, messages, json_mode=True)
+            raw, _ = await call_chat(client, judge_model, messages, json_mode=True)
         except Exception as exc:  # noqa: BLE001
             result.judge_error = f"{type(exc).__name__}: {exc}"
             return
@@ -384,6 +522,8 @@ def render_report(
     cases: List[GoldenCase],
     judge_model: Optional[str],
     timestamp: str,
+    consolidated: bool = False,
+    max_tokens: int = GENERATION_MAX_TOKENS,
 ) -> str:
     """Render the ranked markdown report."""
     by_model = {m: [r for r in results if r.model == m] for m in models}
@@ -393,6 +533,8 @@ def render_report(
     for model, rs in by_model.items():
         judged = [r.mean_judge for r in rs if r.mean_judge is not None]
         latencies = [r.latency_s for r in rs if not r.error]
+        costs = [r.cost_usd for r in rs if r.cost_usd is not None]
+        out_tokens = [r.completion_tokens for r in rs if r.completion_tokens is not None]
         rows.append({
             "model": model,
             "mean_judge": statistics.mean(judged) if judged else None,
@@ -402,29 +544,46 @@ def render_report(
             "over_word_cap": sum(1 for r in rs if r.checks.over_word_cap),
             "errors": sum(1 for r in rs if r.error),
             "p50_latency": statistics.median(latencies) if latencies else None,
+            "mean_cost": statistics.mean(costs) if costs else None,
+            "mean_out_tokens": statistics.mean(out_tokens) if out_tokens else None,
+            "consensus_incomplete": sum(1 for r in rs if r.checks.consensus_complete is False),
+            "descriptions_incomplete": sum(1 for r in rs if r.checks.descriptions_complete is False),
         })
     # Sort: judged models by score desc, unjudged last
     rows.sort(key=lambda r: (r["mean_judge"] is None, -(r["mean_judge"] or 0)))
 
+    mode_str = "CONSOLIDATED single-call (blog + consensus + descriptions)" if consolidated else "blog-only (production today)"
     lines = [
         f"# Voice bake-off — {timestamp}",
         "",
+        f"- **Mode:** {mode_str}",
         f"- **Models:** {', '.join(models)}",
         f"- **Cases:** {', '.join(c.id for c in cases)}",
         f"- **Judge:** {judge_model or 'disabled (--no-judge)'}",
-        f"- **Generation params:** temperature={GENERATION_TEMPERATURE}, max_tokens={GENERATION_MAX_TOKENS}, json_object mode",
+        f"- **Generation params:** temperature={GENERATION_TEMPERATURE}, max_tokens={max_tokens}, json_object mode",
         "",
         "## Ranked summary",
         "",
-        "| Rank | Model | Mean judge (1-5) | Voice violations | Generic follow-ups | JSON failures | Over word cap | Errors | p50 latency (s) |",
-        "|---|---|---|---|---|---|---|---|---|",
     ]
+    header = (
+        "| Rank | Model | Mean judge (1-5) | Voice violations | Generic follow-ups | JSON failures "
+        "| Over word cap | Errors | p50 latency (s) | Mean cost ($/resp) | Mean output tokens |"
+    )
+    separator = "|---|---|---|---|---|---|---|---|---|---|---|"
+    if consolidated:
+        header += " Incomplete consensus | Incomplete descriptions |"
+        separator += "---|---|"
+    lines += [header, separator]
     for i, row in enumerate(rows, 1):
-        lines.append(
+        cells = (
             f"| {i} | {row['model']} | {_fmt(row['mean_judge'])} | {row['violations']} | "
             f"{row['generic_follow_ups']} | {row['json_failures']} | {row['over_word_cap']} | "
-            f"{row['errors']} | {_fmt(row['p50_latency'])} |"
+            f"{row['errors']} | {_fmt(row['p50_latency'])} | {_fmt(row['mean_cost'], 5)} | "
+            f"{_fmt(row['mean_out_tokens'], 0)} |"
         )
+        if consolidated:
+            cells += f" {row['consensus_incomplete']} | {row['descriptions_incomplete']} |"
+        lines.append(cells)
 
     # Per-dimension breakdown (only if judging ran)
     if any(r.judge_scores for r in results):
@@ -471,6 +630,20 @@ def render_report(
             follow_up = result.parsed.get("follow_up_question") or "(no follow-up)"
             lines += ["", f"**Follow-up:** {follow_up}"]
 
+            # Consolidated-mode extras: consensus + descriptions, collapsed.
+            consensus = result.parsed.get("consensus")
+            descriptions = result.parsed.get("descriptions")
+            if isinstance(consensus, dict) and consensus:
+                lines += ["", "<details><summary>Consensus entries</summary>", ""]
+                for pname, text in consensus.items():
+                    lines.append(f"- **{pname}**: {text}")
+                lines += ["", "</details>"]
+            if isinstance(descriptions, dict) and descriptions:
+                lines += ["", "<details><summary>Descriptions</summary>", ""]
+                for pname, text in descriptions.items():
+                    lines.append(f"- **{pname}**: {text}")
+                lines += ["", "</details>"]
+
             flags = []
             if result.checks.voice_violations:
                 flags.append(f"banned phrases: {result.checks.voice_violations}")
@@ -480,6 +653,10 @@ def render_report(
                 flags.append(f"missing fields: {result.checks.missing_fields}")
             if result.checks.over_word_cap:
                 flags.append(f"body over {BODY_WORD_CAP} words ({result.checks.body_word_count})")
+            if result.checks.consensus_complete is False:
+                flags.append(f"incomplete consensus ({result.checks.consensus_count} entries)")
+            if result.checks.descriptions_complete is False:
+                flags.append(f"incomplete descriptions ({result.checks.descriptions_count} entries)")
             if result.notes:
                 flags += result.notes
             if flags:
@@ -500,6 +677,8 @@ def write_csv(results: List[CaseResult], path: Path) -> None:
     fieldnames = [
         "model", "case_id", "json_ok", "missing_fields", "voice_violations",
         "generic_follow_up", "body_word_count", "over_word_cap", "latency_s",
+        "prompt_tokens", "completion_tokens", "cost_usd",
+        "consensus_count", "descriptions_count",
         "error", "notes", *JUDGE_DIMENSIONS, "mean_judge",
     ]
     with path.open("w", newline="", encoding="utf-8") as f:
@@ -516,6 +695,11 @@ def write_csv(results: List[CaseResult], path: Path) -> None:
                 "body_word_count": r.checks.body_word_count,
                 "over_word_cap": r.checks.over_word_cap,
                 "latency_s": round(r.latency_s, 2),
+                "prompt_tokens": r.prompt_tokens if r.prompt_tokens is not None else "",
+                "completion_tokens": r.completion_tokens if r.completion_tokens is not None else "",
+                "cost_usd": f"{r.cost_usd:.6f}" if r.cost_usd is not None else "",
+                "consensus_count": r.checks.consensus_count if r.checks.consensus_count is not None else "",
+                "descriptions_count": r.checks.descriptions_count if r.checks.descriptions_count is not None else "",
                 "error": r.error or "",
                 "notes": ";".join(r.notes),
                 "mean_judge": _fmt(r.mean_judge) if r.mean_judge is not None else "",
@@ -539,14 +723,16 @@ def estimate_and_print_cost(n_models: int, n_cases: int, with_judge: bool) -> No
     print("Estimated spend: well under $1 for the default matrix (worst case ~$0.50 if every call ran at Sonnet pricing).")
 
 
-def dry_run(models: List[str], cases: List[GoldenCase], with_judge: bool) -> None:
+def dry_run(models: List[str], cases: List[GoldenCase], with_judge: bool, consolidated: bool = False) -> None:
     """Assemble every prompt and print a summary. Zero network calls, no key needed."""
     print("=== DRY RUN — no API calls ===\n")
+    if consolidated:
+        print("Mode: CONSOLIDATED single-call (blog + consensus + descriptions)\n")
     print(f"Models ({len(models)}): {', '.join(models)}")
     print(f"Cases ({len(cases)}): {', '.join(c.id for c in cases)}\n")
 
     for case in cases:
-        messages = assemble_messages(case)
+        messages = assemble_messages(case, consolidated=consolidated)
         system_len = len(messages[0]["content"])
         user_len = len(messages[1]["content"])
         print(f"--- {case.id} ---")
@@ -597,9 +783,11 @@ async def run(args: argparse.Namespace) -> int:
         cases = list(GOLDEN_CASES)
 
     with_judge = not args.no_judge
+    consolidated = bool(getattr(args, "consolidated", False))
+    max_tokens = args.max_tokens or (CONSOLIDATED_MAX_TOKENS if consolidated else GENERATION_MAX_TOKENS)
 
     if args.dry_run:
-        dry_run(models, cases, with_judge)
+        dry_run(models, cases, with_judge, consolidated=consolidated)
         return 0
 
     api_key = load_api_key()
@@ -608,18 +796,29 @@ async def run(args: argparse.Namespace) -> int:
         return 1
 
     client = make_client(api_key)
-    models = await validate_models(models, api_key)
+    models, pricing = await validate_models(models, api_key)
     if not models:
         print("ERROR: no valid models to run.")
         return 1
 
     estimate_and_print_cost(len(models), len(cases), with_judge)
+    if consolidated:
+        print(f"Mode: CONSOLIDATED single-call, max_tokens={max_tokens}")
     print()
 
     sem = asyncio.Semaphore(MAX_CONCURRENCY)
 
     # Generate all (model × case) outputs concurrently.
-    gen_tasks = [generate_one(client, model, case, sem, ungrounded=args.ungrounded) for model in models for case in cases]
+    gen_tasks = [
+        generate_one(
+            client, model, case, sem,
+            ungrounded=args.ungrounded,
+            consolidated=consolidated,
+            max_tokens=max_tokens,
+            pricing=pricing,
+        )
+        for model in models for case in cases
+    ]
     print(f"Generating {len(gen_tasks)} outputs across {len(models)} models...")
     results: List[CaseResult] = list(await asyncio.gather(*gen_tasks))
 
@@ -641,7 +840,10 @@ async def run(args: argparse.Namespace) -> int:
     md_path = RESULTS_DIR / f"{timestamp}.md"
     csv_path = RESULTS_DIR / f"{timestamp}.csv"
 
-    md_path.write_text(render_report(results, models, cases, judge_model, timestamp), encoding="utf-8")
+    md_path.write_text(
+        render_report(results, models, cases, judge_model, timestamp, consolidated=consolidated, max_tokens=max_tokens),
+        encoding="utf-8",
+    )
     write_csv(results, csv_path)
 
     print(f"\nReport: {md_path}")
@@ -668,6 +870,8 @@ def main() -> None:
     parser.add_argument("--no-judge", action="store_true", help="Deterministic checks only, skip the LLM judge")
     parser.add_argument("--dry-run", action="store_true", help="Assemble prompts and estimate cost without any API calls")
     parser.add_argument("--ungrounded", action="store_true", help="Strip product/review evidence from the writer's input (parametric-only) — for the grounded-vs-ungrounded claim_support A/B")
+    parser.add_argument("--consolidated", action="store_true", help="Tier-3 single-call mode: the role also asks for per-product consensus + descriptions (bigger output, default max_tokens 1400)")
+    parser.add_argument("--max-tokens", type=int, default=None, help="Override generation max_tokens (default: 700, or 1400 with --consolidated)")
     args = parser.parse_args()
 
     sys.exit(asyncio.run(run(args)))
