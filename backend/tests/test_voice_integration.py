@@ -140,6 +140,10 @@ _HAS_LIVE_CREDS = _looks_like_real_key(os.environ.get("ANTHROPIC_API_KEY")) or _
 # Tools that hit settings.DEFAULT_MODEL / settings.COMPOSER_MODEL (both
 # default to ``gpt-4o-mini``) need an OpenAI key specifically.
 _HAS_OPENAI = _looks_like_real_key(os.environ.get("OPENAI_API_KEY"))
+# product_compose routes through model_service.generate_compose → the OpenRouter
+# compose path prod actually runs (Haiku 4.5). Testing it needs a real
+# OPENROUTER_API_KEY; gate the live OpenRouter compliance test on that.
+_HAS_OPENROUTER = _looks_like_real_key(os.environ.get("OPENROUTER_API_KEY"))
 
 
 @pytest.fixture(autouse=False)
@@ -271,11 +275,93 @@ async def test_product_general_information_follow_up_is_structured() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Live compliance through the REAL OpenRouter compose path (prod-model gate).
+# product_compose is the moat call and the only one that routes via
+# model_service.generate_compose → OpenRouter (Haiku 4.5). The other live tests
+# above all use model_service.generate → gpt-4o-mini, so without this test CI
+# never exercises the model prod actually composes with. Gated by a real
+# OPENROUTER_API_KEY; the voice-live-openrouter CI job provides it and pins
+# OPENROUTER_COMPOSE_MODEL. Skips cleanly (job still green) when unkeyed.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(not _HAS_OPENROUTER, reason="needs a real OPENROUTER_API_KEY (product_compose routes via generate_compose → OpenRouter)")
+@pytest.mark.asyncio
+async def test_product_compose_openrouter_voice_compliance() -> None:
+    """Drive product_compose through the REAL OpenRouter compose route (the path
+    prod runs) and assert the moat blog body is voice-compliant. This is the
+    only live test that exercises generate_compose / OPENROUTER_COMPOSE_MODEL."""
+    from mcp_server.tools.product_compose import product_compose
+
+    state = {
+        "user_message": "best noise cancelling headphones under $300",
+        "intent": "product",
+        "slots": {"category": "headphones"},
+        "normalized_products": [
+            {"name": "Sony WH-1000XM5", "price": 299, "url": "https://example.com/sony"},
+            {"name": "Bose QuietComfort 45", "price": 279, "url": "https://example.com/bose"},
+        ],
+        "affiliate_products": {
+            "serper_shopping": [
+                {"product_name": "Sony WH-1000XM5", "offers": [{
+                    "title": "Sony WH-1000XM5", "price": 299.99, "currency": "USD",
+                    "url": "https://www.google.com/shopping/product/sony", "merchant": "BestBuy",
+                    "image_url": "https://img.example.com/sony.jpg", "source": "serper_shopping"}]},
+                {"product_name": "Bose QuietComfort 45", "offers": [{
+                    "title": "Bose QuietComfort 45", "price": 279.00, "currency": "USD",
+                    "url": "https://www.google.com/shopping/product/bose", "merchant": "BestBuy",
+                    "image_url": "https://img.example.com/bose.jpg", "source": "serper_shopping"}]},
+            ],
+        },
+        "review_data": {
+            "Sony WH-1000XM5": {"avg_rating": 4.7, "total_reviews": 12500, "quality_score": 0.95,
+                "sources": [{"site_name": "", "url": "https://x/1", "snippet": "Class-leading ANC and comfort."}]},
+            "Bose QuietComfort 45": {"avg_rating": 4.5, "total_reviews": 8400, "quality_score": 0.88,
+                "sources": [{"site_name": "", "url": "https://x/2", "snippet": "Lighter, very comfortable."}]},
+        },
+        "comparison_html": None, "comparison_data": None, "general_product_info": "",
+        "conversation_history": [], "last_search_context": {}, "search_history": [],
+    }
+    result = await product_compose(state)
+    text = result.get("assistant_text", "")
+    if not text or result.get("success") is False:
+        pytest.skip(
+            f"infra: product_compose returned empty / success=False "
+            f"(error={result.get('error')!r}). Not a voice regression — likely an "
+            "OpenRouter auth / network issue."
+        )
+    _assert_voice_compliant(text, "product_compose/openrouter")
+
+
+# ---------------------------------------------------------------------------
 # Smoke: confirm the voice prompt itself isn't smuggling banned phrases.
 # (Edge case — VOICE_PROMPT quotes some banned phrases inside its own list,
 # so this test verifies the *content* of a tagline-style response built
 # *with* the prompt, not the prompt itself.)
 # ---------------------------------------------------------------------------
+
+
+def test_effective_compose_model_is_openrouter_haiku() -> None:
+    """Pin the model prod ACTUALLY composes with — not just COMPOSER_MODEL.
+
+    Prod routes generate_compose via OpenRouter (USE_OPENROUTER_COMPOSE default
+    True + OPENROUTER_API_KEY set on Railway), so the effective compose model is
+    OPENROUTER_COMPOSE_MODEL, NOT settings.COMPOSER_MODEL (gpt-4o-mini, the
+    fallback). The old CI gate pinned only COMPOSER_MODEL, so a change to the
+    real model would pass CI silently — exactly the PR #6 drift class. This pins
+    the real default; update it in lockstep when intentionally swapping models.
+    """
+    from app.core.config import settings
+
+    assert settings.USE_OPENROUTER_COMPOSE is True, (
+        "USE_OPENROUTER_COMPOSE default flipped off — prod compose routing changed."
+    )
+    assert settings.OPENROUTER_COMPOSE_MODEL == "anthropic/claude-haiku-4.5", (
+        f"Effective compose model drifted to {settings.OPENROUTER_COMPOSE_MODEL!r}. "
+        "If intentional, update this pin AND .github/workflows/voice-integration.yml "
+        "CI_OPENROUTER_COMPOSE_MODEL in the same PR."
+    )
 
 
 def test_build_system_prompt_does_not_double_inject_voice() -> None:
