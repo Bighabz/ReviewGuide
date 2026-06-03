@@ -70,6 +70,8 @@ ACCESSORY_KEYWORDS = {
     "cord", "dongle", "hub", "dock", "replacement filter",
     "logic board", "motherboard", "replacement", "refurbished part",
     "spare part", "hepa filter", "filter cartridge",
+    # Mobile QA Round 8: an "Armrest Tops" listing ranked as an office chair
+    "armrest", "armrests", "armrest tops", "seat cushion", "casters", "chair mat",
 }
 
 

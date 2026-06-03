@@ -141,7 +141,8 @@ export default function ConversationSidebar({
           </h2>
           <button
             onClick={onClose}
-            className="lg:hidden p-1.5 rounded-lg hover:bg-[var(--surface-hover)] text-[var(--text-muted)]"
+            aria-label="Close history"
+            className="lg:hidden min-w-[40px] min-h-[40px] flex items-center justify-center rounded-lg hover:bg-[var(--surface-hover)] text-[var(--text-muted)]"
           >
             <X size={16} strokeWidth={1.5} />
           </button>

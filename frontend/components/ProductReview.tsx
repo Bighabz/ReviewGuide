@@ -20,7 +20,7 @@ function SaveToggle({ item }: { item: Omit<SavedItem, 'savedAt'> }) {
     <button
       onClick={(e) => { e.preventDefault(); e.stopPropagation(); setSaved(toggleSaved(item)); setPulse((p) => p + 1) }}
       aria-label={saved ? 'Remove bookmark' : 'Save'}
-      className="relative w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0"
+      className="relative w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
       style={{ background: 'var(--paper-hi)', border: '1px solid var(--line)' }}
     >
       {pulse > 0 && <span key={pulse} className="rg-ring absolute inset-0 rounded-full" style={{ border: '1px solid var(--terra)' }} />}

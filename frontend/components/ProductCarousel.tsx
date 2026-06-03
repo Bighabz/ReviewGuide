@@ -22,7 +22,7 @@ function SaveToggle({ item }: { item: Omit<SavedItem, 'savedAt'> }) {
     <button
       onClick={(e) => { e.preventDefault(); e.stopPropagation(); setSaved(toggleSaved(item)); setPulse((p) => p + 1) }}
       aria-label={saved ? 'Remove bookmark' : 'Save'}
-      className="absolute top-2 right-2 z-10 w-8 h-8 rounded-full flex items-center justify-center"
+      className="absolute top-1 right-1 z-10 w-10 h-10 rounded-full flex items-center justify-center"
       style={{ background: 'var(--paper-hi)', border: '1px solid var(--line)' }}
     >
       {pulse > 0 && (
@@ -274,19 +274,24 @@ export default function ProductCarousel({ items, title }: ProductCarouselProps) 
           ))}
         </div>
 
-        {/* Pagination Dots */}
+        {/* Pagination Dots — each visual dot sits inside a ≥40px hit area
+            (Mobile QA Round 8: 6px dots were untappable on touch screens) */}
         {items.length > itemsPerPage && (
-          <div className="flex justify-center gap-1.5 mt-4">
+          <div className="flex justify-center mt-2">
             {Array.from({ length: Math.ceil(items.length / itemsPerPage) }).map((_, idx) => (
               <button
                 key={idx}
                 onClick={() => setCurrentIndex(idx * itemsPerPage)}
-                className={`h-1.5 rounded-full transition-all ${Math.floor(currentIndex / itemsPerPage) === idx
-                  ? 'w-6 bg-[var(--primary)]'
-                  : 'w-1.5 bg-[var(--border-strong)] hover:bg-[var(--text-muted)]'
-                  }`}
+                className="min-w-[40px] min-h-[40px] flex items-center justify-center"
                 aria-label={`Page ${idx + 1}`}
-              />
+              >
+                <span
+                  className={`h-1.5 rounded-full transition-all ${Math.floor(currentIndex / itemsPerPage) === idx
+                    ? 'w-6 bg-[var(--primary)]'
+                    : 'w-1.5 bg-[var(--border-strong)]'
+                    }`}
+                />
+              </button>
             ))}
           </div>
         )}

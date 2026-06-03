@@ -43,7 +43,7 @@ export default function MobileHeader() {
           {/* Back arrow — goes to /chat from results, or / from chat */}
           <button
             onClick={() => router.push(isResultsRoute ? '/chat' : '/')}
-            className="flex items-center justify-center w-8 h-8 rounded-lg -ml-1"
+            className="flex items-center justify-center w-10 h-10 rounded-lg -ml-1"
             style={{ color: 'var(--text)' }}
             aria-label={isResultsRoute ? 'Back to Chat' : 'Back to Discover'}
           >
@@ -71,7 +71,7 @@ export default function MobileHeader() {
           {/* Expand icon — hidden on /results (already on results page) */}
           {!isResultsRoute && (
             <button
-              className="flex items-center justify-center w-8 h-8 rounded-lg"
+              className="flex items-center justify-center w-10 h-10 rounded-lg"
               style={{ color: 'var(--text-muted)' }}
               aria-label="Expand results"
               onClick={handleExpandClick}
@@ -82,7 +82,7 @@ export default function MobileHeader() {
 
           {/* Spacer to keep title centered when expand icon hidden */}
           {isResultsRoute && (
-            <div className="w-8 h-8" />
+            <div className="w-10 h-10" />
           )}
         </>
       ) : (
