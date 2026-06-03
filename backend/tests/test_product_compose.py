@@ -361,13 +361,16 @@ async def test_floor_budget_drops_under_floor_product():
 
 
 @pytest.mark.asyncio
-async def test_range_budget_keeps_only_in_range_products():
-    """A "$500–$800" chip budget must keep only products priced inside the range."""
+async def test_range_budget_keeps_below_floor_as_badged_deal_drops_above_ceiling():
+    """F2 (QA Round 6, user product decision): on a RANGE budget ("$500–$800") the
+    ceiling stays a hard filter, but a product priced BELOW the floor is a deal —
+    it stays on the shortlist and its buy links carry below_budget_floor=True so
+    the card renders an "Under budget" badge."""
     fake_service = MagicMock()
     fake_service.generate_compose = AsyncMock(return_value="mock response text")
 
     state = _budget_filter_state("$500–$800", [
-        ("Too Cheap Laptop", 349.00),
+        ("Bargain Laptop", 349.00),
         ("Just Right Laptop", 649.00),
         ("Also Right Laptop", 799.00),
         ("Too Expensive Laptop", 1499.00),
@@ -377,10 +380,49 @@ async def test_range_budget_keeps_only_in_range_products():
         result = await product_compose(state)
 
     review_cards = [b for b in result.get("ui_blocks", []) if b.get("type") == "product_review"]
-    card_names = [c["data"]["product_name"] for c in review_cards]
+    cards_by_name = {c["data"]["product_name"]: c["data"] for c in review_cards}
+    card_names = list(cards_by_name)
+
     assert "Just Right Laptop" in card_names and "Also Right Laptop" in card_names, f"in-range products missing: {card_names}"
-    assert "Too Cheap Laptop" not in card_names, f"under-range product leaked: {card_names}"
-    assert "Too Expensive Laptop" not in card_names, f"over-range product leaked: {card_names}"
+    assert "Too Expensive Laptop" not in card_names, f"over-range product leaked past the ceiling: {card_names}"
+    # The deal stays — badged, not hidden
+    assert "Bargain Laptop" in card_names, f"below-floor deal was hidden instead of badged: {card_names}"
+
+    def _links(name):
+        return [l for l in cards_by_name[name]["affiliate_links"] if l.get("price")]
+
+    assert all(
+        l.get("below_budget_floor") is True for l in _links("Bargain Laptop")
+    ), f"below-floor offer not flagged for badge: {_links('Bargain Laptop')}"
+    assert all(
+        not l.get("below_budget_floor") for l in _links("Just Right Laptop") + _links("Also Right Laptop")
+    ), "in-range offers must NOT carry the Under-budget badge"
+
+
+@pytest.mark.asyncio
+async def test_floor_only_budget_does_not_badge_it_filters():
+    """The badge is a range-budget concept. On a floor-only budget ("$500+") the
+    floor stays a hard filter (quality intent) — surviving in-budget offers must
+    never carry below_budget_floor."""
+    fake_service = MagicMock()
+    fake_service.generate_compose = AsyncMock(return_value="mock response text")
+
+    state = _budget_filter_state("$500+", [
+        ("Cheap Laptop", 299.00),
+        ("Mid Laptop", 749.00),
+        ("Premium Laptop", 1299.00),
+    ])
+
+    with patch("app.services.model_service.model_service", fake_service):
+        result = await product_compose(state)
+
+    review_cards = [b for b in result.get("ui_blocks", []) if b.get("type") == "product_review"]
+    cards_by_name = {c["data"]["product_name"]: c["data"] for c in review_cards}
+
+    assert "Cheap Laptop" not in cards_by_name, "under-floor product must be dropped on a floor-only budget"
+    for name, data in cards_by_name.items():
+        for link in data["affiliate_links"]:
+            assert not link.get("below_budget_floor"), f"{name} wrongly badged on a floor-only budget"
 
 
 @pytest.mark.asyncio

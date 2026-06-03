@@ -805,18 +805,29 @@ async def product_compose(state: Dict[str, Any]) -> Dict[str, Any]:
                         if real_image and not o.get("image_url"):
                             o["image_url"] = real_image
 
-                # Apply budget enforcement in BOTH directions: drop offers above the
-                # ceiling AND below the floor ("$500+" budgets must not headline a
-                # $299 item). If no offer survives, keep them all so the user still
-                # sees results (degraded beats empty).
+                # Budget enforcement on offers (F2 final design, QA Round 6):
+                #  - CEILING is always a hard filter — an over-budget offer must
+                #    never appear ("Under $100" → no $159 link).
+                #  - FLOOR depends on the budget's shape:
+                #      * Floor-only ("$500+", "at least $500") expresses a quality
+                #        intent → below-floor offers are dropped (the "$299 pick
+                #        on a $500+ ask" bug).
+                #      * Range ("$80–$130") expresses a price window → a cheaper
+                #        offer is a deal, not a mistake. Keep it and tag it
+                #        below_budget_floor so the card renders an honest
+                #        "Under budget" badge (user product decision 2026-06-02).
+                # If no offer survives the hard filters, keep them all so the user
+                # still sees results (degraded beats empty).
                 if budget_max is not None or budget_min is not None:
+                    floor_is_hard = budget_min is not None and budget_max is None
+
                     def _within_budget(o):
                         p = _extract_price(o)
                         if p is None:
                             return False
                         if budget_max is not None and p > budget_max:
                             return False
-                        if budget_min is not None and p < budget_min:
+                        if floor_is_hard and p < budget_min:
                             return False
                         return True
 
@@ -825,12 +836,19 @@ async def product_compose(state: Dict[str, Any]) -> Dict[str, Any]:
                         removed_count = len(all_offers_for_product) - len(in_budget)
                         if removed_count > 0:
                             bounds = []
-                            if budget_min is not None:
+                            if floor_is_hard:
                                 bounds.append(f"≥${budget_min:.0f}")
                             if budget_max is not None:
                                 bounds.append(f"≤${budget_max:.0f}")
                             logger.info(f"[product_compose] Budget filter ({' and '.join(bounds)}): removed {removed_count} out-of-budget offer(s) for {product_name}")
                         all_offers_for_product = in_budget
+
+                    # Tag below-floor survivors (range budgets only) for the card badge.
+                    if budget_min is not None and not floor_is_hard:
+                        for o in all_offers_for_product:
+                            _p = _extract_price(o)
+                            if _p is not None and _p < budget_min:
+                                o["below_budget_floor"] = True
 
                 # Best offer = first with a real price, or just first
                 priced = [o for o in all_offers_for_product if o.get("price", 0) > 0]
@@ -855,7 +873,10 @@ async def product_compose(state: Dict[str, Any]) -> Dict[str, Any]:
                     return True
                 if budget_max is not None and price > budget_max:
                     return False
-                if budget_min is not None and price < budget_min:
+                # The floor only prunes on floor-only budgets ("$500+" = quality
+                # intent). On a range ("$80–$130") a cheaper product is a deal and
+                # stays — its offers carry the below_budget_floor badge instead (F2).
+                if budget_min is not None and budget_max is None and price < budget_min:
                     return False
                 return True
 
@@ -1228,7 +1249,9 @@ Products to describe:
                     if _prod_price > 0:
                         if budget_max is not None and _prod_price > budget_max:
                             continue
-                        if budget_min is not None and _prod_price < budget_min:
+                        # Floor is only a hard filter on floor-only budgets (F2):
+                        # on a range, cheaper products are deals and stay.
+                        if budget_min is not None and budget_max is None and _prod_price < budget_min:
                             continue
                     if _budget_pruned_names and any(
                         _fuzzy_product_match(t, dropped) for dropped in _budget_pruned_names
@@ -1744,6 +1767,7 @@ TRANSITIONAL RULES (transitional_reasoning field):
                 ):
                     # Mislabeled as Amazon but URL is a different domain — correct the label
                     offer_merchant = derived_merchant
+                _link_price = _extract_price(o)
                 affiliate_links.append({
                     "product_id": f"{o.get('source', 'unknown')}-{idx}",
                     "title": offer_merchant + " - " + pname,
@@ -1754,6 +1778,15 @@ TRANSITIONAL RULES (transitional_reasoning field):
                     "image_url": img,
                     "rating": o.get("rating"),
                     "review_count": o.get("review_count"),
+                    # F2 (QA Round 6): on a RANGE budget, offers cheaper than the
+                    # stated floor are kept as deals but flagged so the frontend
+                    # renders an "Under budget" badge instead of silently showing
+                    # a price below what the user asked for. ui_blocks passes
+                    # through the validator as List[Any], so no schema change.
+                    "below_budget_floor": bool(
+                        budget_min is not None and budget_max is not None
+                        and _link_price is not None and _link_price < budget_min
+                    ),
                 })
 
             if not affiliate_links:
