@@ -1605,34 +1605,12 @@ TRANSITIONAL RULES (transitional_reasoning field):
             agent_name="blog_article_composer"
         )
 
-        # --- Top Pick editorial prose (UX-03) ---
-        # Uses deterministic "Best Overall" selection + LLM for prose
-        if review_data and review_bundles:
-            sorted_by_quality = sorted(
-                review_data.items(),
-                key=lambda x: x[1].get("quality_score", 0),
-                reverse=True
-            )
-            if sorted_by_quality and sorted_by_quality[0][1].get("quality_score", 0) > 0:
-                best_product_name = sorted_by_quality[0][0]
-                best_bundle = sorted_by_quality[0][1]
-                top_pick_role = (
-                    "Given a top-rated product, write a JSON object with exactly "
-                    "three keys: headline (one sentence why it's the best pick), "
-                    "best_for (who should buy it, one sentence), not_for (who "
-                    "should look elsewhere, one sentence). Be specific and "
-                    "opinionated. Do not use generic phrases."
-                )
-                llm_tasks['top_pick'] = model_service.generate_compose(
-                    messages=[
-                        {"role": "system", "content": build_system_prompt(role_prompt=top_pick_role, kind="snippet")},
-                        {"role": "user", "content": f'Product: {best_product_name}\nRating: {best_bundle.get("avg_rating", 0)}/5 from {best_bundle.get("total_reviews", 0)} reviews\nUser asked: "{user_message}"'}
-                    ],
-                    temperature=0.5,
-                    max_tokens=150,
-                    response_format={"type": "json_object"},
-                    agent_name="top_pick_composer"
-                )
+        # NOTE: the old "Top Pick editorial prose" (UX-03) LLM call + its
+        # type:"top_pick" ui_block were removed (QA Round 7 cleanup): the block
+        # had no frontend renderer, so every request with review data burned one
+        # LLM round-trip composing prose nobody ever saw. The prose's own top
+        # pick (#93 blog JSON top_pick → prose_top_pick) is what pins card #1 and
+        # the consensus order — that path is unchanged.
 
         # ── Phase 3: Fire all LLM calls in parallel ──
 
@@ -1678,60 +1656,8 @@ TRANSITIONAL RULES (transitional_reasoning field):
 
         ui_blocks = []
 
-        # ── Top Pick block (UX-03) — must be FIRST in ui_blocks ──
-        if 'top_pick' in result_map:
-            top_pick_raw = _get_result('top_pick', '')
-            if top_pick_raw:
-                try:
-                    top_pick_result = json.loads(top_pick_raw)
-                    # Find the best product name (same selection as Phase 2)
-                    sorted_by_quality = sorted(
-                        review_data.items(),
-                        key=lambda x: x[1].get("quality_score", 0),
-                        reverse=True
-                    )
-                    best_product_name = sorted_by_quality[0][0] if sorted_by_quality else ""
-                    # Find image and affiliate URL from products_with_offers
-                    # Prefer Amazon offer for the buy button; fall back to best_offer
-                    best_image = ""
-                    best_url = ""
-                    for p in products_with_offers:
-                        if _fuzzy_product_match(p.get("name", ""), best_product_name):
-                            all_p_offers = p.get("all_offers", [])
-                            # Pick Amazon offer first (don't send users to eBay with "Buy on Amazon")
-                            amazon_offer = next(
-                                (o for o in all_p_offers if "amazon" in o.get("url", "").lower() or "amzn.to" in o.get("url", "").lower()),
-                                None
-                            )
-                            if amazon_offer:
-                                best_url = amazon_offer.get("url", "")
-                                best_image = amazon_offer.get("image_url", "")
-                            else:
-                                offer = p.get("best_offer", {})
-                                best_url = offer.get("url", "")
-                                best_image = offer.get("image_url", "")
-                            # If Amazon offer had no image, grab from any offer that has one
-                            if not best_image:
-                                for o in all_p_offers:
-                                    if o.get("image_url"):
-                                        best_image = o["image_url"]
-                                        break
-                            break
-                    ui_blocks.insert(0, {
-                        "type": "top_pick",
-                        "title": "Our Top Pick",
-                        "data": {
-                            "product_name": best_product_name,
-                            "headline": top_pick_result.get("headline", ""),
-                            "best_for": top_pick_result.get("best_for", ""),
-                            "not_for": top_pick_result.get("not_for", ""),
-                            "image_url": best_image,
-                            "affiliate_url": best_url,
-                        }
-                    })
-                    logger.info(f"[product_compose] Added top_pick block for {best_product_name}")
-                except (json.JSONDecodeError, Exception) as e:
-                    logger.warning(f"[product_compose] Failed to parse top_pick: {e}")
+        # (The type:"top_pick" ui_block that used to be emitted first was removed —
+        # no frontend renderer ever existed for it. See the Phase-2 note above.)
 
         # ── Review consensus comparison block ──
         # One card per product: aggregated rating + review count + synthesized
