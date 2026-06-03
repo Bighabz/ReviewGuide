@@ -264,6 +264,15 @@ class Settings(BaseSettings):
     # fallback to the draft on any failure. Default off.
     USE_VOICE_PASS: bool = Field(default=False, description="Run a draft→revise voice pass over the assembled blog body (Tier 3)")
 
+    # Outcome 6 PROTOTYPE (conversational engine): answer-aware follow-ups.
+    # The clarifier asks use_case ALONE first; once answered, the features
+    # question is generated with knowledge of that answer, so it can adapt
+    # ("Gaming" → "What kind of gaming?") via the packs' features_by_use_case
+    # branches. COST: one extra conversation turn per search (two clarifier
+    # cards instead of one) — measure on prod before any default-on decision.
+    # Default off; the single-card flow is unchanged while off.
+    USE_ANSWER_AWARE_FOLLOWUPS: bool = Field(default=False, description="Outcome 6 prototype: sequential clarification — use_case first, then an answer-adapted features question (doubles turns)")
+
     # Agent-specific Max Tokens
     PLANNER_MAX_TOKENS: int = Field(default=2000, description="Max tokens for planner agent")
     INTENT_MAX_TOKENS: int = Field(default=50, description="Max tokens for intent agent")
