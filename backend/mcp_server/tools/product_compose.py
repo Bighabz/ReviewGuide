@@ -19,6 +19,54 @@ backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__
 if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
+# ---------------------------------------------------------------------------
+# Tier 3a consolidation — single-call schema extension
+# ---------------------------------------------------------------------------
+# When USE_CONSOLIDATED_COMPOSE is on, the blog_article call also returns the
+# per-product review consensus (top 3) + card descriptions in its JSON, so the
+# separate consensus:* / descriptions LLM calls can be dropped. The extension
+# below is applied to the (byte-pinned) blog_role at the call site.
+#
+# These three constants are mirrored byte-for-byte in backend/eval/voice_eval.py
+# (CONSOLIDATED_ROLE). The eval smoke test test_consolidated_role_in_sync_with_
+# production asserts `_consolidated_blog_role(BLOG_ROLE) == CONSOLIDATED_ROLE`,
+# so the bake-off keeps measuring the real production prompt. Change one → change
+# both in the same PR.
+_BLOG_SCHEMA_TAIL = '''  "top_pick": "<the EXACT product name of your #1 pick, copied verbatim from the product list — the same product your body names first>"
+}'''
+
+_CONSOLIDATED_SCHEMA_TAIL = '''  "top_pick": "<the EXACT product name of your #1 pick, copied verbatim from the product list — the same product your body names first>",
+  "consensus": {"<product name>": "<3-5 sentence review consensus summary>", "...": "..."},
+  "descriptions": {"<product name>": "<15-25 word factual description>", "...": "..."}
+}'''
+
+_CONSOLIDATED_EXTRA_RULES = """
+
+CONSENSUS RULES (consensus field):
+- One entry for EACH of the top 3 products in your ranking (all products if fewer than 3)
+- Keys are the EXACT product names copied verbatim from the product list
+- Each value: a 3-5 sentence summary covering (1) what reviewers consistently praise,
+  (2) any notable criticisms or caveats, and (3) who this product is best suited for,
+  ending with a sentence describing the ideal buyer
+- Do NOT describe your process or mention how many sources were searched
+
+DESCRIPTIONS RULES (descriptions field):
+- One entry for EVERY product in the product list
+- Keys are the EXACT product names copied verbatim from the product list
+- Each value: a factual 15-25 word description — key features, best use case, who it's ideal for
+- NEVER invent or assume personal details; write objectively about the product's strengths
+- Vary the descriptions — don't repeat the same sentence pattern"""
+
+
+def _consolidated_blog_role(base_role: str) -> str:
+    """Extend the blog role with the consensus + descriptions schema (Tier 3a).
+
+    ``base_role`` is the byte-pinned blog_role string. The extension replaces the
+    schema's closing tail to add the two new fields, then appends their rules.
+    """
+    return base_role.replace(_BLOG_SCHEMA_TAIL, _CONSOLIDATED_SCHEMA_TAIL) + _CONSOLIDATED_EXTRA_RULES
+
+
 # Tool contract for planner
 TOOL_CONTRACT = {
     "name": "product_compose",
@@ -1141,6 +1189,12 @@ async def product_compose(state: Dict[str, Any]) -> Dict[str, Any]:
 
         # ── Phase 2: Prepare all LLM coroutines (fired in parallel) ──
 
+        # Tier 3a: when consolidated compose is on, the blog_article call also
+        # returns per-product consensus (top 3) + descriptions, so we skip
+        # registering the separate consensus:* / descriptions calls below and
+        # inject those fields from the blog JSON after the gather instead.
+        _consolidated = getattr(settings, "USE_CONSOLIDATED_COMPOSE", False)
+
         llm_tasks = {}  # key -> coroutine
 
         # --- Assistant text: concierge OR opener (mutually exclusive with review consensus) ---
@@ -1213,9 +1267,14 @@ async def product_compose(state: Dict[str, Any]) -> Dict[str, Any]:
             top_products = products_with_sources[:MAX_CONSENSUS_PRODUCTS]
             remaining_products = products_with_sources[MAX_CONSENSUS_PRODUCTS:]
 
-            # Full LLM consensus for top products
+            # Full LLM consensus for top products.
+            # Tier 3a: when consolidated, the blog call writes these instead —
+            # skip the per-product calls but still register review_bundles so the
+            # consensus block / blog data downstream is built the same way.
             for product_name, bundle in top_products:
                 review_bundles[product_name] = bundle
+                if _consolidated:
+                    continue
                 # Strip site_name from each snippet — the LLM must never see
                 # named source attributions ("Wirecutter:", "RTINGS:") because
                 # VOICE_PROMPT forbids citing competitors but the model treats
@@ -1263,7 +1322,9 @@ async def product_compose(state: Dict[str, Any]) -> Dict[str, Any]:
             # Saves ~1-2s per query. Fallback template will work without it.
 
         # --- Personalized product descriptions ---
-        if all_products_for_desc:
+        # Tier 3a: when consolidated, the blog call writes descriptions inline —
+        # skip the separate call (injected from the blog JSON after the gather).
+        if all_products_for_desc and not _consolidated:
             # Cap at 8: measured on Haiku via OpenRouter, the descriptions JSON
             # parses reliably at <=8 products (8/8 at 1200 tok); 10-15 return
             # malformed/truncated JSON regardless of token budget. Carousels
@@ -1576,6 +1637,15 @@ TRANSITIONAL RULES (transitional_reasoning field):
                 blog_max_tokens = 1000
             logger.info(f"[product_compose] Two-speed: complexity={_complexity}, blog_max_tokens={blog_max_tokens}")
 
+        # Tier 3a: extend the role with the consensus + descriptions schema and
+        # widen the token budget to fit the bigger single-call output. The
+        # extension composes on top of any two-speed LENGTH OVERRIDE (it touches
+        # the schema tail near the top of the role, not the appended tail).
+        if _consolidated:
+            blog_role_effective = _consolidated_blog_role(blog_role_effective)
+            blog_max_tokens += 700  # headroom for top-3 consensus + per-product descriptions (bake-off: ~924 tok used at 1400)
+            logger.info(f"[product_compose] Consolidated compose ON: blog_max_tokens={blog_max_tokens}")
+
         if getattr(settings, "USE_GROUNDED_COMPOSE", False):
             # Tier 2.2/2.3: product facts → RESEARCH slot, conversation → history
             # slot, accumulated prefs → profile slot; the user message is just the
@@ -1645,14 +1715,44 @@ TRANSITIONAL RULES (transitional_reasoning field):
         # (QA Round 6: "skip the Roomba" prose while the Roomba ranked #1 in
         # "How They Compare"). The full blog parse for assistant_text happens later.
         prose_top_pick = ""
+        _blog_parsed_early = None
         _blog_raw_early = _get_result('blog_article', '')
         if _blog_raw_early:
             try:
-                prose_top_pick = (json.loads(_blog_raw_early).get("top_pick") or "").strip()
+                _blog_parsed_early = json.loads(_blog_raw_early)
+                prose_top_pick = (_blog_parsed_early.get("top_pick") or "").strip()
             except (json.JSONDecodeError, TypeError, AttributeError):
+                _blog_parsed_early = None
                 prose_top_pick = ""
         if prose_top_pick:
             logger.info(f"[product_compose] Prose top pick: {prose_top_pick}")
+
+        # Tier 3a: fold the consolidated blog JSON's consensus + descriptions back
+        # into result_map so the existing assembly (consensus block + description
+        # application below) consumes them exactly as if they came from the now-
+        # deleted separate calls. Keys are matched fuzzily to the canonical bundle
+        # / product names. Missing entries fall through to template/empty as before.
+        if _consolidated and isinstance(_blog_parsed_early, dict):
+            _blog_consensus = _blog_parsed_early.get("consensus")
+            if isinstance(_blog_consensus, dict) and review_bundles:
+                injected = 0
+                for _bundle_name in review_bundles:
+                    text = _blog_consensus.get(_bundle_name)
+                    if not text:
+                        for _k, _v in _blog_consensus.items():
+                            if _fuzzy_product_match(_bundle_name, _k, threshold=0.5):
+                                text = _v
+                                break
+                    if isinstance(text, str) and text.strip():
+                        result_map[f'consensus:{_bundle_name}'] = text.strip()
+                        injected += 1
+                logger.info(f"[product_compose] Consolidated: injected {injected} consensus entries from blog JSON")
+            _blog_descriptions = _blog_parsed_early.get("descriptions")
+            if isinstance(_blog_descriptions, dict) and _blog_descriptions:
+                # Re-wrap in the {"descriptions": {...}} envelope the existing
+                # description applier (below) expects from _get_result('descriptions').
+                result_map['descriptions'] = json.dumps({"descriptions": _blog_descriptions})
+                logger.info(f"[product_compose] Consolidated: injected {len(_blog_descriptions)} descriptions from blog JSON")
 
         # ── Phase 4: Assemble blog-style article ──
 
