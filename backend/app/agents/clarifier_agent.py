@@ -24,7 +24,7 @@ from tool_contracts import get_tool_contracts_dict  # noqa: E402
 
 from ..schemas.graph_state import GraphState
 from .base_agent import BaseAgent
-from .category_question_packs import format_pack_hint, get_category_pack
+from .category_question_packs import format_pack_hint, get_category_pack, get_features_spec
 from ..services.halt_state_manager import HaltStateManager
 from ..services.prompts.voice import build_system_prompt
 from app.lib.toon_python import encode
@@ -788,11 +788,30 @@ class ClarifierAgent(BaseAgent):
 
         logger.info(f"[Clarifier Agent] {len(missing_required_slots)} slots still missing after extraction, will ask follow-up questions")
 
+        # ── Outcome 6 PROTOTYPE (flag-gated): answer-aware sequential clarification ──
+        # Ask use_case ALONE first; once it's answered, _handle_user_answer generates
+        # the remaining questions WITH that answer known, so the features question can
+        # adapt to it (the packs' features_by_use_case branches). Costs one extra
+        # conversation turn — the flag stays off until that cost is measured against
+        # the adapted-question benefit on prod.
+        ask_now = missing_required_slots
+        if (
+            getattr(self.settings, "USE_ANSWER_AWARE_FOLLOWUPS", False)
+            and intent == "product"
+            and "use_case" in missing_required_slots
+            and len(missing_required_slots) > 1
+        ):
+            ask_now = ["use_case"]
+            logger.info(
+                "[Clarifier Agent] Answer-aware prototype: asking use_case alone first "
+                f"({len(missing_required_slots) - 1} question(s) deferred until it's answered)"
+            )
+
         # Generate follow-up questions with intro and closing (all from LLM)
-        logger.info(f"[Clarifier Agent] Generating follow-up questions for {len(missing_required_slots)} missing slots")
+        logger.info(f"[Clarifier Agent] Generating follow-up questions for {len(ask_now)} missing slots")
 
         followups_data = await self._generate_followup_questions(
-            missing_required_slots,
+            ask_now,
             current_slots,
             state.get("user_message", ""),
             state.get("intent", ""),
@@ -800,7 +819,9 @@ class ClarifierAgent(BaseAgent):
             user_preferences=(state.get("metadata") or {}).get("user_preferences")
         )
 
-        # Save to halt state (store questions array for slot extraction later)
+        # Save to halt state (store questions array for slot extraction later).
+        # missing_required_slots keeps the FULL list (not just ask_now) so the
+        # answer-aware flow knows which questions were deferred.
         halt_state_data = {
             "intent": state.get("intent"),
             "slots": current_slots,
@@ -944,6 +965,44 @@ class ClarifierAgent(BaseAgent):
                     logger.info(f"[Clarifier Agent] ⏭️ Optional slot '{slot_name}' not found in answer (skipping)")
 
         if not still_missing_required:
+            # ── Outcome 6 PROTOTYPE (flag-gated): deferred questions ──
+            # The first card asked use_case alone; the rest of the planned slots
+            # were deferred. Now that the use_case answer is in current_slots, ask
+            # them — _generate_followup_questions adapts the features question to
+            # the answer via the pack's features_by_use_case branch.
+            if getattr(self.settings, "USE_ANSWER_AWARE_FOLLOWUPS", False):
+                planned = halt_state.get("missing_required_slots") or []
+                deferred = [
+                    s for s in planned
+                    if s not in required_slot_names and not current_slots.get(s)
+                ]
+                if deferred:
+                    logger.info(
+                        f"[Clarifier Agent] Answer-aware prototype: asking {len(deferred)} deferred "
+                        f"question(s) now that use_case is answered: {deferred}"
+                    )
+                    followups_data = await self._generate_followup_questions(
+                        deferred,
+                        current_slots,
+                        user_message,
+                        intent,
+                        conversation_history=conversation_history,
+                        user_preferences=(state.get("metadata") or {}).get("user_preferences")
+                    )
+                    remaining_followups = followups_data.get("questions", [])
+                    halt_state["slots"] = current_slots
+                    halt_state["followups"] = remaining_followups
+                    # The deferred slots are now the ones being asked
+                    halt_state["missing_required_slots"] = deferred
+                    await HaltStateManager.update_halt_state(session_id, halt_state)
+                    return {
+                        "slots": current_slots,
+                        "followups": remaining_followups,
+                        "missing_required_slots": deferred,
+                        "next_question": followups_data,
+                        "proceed_to_execution": False
+                    }
+
             # All slots successfully extracted - proceed to execution
             logger.info(f"[Clarifier Agent] All follow-up questions answered, proceeding to execution")
 
@@ -1092,6 +1151,11 @@ Each option is 1-4 words. Also generate "free_text_hint": a short affordance lik
         # ("best running shoes" → category="shoes", product_name="running shoes"),
         # and the raw query is the last resort.
         pack = None
+        # Outcome 6: when the use_case answer is already known (answer-aware
+        # sequential flow, or extracted from the query itself), the features
+        # question adapts to it via the pack's features_by_use_case branch.
+        # None when unanswered → the default features question.
+        known_use_case = str(current_slots.get("use_case") or "") or None
         if intent == "product":
             matched_on = None
             for candidate in (
@@ -1106,7 +1170,7 @@ Each option is 1-4 words. Also generate "free_text_hint": a short affordance lik
                         matched_on = candidate
                         break
             if pack:
-                expert_hint += format_pack_hint(pack)
+                expert_hint += format_pack_hint(pack, use_case_answer=known_use_case)
                 logger.info(f"[Clarifier Agent] Using curated question pack (matched on '{matched_on}')")
 
         # Outcome 5: comparison-dimension question. The user named two specific
@@ -1213,8 +1277,16 @@ Return ONLY valid JSON:
                     if q["slot"] == "use_case":
                         q["options"] = list(pack["use_case"]["options"])
                     elif q["slot"] == "features":
-                        q["options"] = list(pack["features"]["options"])
-                        if pack["features"].get("multi_select"):
+                        # Outcome 6: the per-answer branch (when use_case is known)
+                        # is just as authoritative as the default features spec.
+                        features_spec = get_features_spec(pack, known_use_case)
+                        if features_spec is not pack["features"]:
+                            # A branch applies — its question text replaces the
+                            # default too. (When no branch, the LLM's text stays:
+                            # byte-identical to pre-Outcome-6 behavior.)
+                            q["question"] = features_spec["question"]
+                        q["options"] = list(features_spec["options"])
+                        if features_spec.get("multi_select"):
                             q["type"] = "multi_select"
                         else:
                             q.pop("type", None)

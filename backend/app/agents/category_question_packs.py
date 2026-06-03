@@ -34,6 +34,32 @@ CATEGORY_QUESTION_PACKS: Dict[str, Dict[str, Any]] = {
             "options": ["Just the basics", "Mid-range power", "High-end specs", "No strong preference"],
             "multi_select": False,
         },
+        # Outcome 6 prototype (USE_ANSWER_AWARE_FOLLOWUPS): when the use_case
+        # answer is already known, the features question adapts to it. Keys must
+        # match the use_case options exactly. Each branch's last option stays
+        # "No strong preference" (the features escape hatch).
+        "features_by_use_case": {
+            "Student / everyday": {
+                "question": "What matters most for school and daily use?",
+                "options": ["Battery life", "Light weight", "Screen quality", "No strong preference"],
+                "multi_select": False,
+            },
+            "Gaming": {
+                "question": "What kind of gaming?",
+                "options": ["AAA / new releases", "Esports / competitive", "Casual & indie", "No strong preference"],
+                "multi_select": False,
+            },
+            "Creative / video editing": {
+                "question": "What's your main creative work?",
+                "options": ["Video editing", "Photo / design", "3D / rendering", "No strong preference"],
+                "multi_select": False,
+            },
+            "Business / office": {
+                "question": "What does your work mostly involve?",
+                "options": ["Meetings & travel", "Docs & spreadsheets", "Coding / dev work", "No strong preference"],
+                "multi_select": False,
+            },
+        },
         "budget_brackets": ["Under $500", "$500–$800", "$800–$1,200", "$1,200+"],
     },
     "phones": {
@@ -72,6 +98,29 @@ CATEGORY_QUESTION_PACKS: Dict[str, Dict[str, Any]] = {
             "question": "Which features matter to you?",
             "options": ["Noise cancelling", "Wireless", "Over-ear", "In-ear", "No strong preference"],
             "multi_select": True,
+        },
+        # Outcome 6 prototype: answer-adapted features questions (see laptops pack).
+        "features_by_use_case": {
+            "Commute & travel": {
+                "question": "What matters most on the go?",
+                "options": ["Noise cancelling", "Compact / pocketable", "Long battery", "No strong preference"],
+                "multi_select": True,
+            },
+            "Gym & runs": {
+                "question": "What do your workouts demand?",
+                "options": ["Sweat / water resistance", "Secure fit", "Awareness mode", "No strong preference"],
+                "multi_select": True,
+            },
+            "At a desk": {
+                "question": "What matters for desk listening?",
+                "options": ["All-day comfort", "Mic quality for calls", "Multipoint (two devices)", "No strong preference"],
+                "multi_select": True,
+            },
+            "Studio": {
+                "question": "What's the studio priority?",
+                "options": ["Flat / neutral sound", "Open-back", "Closed-back isolation", "No strong preference"],
+                "multi_select": True,
+            },
         },
         "budget_brackets": ["Under $100", "$100–$250", "$250–$400", "$400+"],
     },
@@ -331,11 +380,32 @@ def get_category_pack(category: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def format_pack_hint(pack: Dict[str, Any]) -> str:
+def get_features_spec(pack: Dict[str, Any], use_case_answer: Optional[str] = None) -> Dict[str, Any]:
+    """The features question spec to use: the per-answer branch when the use_case
+    answer is known and a branch exists for it (Outcome 6), else the default.
+
+    Matching is exact (branch keys are the pack's own use_case options) with a
+    case-insensitive fallback for chip-text variations.
+    """
+    branches = pack.get("features_by_use_case") or {}
+    if use_case_answer and branches:
+        if use_case_answer in branches:
+            return branches[use_case_answer]
+        lowered = {k.lower(): v for k, v in branches.items()}
+        if use_case_answer.lower().strip() in lowered:
+            return lowered[use_case_answer.lower().strip()]
+    return pack["features"]
+
+
+def format_pack_hint(pack: Dict[str, Any], use_case_answer: Optional[str] = None) -> str:
     """Render a pack as prompt text the clarifier injects into its question-
     generation prompt. The pack is authoritative for question text, options,
-    multi-select flags, and budget brackets."""
-    features = pack["features"]
+    multi-select flags, and budget brackets.
+
+    When use_case_answer is provided (Outcome 6 answer-aware flow), the features
+    question comes from that answer's branch where one exists.
+    """
+    features = get_features_spec(pack, use_case_answer)
     features_type = "multi_select" if features.get("multi_select") else "single_select"
     return f"""
 CURATED QUESTION SET for this category — use these questions and options EXACTLY (only adapt wording if the conversation already covers part of an answer):
