@@ -342,3 +342,94 @@ async def test_consensus_rank_renumbered_after_filtering():
     products = consensus_blocks[0]["data"]["products"]
     assert products[0]["rank"] == 1, "first listed product must be rank 1 after filtering"
     assert all(p["name"] != "Phantom Product X" for p in products)
+
+
+@pytest.mark.asyncio
+async def test_consensus_collapses_trim_variants_to_one_per_family():
+    """A head-to-head ask must not fill the comparison block with trim variants of
+    one side. iPhone 15 / 15 Pro / 15 Pro Max (more reviews → higher quality_score)
+    collapse to ONE iPhone representative; the Pixel still appears — one per model
+    family. This is the QA finding fix: the block showed 3 iPhone variants and no
+    Pixel, plus duplicate consensus text across near-identical variants."""
+    fake_service = _fake_service()
+    names = ["iPhone 15", "iPhone 15 Pro", "iPhone 15 Pro Max", "Google Pixel 8"]
+    qscores = [0.95, 0.93, 0.90, 0.70]  # iPhones outrank the Pixel by review quality
+    review_data = {}
+    shopping_offers = []
+    for i, name in enumerate(names):
+        review_data[name] = {
+            "avg_rating": 4.6,
+            "total_reviews": 5000 - i,
+            "quality_score": qscores[i],
+            "sources": [{"site_name": "", "url": f"https://x/{i}", "snippet": f"Great phone {i}"}],
+        }
+        shopping_offers.append({
+            "product_name": name,
+            "offers": [{
+                "title": name, "price": 699.0 + i, "currency": "USD",
+                "url": f"https://www.google.com/shopping/product/{i}", "merchant": "BestBuy",
+                "image_url": f"https://img.example.com/{i}.jpg", "source": "serper_shopping",
+            }],
+        })
+
+    state = _base_state(
+        user_message="iPhone 15 vs Pixel 8",
+        review_data=review_data,
+        normalized_products=[
+            {"name": n, "price": 699.0 + i, "url": f"https://example.com/{i}"} for i, n in enumerate(names)
+        ],
+        affiliate_products={"serper_shopping": shopping_offers},
+    )
+
+    with patch("app.services.model_service.model_service", fake_service):
+        result = await product_compose(state)
+
+    consensus_blocks = [b for b in result.get("ui_blocks", []) if b.get("type") == "review_consensus"]
+    assert consensus_blocks
+    block_names = [p["name"] for p in consensus_blocks[0]["data"]["products"]]
+
+    iphone_count = sum(1 for n in block_names if n.lower().startswith("iphone"))
+    assert iphone_count == 1, f"expected ONE iPhone representative (trims collapsed), got {block_names}"
+    assert any("pixel" in n.lower() for n in block_names), f"Pixel must appear (not crowded out): {block_names}"
+    # Ranks stay contiguous after the collapse.
+    assert [p["rank"] for p in consensus_blocks[0]["data"]["products"]] == list(
+        range(1, len(block_names) + 1)
+    )
+
+
+@pytest.mark.asyncio
+async def test_consensus_keeps_distinct_models_and_falls_back_below_two():
+    """Distinct models (different last token) are NOT collapsed; and if collapsing
+    would drop the block below two entries, the full list is kept rather than
+    showing a lone card."""
+    fake_service = _fake_service()
+    # Two genuinely distinct models — must both survive (no false collapse).
+    distinct = ["Sony WH-1000XM5", "Bose QuietComfort 45"]
+    review_data = {}
+    shopping_offers = []
+    for i, name in enumerate(distinct):
+        review_data[name] = {
+            "avg_rating": 4.6, "total_reviews": 5000 - i, "quality_score": 0.9 - i * 0.1,
+            "sources": [{"site_name": "", "url": f"https://x/{i}", "snippet": f"Snippet {i}"}],
+        }
+        shopping_offers.append({
+            "product_name": name,
+            "offers": [{
+                "title": name, "price": 299.0 + i, "currency": "USD",
+                "url": f"https://www.google.com/shopping/product/{i}", "merchant": "BestBuy",
+                "image_url": f"https://img.example.com/{i}.jpg", "source": "serper_shopping",
+            }],
+        })
+
+    state = _base_state(
+        review_data=review_data,
+        normalized_products=[{"name": n, "price": 299.0 + i, "url": f"https://e/{i}"} for i, n in enumerate(distinct)],
+        affiliate_products={"serper_shopping": shopping_offers},
+    )
+    with patch("app.services.model_service.model_service", fake_service):
+        result = await product_compose(state)
+
+    consensus_blocks = [b for b in result.get("ui_blocks", []) if b.get("type") == "review_consensus"]
+    assert consensus_blocks
+    block_names = [p["name"] for p in consensus_blocks[0]["data"]["products"]]
+    assert "Sony WH-1000XM5" in block_names and "Bose QuietComfort 45" in block_names
