@@ -112,6 +112,12 @@ python -m eval.voice_eval
 python -m eval.voice_eval --models openai/gpt-4o-mini,anthropic/claude-sonnet-4.6
 python -m eval.voice_eval --cases earbuds_under_100,airpods_max_pushback
 python -m eval.voice_eval --no-judge
+
+# Consolidated single-call mode (Tier 3 prototype): the role also asks for
+# per-product consensus + descriptions in the same response — measures whether
+# a model can carry the full single-call workload without prose quality dropping.
+python -m eval.voice_eval --consolidated
+python -m eval.voice_eval --consolidated --max-tokens 1800
 ```
 
 Smoke tests (no network):
@@ -134,6 +140,11 @@ Per (model × case):
    follow-up quality, calibrated depth, transitional correctness. The judge
    never sees which model wrote the output.
 3. **Latency** — wall-clock per generation.
+4. **Cost** — dollars per response, from OpenRouter per-token pricing × the
+   generation call's actual usage (judge overhead excluded).
+5. **Consolidated structure** (`--consolidated` only) — whether the
+   `consensus` (top-3 products) and `descriptions` (every product) objects came
+   back complete; the contract Tier 3a's assembly will rely on.
 
 ## Output
 
@@ -162,8 +173,13 @@ Five golden cases drawn from tone.md's canonical examples (`fixtures.py`):
   `mcp_server/tools/product_compose.py`. The smoke test
   `test_blog_role_in_sync_with_production` fails if they drift — when it does,
   copy the new production text into `voice_eval.py`.
-- Generation parameters (temperature 0.7, max_tokens 700, JSON object mode)
-  mirror the production `model_service.generate_compose` call.
+- `CONSOLIDATED_ROLE` (the `--consolidated` mode prompt) is derived from
+  `BLOG_ROLE` at import time — extended OUTPUT FORMAT plus CONSENSUS/DESCRIPTIONS
+  rules sections mirroring production's `consensus_role` and `desc_system`.
+  BLOG_ROLE itself is never modified.
+- Generation parameters (temperature 0.7, max_tokens 700 — or 1400 in
+  consolidated mode, JSON object mode) mirror the production
+  `model_service.generate_compose` call.
 - Fixture review snippets carry no review-source names, same as production
   (VOICE_PROMPT forbids citing competitors).
 
