@@ -2,19 +2,30 @@
 Product Ranking Tool
 
 Ranks products by quality, relevance, and user preferences.
+
+Outcome 9 (budget-aware value ranking): when the user stated a budget, ranking
+favors value — rating per dollar — within that budget. A $550 / 4.5★ pick
+outranks a $999 / 4.6★ pick on a "$500–$1,000" ask. Products outside the budget
+sink below everything inside it. With no stated budget, the legacy quality
+scoring is unchanged.
 """
 
 from app.core.centralized_logger import get_logger
 from app.core.error_manager import tool_error_handler
+import statistics
 import sys
 import os
-from typing import Dict, Any, List
-from app.core.error_manager import tool_error_handler
+from typing import Dict, Any, List, Optional
 
 # Add backend to path (portable path)
 backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
+
+# Budget/price parsing is shared with product_compose so ranking's notion of
+# "in budget" can never drift from the offer filter's (F2 / PR #92 semantics:
+# ceiling always hard; floor hard only on floor-only budgets).
+from .product_compose import _extract_price, _parse_budget  # noqa: E402
 
 logger = get_logger(__name__)
 
@@ -30,11 +41,52 @@ def _fuzzy_name_match(name_a: str, name_b: str, threshold: float = 0.35) -> bool
     return len(intersection) / len(union) >= threshold
 
 
+def _median_offer_price(product_name: str, affiliate_products: Dict[str, List]) -> Optional[float]:
+    """Median positive offer price across all providers for a product (fuzzy match).
+
+    Median is robust to scraped-noise outliers (the "$12 iPhone 15" case listing)
+    without duplicating compose's full outlier-dropping pass.
+    """
+    prices: List[float] = []
+    for provider_name, provider_groups in (affiliate_products or {}).items():
+        for group in provider_groups or []:
+            if not _fuzzy_name_match(product_name, group.get("product_name", "")):
+                continue
+            for offer in group.get("offers", []) or []:
+                p = _extract_price(offer)
+                if p is not None and p > 0:
+                    prices.append(p)
+    return statistics.median(prices) if prices else None
+
+
+def _best_rating(
+    product_name: str,
+    review_data: Dict[str, Any],
+    review_aspects: Optional[List[Dict[str, Any]]],
+    product: Dict[str, Any],
+) -> Optional[float]:
+    """Best available rating signal: review_search avg_rating, then legacy
+    review_aspects, then the normalized product's own rating."""
+    if review_data:
+        for rname, rbundle in review_data.items():
+            if _fuzzy_name_match(product_name, rname):
+                rating = (rbundle or {}).get("avg_rating", 0)
+                if rating:
+                    return float(rating)
+    if review_aspects:
+        for r in review_aspects:
+            if product_name in r.get("product", "") and r.get("rating"):
+                return float(r["rating"])
+    if product.get("rating"):
+        return float(product["rating"])
+    return None
+
+
 # Tool contract for planner
 TOOL_CONTRACT = {
     "name": "product_ranking",
     "intent": "product",
-    "purpose": "Scores and ranks products based on multiple quality factors including review sentiment, ratings, value for money, and relevance to user criteria. This tool combines evidence from reviews with search relevance to produce an ordered list from best to worst. Use this when user wants to know which product is best overall or needs help prioritizing between multiple options.",
+    "purpose": "Scores and ranks products based on multiple quality factors including review sentiment, ratings, value for money, and relevance to user criteria. When the user stated a budget, ranking favors rating-per-dollar value within that budget. This tool combines evidence from reviews with search relevance to produce an ordered list from best to worst. Use this when user wants to know which product is best overall or needs help prioritizing between multiple options.",
     "tools": {
         "pre": [],  # Needs review_aspects from evidence
         "post": []  # Compose is auto-added at end of intent
@@ -48,17 +100,21 @@ TOOL_CONTRACT = {
 @tool_error_handler(tool_name="product_ranking", error_message="Failed to rank products")
 async def product_ranking(state: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Rank products by quality and relevance.
+    Rank products by quality, relevance, and budget-aware value.
 
     Reads from state:
         - product_names: List of product name strings from product_search
         - normalized_products: Normalized product objects (optional, preferred over product_names)
         - review_aspects: Review analysis results (optional)
-        - affiliate_products: Affiliate link data by provider (optional)
-        - review_data: Review data from review_search (optional)
+        - affiliate_products: Affiliate link data by provider (optional, supplies prices)
+        - review_data: Review data from review_search (optional, supplies ratings)
+        - slots: Conversation slots; slots["budget"] is a STRING ("$500–$1,000",
+                 "under $100", "$500+") since PR #94 — legacy numbers still accepted
 
     Writes to state:
-        - ranked_products: Ranked list of products with scores
+        - ranked_products: Ranked list of products with scores. When a budget was
+          stated, items carry price / rating / in_budget / value_per_dollar so
+          compose can mirror the value order.
 
     Returns:
         {
@@ -80,10 +136,22 @@ async def product_ranking(state: Dict[str, Any]) -> Dict[str, Any]:
             products = [{"name": name, "title": name} for name in product_names]
 
         review_aspects = state.get("review_aspects")
-        review_data = state.get("review_data", {})
-        affiliate_products = state.get("affiliate_products", {})
+        review_data = state.get("review_data", {}) or {}
+        affiliate_products = state.get("affiliate_products", {}) or {}
 
-        logger.info(f"[product_ranking] Ranking {len(products)} products")
+        # Outcome 9: budget bounds from the conversation slots.
+        slots = state.get("slots", {}) or {}
+        budget_min, budget_max = _parse_budget(slots.get("budget"))
+        has_budget = budget_min is not None or budget_max is not None
+        # F2 semantics (shared with compose): ceiling is always hard; the floor is
+        # hard only on floor-only budgets ("$500+" = quality intent). On a range
+        # ("$80–$130") a cheaper product is a deal, not a violation.
+        floor_is_hard = budget_min is not None and budget_max is None
+
+        logger.info(
+            f"[product_ranking] Ranking {len(products)} products"
+            + (f" (budget: min={budget_min}, max={budget_max})" if has_budget else " (no budget stated)")
+        )
 
         ranked_items = []
 
@@ -152,14 +220,61 @@ async def product_ranking(state: Dict[str, Any]) -> Dict[str, Any]:
                     score += 0.2
                     reasons.append("Available for purchase")
 
-            # Normalize final score
+            # Normalize legacy score
             score = min(1.0, score)
 
-            ranked_items.append({
+            item: Dict[str, Any] = {
                 "product_name": product_name,
                 "score": round(score, 2),
-                "reasons": reasons
-            })
+                "reasons": reasons,
+            }
+
+            # ── Outcome 9: attach value signals when a budget was stated ──
+            if has_budget:
+                price = _median_offer_price(product_name, affiliate_products)
+                rating = _best_rating(product_name, review_data, review_aspects, product)
+                item["price"] = price
+                item["rating"] = rating
+                if price is not None:
+                    over_ceiling = budget_max is not None and price > budget_max
+                    under_hard_floor = floor_is_hard and price < budget_min
+                    item["in_budget"] = not (over_ceiling or under_hard_floor)
+                else:
+                    item["in_budget"] = None  # no price signal
+
+            ranked_items.append(item)
+
+        # ── Outcome 9: budget-aware value scoring ──
+        # Within the budget, rating-per-dollar decides: value candidates are lifted
+        # into a 2.0–3.0 score band (above every legacy 0–1 score), normalized so
+        # the best value lands at 3.0. Out-of-budget products are penalized below
+        # everything in budget. No budget → legacy scores stand untouched.
+        if has_budget:
+            value_candidates = [
+                it for it in ranked_items
+                if it.get("in_budget") and it.get("rating") and it.get("price")
+            ]
+            if value_candidates:
+                max_value = max(it["rating"] / it["price"] for it in value_candidates)
+                for it in value_candidates:
+                    value = it["rating"] / it["price"]
+                    it["value_per_dollar"] = round(value, 5)
+                    it["score"] = round(2.0 + (value / max_value), 2)
+                    if value == max_value:
+                        it["reasons"].insert(
+                            0, f"Best value in your budget (${it['price']:.0f} at {it['rating']}★)"
+                        )
+                    else:
+                        it["reasons"].insert(0, f"${it['price']:.0f} at {it['rating']}★ — in budget")
+                logger.info(
+                    f"[product_ranking] Value ranking applied to {len(value_candidates)} in-budget products; "
+                    f"best value: {max(value_candidates, key=lambda x: x['value_per_dollar'])['product_name']}"
+                )
+
+            for it in ranked_items:
+                if it.get("in_budget") is False:
+                    it["score"] = round(it["score"] * 0.3, 2)
+                    it["reasons"].append("Outside stated budget")
 
         # Sort by score descending
         ranked_items.sort(key=lambda x: x["score"], reverse=True)
