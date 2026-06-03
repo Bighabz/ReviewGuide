@@ -228,6 +228,81 @@ async def test_consolidated_graceful_when_fields_missing(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Tier 3b — voice pass folded into the single call
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_consolidated_voice_pass_folded_no_second_call(monkeypatch):
+    """With consolidated + USE_VOICE_PASS on, the self-edit directive rides the
+    single blog call and the separate voice_pass_reviser round-trip is skipped."""
+    monkeypatch.setattr(settings, "USE_CONSOLIDATED_COMPOSE", True)
+    monkeypatch.setattr(settings, "USE_VOICE_PASS", True)
+    fake_service = _fake_service()
+    state = _base_state(review_data=_REVIEW_DATA)
+
+    with patch("app.services.model_service.model_service", fake_service):
+        await product_compose(state)
+
+    names = _agent_names(fake_service)
+    assert "voice_pass_reviser" not in names, "voice pass must not be a separate call in consolidated mode"
+
+    blog_call = next(
+        c for c in fake_service.generate_compose.call_args_list
+        if c.kwargs.get("agent_name") == "blog_article_composer"
+    )
+    system_prompt = blog_call.kwargs["messages"][0]["content"]
+    assert "SELF-EDIT BEFORE EMITTING" in system_prompt
+
+
+@pytest.mark.asyncio
+async def test_consolidated_no_voice_pass_section_when_flag_off(monkeypatch):
+    """Consolidated but USE_VOICE_PASS off → no self-edit section, no revise call."""
+    monkeypatch.setattr(settings, "USE_CONSOLIDATED_COMPOSE", True)
+    monkeypatch.setattr(settings, "USE_VOICE_PASS", False)
+    fake_service = _fake_service()
+    state = _base_state(review_data=_REVIEW_DATA)
+
+    with patch("app.services.model_service.model_service", fake_service):
+        await product_compose(state)
+
+    blog_call = next(
+        c for c in fake_service.generate_compose.call_args_list
+        if c.kwargs.get("agent_name") == "blog_article_composer"
+    )
+    assert "SELF-EDIT BEFORE EMITTING" not in blog_call.kwargs["messages"][0]["content"]
+    assert "voice_pass_reviser" not in _agent_names(fake_service)
+
+
+@pytest.mark.asyncio
+async def test_legacy_voice_pass_still_a_separate_call_when_not_consolidated(monkeypatch):
+    """Non-consolidated path keeps the separate voice pass round-trip (unchanged)."""
+    monkeypatch.setattr(settings, "USE_CONSOLIDATED_COMPOSE", False)
+    monkeypatch.setattr(settings, "USE_VOICE_PASS", True)
+    # The legacy voice pass calls generate_compose with agent_name=voice_pass_reviser
+    # and expects a JSON body back; return a valid revise payload for that call.
+    revised = json.dumps({
+        "body": "Revised body.", "follow_up_question": "Revised q?", "transitional_reasoning": "",
+    })
+
+    async def _generate_compose(*args, **kwargs):
+        name = kwargs.get("agent_name")
+        if name == "blog_article_composer":
+            return _CONSOLIDATED_BLOG
+        if name == "voice_pass_reviser":
+            return revised
+        return "STRAY-SEPARATE-CALL"
+
+    fake_service = MagicMock()
+    fake_service.generate_compose = AsyncMock(side_effect=_generate_compose)
+    state = _base_state(review_data=_REVIEW_DATA)
+
+    with patch("app.services.model_service.model_service", fake_service):
+        await product_compose(state)
+
+    assert "voice_pass_reviser" in _agent_names(fake_service)
+
+
+# ---------------------------------------------------------------------------
 # Consolidated OFF (baseline parity)
 # ---------------------------------------------------------------------------
 
