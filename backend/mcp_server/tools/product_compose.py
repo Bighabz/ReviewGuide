@@ -148,6 +148,54 @@ def _dedupe_by_model_code(products: list) -> list:
     return deduped
 
 
+# ── $407-class listing honesty: condition labels ────────────────────────────
+# Marketplace offers priced way below market are usually renewed / used /
+# open-box listings. The price-outlier filter can't catch ones at 30-40% of
+# median (they look like plausible prices), so label them honestly instead of
+# hiding them: the eBay Browse API carries a condition field, and Google
+# Shopping listings put "Renewed" / "Refurbished" in the listing title (their
+# condition field is hardcoded "new" by the provider).
+
+_NON_NEW_TITLE_RE = re.compile(
+    r"\b(renewed|refurbished|refurb|pre-?owned|used|open[ -]box|like[ -]new)\b", re.I
+)
+
+# eBay condition strings that still mean "new" — never labeled.
+_NEW_CONDITIONS = {
+    "new", "brand new", "new with tags", "new with box", "new other", "new (other)",
+    "new other (see details)",
+}
+
+
+def _offer_condition_label(offer: dict) -> Optional[str]:
+    """'Renewed' / 'Used' / 'Open box' when an offer isn't new; None when it is.
+
+    Signals, in priority order: the provider's condition field (eBay Browse API
+    carries the listing's real condition), then listing-title keywords (Google
+    Shopping offers arrive with condition='new' regardless, so the title is the
+    only signal there).
+    """
+    raw_condition = offer.get("condition")
+    condition = raw_condition.strip().lower() if isinstance(raw_condition, str) else ""
+    if condition and condition not in _NEW_CONDITIONS:
+        if "refurb" in condition or "renewed" in condition:
+            return "Renewed"
+        if "open box" in condition:
+            return "Open box"
+        return "Used"
+
+    title = offer.get("title")
+    m = _NON_NEW_TITLE_RE.search(title) if isinstance(title, str) else None
+    if m:
+        kw = m.group(1).lower().replace("-", " ")
+        if kw in ("renewed", "refurbished", "refurb"):
+            return "Renewed"
+        if kw == "open box":
+            return "Open box"
+        return "Used"  # used, pre owned, like new
+    return None
+
+
 # Domain -> merchant name mapping for label-domain parity correction
 _DOMAIN_TO_MERCHANT = {
     "amazon.com": "Amazon",
@@ -804,6 +852,11 @@ async def product_compose(state: Dict[str, Any]) -> Dict[str, Any]:
                         "image_url": _str_or(offer.get("image_url"), ""),
                         "rating": offer.get("rating"),
                         "review_count": offer.get("review_count"),
+                        # Condition honesty ($407-class): the provider's condition
+                        # field + the listing title are what _offer_condition_label
+                        # reads to tag Renewed/Used offers on the card.
+                        "condition": _str_or(offer.get("condition"), ""),
+                        "title": _str_or(offer.get("title"), ""),
                         "source": provider
                     })
 
@@ -911,9 +964,12 @@ async def product_compose(state: Dict[str, Any]) -> Dict[str, Any]:
                             if _p is not None and _p < budget_min:
                                 o["below_budget_floor"] = True
 
-                # Best offer = first with a real price, or just first
+                # Best offer = first NEW offer with a real price ($407-class honesty:
+                # a renewed/used listing can't set the product's headline price when a
+                # new-condition offer exists), then any priced offer, then just first.
                 priced = [o for o in all_offers_for_product if o.get("price", 0) > 0]
-                product_copy["best_offer"] = priced[0] if priced else all_offers_for_product[0]
+                new_priced = [o for o in priced if not _offer_condition_label(o)]
+                product_copy["best_offer"] = (new_priced or priced or all_offers_for_product)[0]
                 product_copy["all_offers"] = all_offers_for_product
 
             products_with_offers.append(product_copy)
@@ -1859,17 +1915,21 @@ TRANSITIONAL RULES (transitional_reasoning field):
 
             # Build affiliate_links array for the card
             # Image priority: Serper/Google > Amazon > eBay (Google images are cleanest)
-            # Offer priority: Amazon first, then one eBay, then other retailers
+            # Offer priority: Amazon first, then one eBay, then other retailers.
+            # Within a source, NEW offers sort ahead of Renewed/Used ones ($407-class
+            # honesty — a renewed listing never becomes the card's lead offer when a
+            # new-condition offer from the same source exists).
             def _offer_sort_key(o):
                 src = o.get("source", "").lower()
                 url = o.get("url", "").lower()
+                non_new = _offer_condition_label(o) is not None
                 if "amazon" in url or "amzn.to" in url or src == "amazon":
-                    return (0, not o.get("image_url"))
+                    return (0, non_new, not o.get("image_url"))
                 if src == "serper_shopping":
-                    return (1, not o.get("image_url"))
+                    return (1, non_new, not o.get("image_url"))
                 if src == "ebay":
-                    return (2, not o.get("image_url"))
-                return (3, not o.get("image_url"))
+                    return (2, non_new, not o.get("image_url"))
+                return (3, non_new, not o.get("image_url"))
 
             # Offers eligible to become CLICKABLE buy-links. Exclude Google Shopping
             # (serper_shopping): we only earn on our Amazon affiliate links, so Shopping
@@ -1992,6 +2052,10 @@ TRANSITIONAL RULES (transitional_reasoning field):
                         budget_min is not None and budget_max is not None
                         and _link_price is not None and _link_price < budget_min
                     ),
+                    # $407-class honesty: "Renewed" / "Used" / "Open box" badge for
+                    # non-new listings (eBay condition field or title keywords) —
+                    # the price is real, the user just deserves to know why it's low.
+                    "condition_label": _offer_condition_label(o),
                 })
 
             if not affiliate_links:

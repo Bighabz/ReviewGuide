@@ -65,6 +65,9 @@ interface AffiliateLink {
   // F2: offer priced below the user's stated budget range — shown as a deal
   // with an "Under budget" badge rather than hidden.
   below_budget_floor?: boolean
+  // $407-class honesty: "Renewed" / "Used" / "Open box" for non-new listings —
+  // the low price is real, the user just deserves to know why.
+  condition_label?: string | null
 }
 
 interface ProductReviewProps {
@@ -268,6 +271,22 @@ export default function ProductReview({ product }: ProductReviewProps) {
                         }}
                       >
                         Under budget
+                      </span>
+                    )}
+                    {link.condition_label && (
+                      <span
+                        data-testid="condition-badge"
+                        className="uppercase px-1.5 py-0.5 rounded-full whitespace-nowrap"
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 600,
+                          letterSpacing: '0.06em',
+                          color: 'var(--ink-2)',
+                          background: 'var(--paper-alt)',
+                          border: '1px solid var(--line)',
+                        }}
+                      >
+                        {link.condition_label}
                       </span>
                     )}
                   </div>

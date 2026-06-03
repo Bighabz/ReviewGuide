@@ -103,3 +103,94 @@ describe('ProductReview — Where to buy', () => {
     expect(screen.getByText('Check price →')).toBeInTheDocument()
   })
 })
+
+describe('ProductReview - condition badges ($407-class honesty)', () => {
+  it('shows the condition label badge on non-new offers', () => {
+    const product = makeProduct({
+      affiliate_links: [
+        {
+          product_id: 'ebay-1',
+          title: 'eBay - iPhone 15 Pro',
+          price: 407.0,
+          currency: 'USD',
+          affiliate_link: 'https://www.ebay.com/itm/iphone-used',
+          merchant: 'eBay',
+          condition_label: 'Used',
+        },
+        {
+          product_id: 'amazon-1',
+          title: 'Amazon - iPhone 15 Pro',
+          price: 999.0,
+          currency: 'USD',
+          affiliate_link: 'https://www.amazon.com/dp/iphone',
+          merchant: 'Amazon',
+          condition_label: null,
+        },
+      ],
+    })
+    render(<ProductReview product={product} />)
+
+    const badges = screen.getAllByTestId('condition-badge')
+    expect(badges).toHaveLength(1)
+    expect(badges[0]).toHaveTextContent('Used')
+
+    // The badge belongs to the $407 eBay offer, not the $999 Amazon one
+    const ebayLink = screen.getByText('USD 407.00').closest('a')
+    expect(ebayLink).toContainElement(badges[0])
+  })
+
+  it('renders Renewed and Open box labels verbatim', () => {
+    const product = makeProduct({
+      affiliate_links: [
+        {
+          product_id: 'ebay-1',
+          title: 'eBay - iPhone 15 Pro Refurb',
+          price: 450.0,
+          currency: 'USD',
+          affiliate_link: 'https://www.ebay.com/itm/refurb',
+          merchant: 'eBay',
+          condition_label: 'Renewed',
+        },
+        {
+          product_id: 'ebay-2',
+          title: 'eBay - iPhone 15 Pro Open Box',
+          price: 700.0,
+          currency: 'USD',
+          affiliate_link: 'https://www.ebay.com/itm/openbox',
+          merchant: 'Best Buy',
+          condition_label: 'Open box',
+        },
+      ],
+    })
+    render(<ProductReview product={product} />)
+
+    const badges = screen.getAllByTestId('condition-badge')
+    expect(badges.map((b) => b.textContent)).toEqual(['Renewed', 'Open box'])
+  })
+
+  it('renders no condition badge when all offers are new', () => {
+    render(<ProductReview product={makeProduct()} />)
+    expect(screen.queryByTestId('condition-badge')).not.toBeInTheDocument()
+  })
+
+  it('condition badge and under-budget badge can coexist on one offer', () => {
+    const product = makeProduct({
+      affiliate_links: [
+        {
+          product_id: 'ebay-1',
+          title: 'eBay - cheap renewed below budget floor',
+          price: 60.0,
+          currency: 'USD',
+          affiliate_link: 'https://www.ebay.com/itm/cheap-renewed',
+          merchant: 'eBay',
+          below_budget_floor: true,
+          condition_label: 'Renewed',
+        },
+      ],
+    })
+    render(<ProductReview product={product} />)
+
+    expect(screen.getByTestId('under-budget-badge')).toBeInTheDocument()
+    expect(screen.getByTestId('condition-badge')).toHaveTextContent('Renewed')
+  })
+})
