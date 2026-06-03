@@ -62,6 +62,9 @@ interface AffiliateLink {
   image_url?: string
   rating?: number
   review_count?: number
+  // F2: offer priced below the user's stated budget range — shown as a deal
+  // with an "Under budget" badge rather than hidden.
+  below_budget_floor?: boolean
 }
 
 interface ProductReviewProps {
@@ -250,6 +253,22 @@ export default function ProductReview({ product }: ProductReviewProps) {
                         <Star size={10} fill="currentColor" />
                         <span className="text-xs">{link.rating}</span>
                       </div>
+                    )}
+                    {link.below_budget_floor && (
+                      <span
+                        data-testid="under-budget-badge"
+                        className="uppercase px-1.5 py-0.5 rounded-full whitespace-nowrap"
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 600,
+                          letterSpacing: '0.06em',
+                          color: 'var(--terra)',
+                          background: 'var(--paper-alt)',
+                          border: '1px solid var(--line)',
+                        }}
+                      >
+                        Under budget
+                      </span>
                     )}
                   </div>
                   <p className="text-sm font-semibold text-[var(--text)] truncate">{link.title}</p>
