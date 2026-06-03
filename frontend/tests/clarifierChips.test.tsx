@@ -506,3 +506,70 @@ describe('Clarifier chips — question locking after an answer (QA4 F0b)', () =>
     spy.mockRestore()
   })
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Outcome 8 — skip-all affordance ("Just show me the best overall")
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('Clarifier skip-all affordance (Outcome 8)', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('renders the skip-all button on a multi-question card', () => {
+    render(
+      <Message
+        message={makeClarifierMessage([LAPTOP_USE_CASE_QUESTION, LAPTOP_BUDGET_QUESTION]) as any}
+      />
+    )
+    const skip = screen.getByTestId('clarifier-skip-all')
+    expect(skip).toBeInTheDocument()
+    expect(skip).toHaveTextContent('Just show me the best overall')
+  })
+
+  it('renders the skip-all button on a single-question card too', () => {
+    render(<Message message={makeClarifierMessage([LAPTOP_USE_CASE_QUESTION]) as any} />)
+    expect(screen.getByTestId('clarifier-skip-all')).toBeInTheDocument()
+  })
+
+  it('tapping skip-all sends the skip phrase and locks the card', () => {
+    const dispatched: Event[] = []
+    const spy = vi
+      .spyOn(window, 'dispatchEvent')
+      .mockImplementation((event: Event) => {
+        dispatched.push(event)
+        return true
+      })
+
+    render(
+      <Message
+        message={makeClarifierMessage([LAPTOP_USE_CASE_QUESTION, LAPTOP_BUDGET_QUESTION]) as any}
+      />
+    )
+    fireEvent.click(screen.getByTestId('clarifier-skip-all'))
+
+    const sendEvents = dispatched.filter((e) => e.type === 'sendSuggestion')
+    expect(sendEvents).toHaveLength(1)
+    expect((sendEvents[0] as CustomEvent).detail.question).toBe('Just show me the best overall')
+
+    // Card locks: skip-all disappears, chips disable, no double-send possible
+    expect(screen.queryByTestId('clarifier-skip-all')).toBeNull()
+    const chips = screen.getAllByTestId('clarifier-option-chip')
+    chips.forEach((c) => expect((c as HTMLButtonElement).disabled).toBe(true))
+
+    fireEvent.click(chips[0])
+    expect(dispatched.filter((e) => e.type === 'sendSuggestion')).toHaveLength(1)
+    spy.mockRestore()
+  })
+
+  it('skip-all disappears after a normal submit (no stale escape hatch)', () => {
+    const spy = vi.spyOn(window, 'dispatchEvent').mockImplementation(() => true)
+
+    render(<Message message={makeClarifierMessage([LAPTOP_USE_CASE_QUESTION]) as any} />)
+    // Single-question card: tapping a chip submits immediately
+    fireEvent.click(screen.getByText('Gaming'))
+
+    expect(screen.queryByTestId('clarifier-skip-all')).toBeNull()
+    spy.mockRestore()
+  })
+})
