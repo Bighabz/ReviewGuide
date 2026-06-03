@@ -226,6 +226,32 @@ def test_consolidated_role_extends_blog_role_without_modifying_it():
     assert CONSOLIDATED_MAX_TOKENS > GENERATION_MAX_TOKENS
 
 
+def test_consolidated_role_in_sync_with_production():
+    """The eval's CONSOLIDATED_ROLE must equal what production builds via
+    _consolidated_blog_role(blog_role). product_compose owns the canonical
+    transform; this pins the bake-off to it (sibling of the BLOG_ROLE pin)."""
+    from mcp_server.tools.product_compose import (
+        _consolidated_blog_role,
+        _BLOG_SCHEMA_TAIL as PROD_SCHEMA_TAIL,
+    )
+
+    # Production's schema-tail constant must actually occur in the production
+    # blog_role, or the .replace() is a silent no-op and the new fields vanish.
+    source = (_BACKEND_DIR / "mcp_server" / "tools" / "product_compose.py").read_text(encoding="utf-8")
+    match = re.search(r'blog_role = """(.*?)"""', source, re.DOTALL)
+    assert match, "Could not find blog_role in product_compose.py"
+    assert PROD_SCHEMA_TAIL in match.group(1), (
+        "_BLOG_SCHEMA_TAIL no longer occurs in production blog_role — the "
+        "consolidated .replace() would be a no-op. Update _BLOG_SCHEMA_TAIL."
+    )
+
+    # And the eval's consolidated role must be byte-identical to production's.
+    assert _consolidated_blog_role(BLOG_ROLE) == CONSOLIDATED_ROLE, (
+        "CONSOLIDATED_ROLE has drifted from production's _consolidated_blog_role "
+        "transform — update eval/voice_eval.py to match product_compose.py."
+    )
+
+
 def test_consolidated_assembly_uses_consolidated_role():
     case = CASES_BY_ID["earbuds_under_100"]
     normal = assemble_messages(case)

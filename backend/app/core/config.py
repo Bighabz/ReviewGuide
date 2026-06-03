@@ -264,6 +264,16 @@ class Settings(BaseSettings):
     # fallback to the draft on any failure. Default off.
     USE_VOICE_PASS: bool = Field(default=False, description="Run a draft→revise voice pass over the assembled blog body (Tier 3)")
 
+    # Tier 3a compose consolidation: fold the per-product review consensus (top 3)
+    # and the card descriptions into the single blog_article call's JSON schema,
+    # deleting the separate consensus:* and descriptions LLM calls (5-6 round-trips
+    # → 1). The blog writer already has every product's reviews/ratings in its
+    # input, so it writes consensus + descriptions from the same evidence. Bake-off
+    # (eval/SINGLE_CALL_BAKEOFF.md) showed this is quality-neutral on Haiku 4.5.
+    # Graceful: if a consensus/description entry is missing, the template/empty
+    # fallback fills it. Default off.
+    USE_CONSOLIDATED_COMPOSE: bool = Field(default=False, description="Fold review consensus + descriptions into the single blog compose call (Tier 3a)")
+
     # Outcome 6 PROTOTYPE (conversational engine): answer-aware follow-ups.
     # The clarifier asks use_case ALONE first; once answered, the features
     # question is generated with knowledge of that answer, so it can adapt
