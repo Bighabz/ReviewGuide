@@ -9,6 +9,8 @@ from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
 from app.core.colored_logging import get_colored_logger
+from app.core.config import settings
+from app.core.ip_utils import get_real_client_ip
 
 logger = get_logger(__name__)
 colored_logger = get_colored_logger(__name__)
@@ -41,7 +43,11 @@ class LoggingMiddleware(BaseHTTPMiddleware):
             "method": request.method,
             "path": request.url.path,
             "query_params": str(request.query_params),
-            "client_ip": request.client.host if request.client else None,
+            # Proxy-aware: behind Railway's proxy, request.client.host is the
+            # proxy's IP for every request — useless for debugging. Resolve the
+            # real client IP the same way the rate limiter does (X-Forwarded-For,
+            # trusted only when the connecting IP is a known proxy CIDR).
+            "client_ip": get_real_client_ip(request, settings.TRUSTED_PROXY_CIDRS),
             "user_agent": request.headers.get("user-agent"),
         }
 
