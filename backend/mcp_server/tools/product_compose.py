@@ -1158,6 +1158,23 @@ Products to describe:
         # Gather all data the blog writer needs
         blog_data_parts = []
         blog_data_parts.append(f"User asked: \"{user_message}\"")
+
+        # Outcome 5: comparison-dimension weighting. When the clarifier captured
+        # which dimension decides ("Camera quality" on an "iPhone 15 vs Pixel 8"
+        # ask), the verdict must be written around that dimension. This rides the
+        # USER content (blog_data / blog_messages), never blog_role — the eval
+        # prod-sync test pins blog_role byte-for-byte.
+        comparison_dimension = str((slots or {}).get("comparison_dimension") or "").strip()
+        dimension_directive = ""
+        if comparison_dimension:
+            dimension_directive = (
+                f'\nDECIDING FACTOR: the user said "{comparison_dimension}" matters most. '
+                "Write the verdict around that dimension — name which product wins on it and why. "
+                "Other dimensions are secondary context, mentioned only where they change the call."
+            )
+            blog_data_parts.append(dimension_directive.strip())
+            logger.info(f"[product_compose] Comparison dimension: {comparison_dimension}")
+
         blog_product_names = []  # Track which products are in the blog (for price comparison filtering)
 
         # Products with reviews (use fuzzy matching for offer lookup)
@@ -1390,7 +1407,10 @@ TRANSITIONAL RULES (transitional_reasoning field):
                     history=_format_history(state.get("conversation_history")),
                     tool_outputs=blog_data,
                 )},
-                {"role": "user", "content": f'User asked: "{user_message}"'},
+                # The grounded path's user content is just the query — the comparison
+                # dimension directive (Outcome 5) must ride here too, since blog_data
+                # lands in tool_outputs rather than the user message.
+                {"role": "user", "content": f'User asked: "{user_message}"{dimension_directive}'},
             ]
         else:
             blog_messages = [

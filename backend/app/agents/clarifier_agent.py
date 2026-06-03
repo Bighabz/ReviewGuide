@@ -74,6 +74,49 @@ def _is_skip_all(message: str) -> bool:
     return msg in _SKIP_ALL_PHRASES
 
 
+# ── Outcome 5: comparison-mode clarification ────────────────────────────────
+# "iPhone 15 vs Pixel 8" doesn't need use_case/budget questions — it needs ONE
+# question: which dimension should decide the verdict. The answer rides the
+# comparison_dimension slot into product_compose, which writes the verdict
+# around that dimension.
+
+_VS_SPLIT = re.compile(r"\s+(?:vs\.?|versus)\s+", re.IGNORECASE)
+_COMPARISON_LEAD_WORDS = re.compile(
+    r"^(?:compare|comparing|best|which is better[,:]?|which one is better[,:]?|"
+    r"what'?s better[,:]?|whats better[,:]?)\s+",
+    re.IGNORECASE,
+)
+
+
+def _detect_comparison_query(message: str) -> Optional[List[str]]:
+    """Detect an explicit two-product "X vs Y" query. Returns [a, b] or None.
+
+    Deliberately conservative:
+    - Only the two-product form (three-way comparisons keep the generic flow).
+    - Bare brand-vs-brand ("Dyson vs Shark" — single words, no digits) is NOT
+      comparison mode: those need the ambiguous-brand category question first
+      (you can't pick a deciding dimension without knowing vacuums vs hair
+      dryers). A side counts as a product when it has 2+ words or a digit.
+    """
+    msg = _strip_suggestion_prefix(message or "").strip().rstrip("?!. ")
+    if not msg or len(msg) > 120:
+        return None
+    parts = _VS_SPLIT.split(msg)
+    if len(parts) != 2:
+        return None
+    a = _COMPARISON_LEAD_WORDS.sub("", parts[0]).strip(" ,:-")
+    b = parts[1].strip(" ,:-")
+    if not a or not b or len(a) > 60 or len(b) > 60:
+        return None
+
+    def _looks_like_product(name: str) -> bool:
+        return len(name.split()) >= 2 or any(c.isdigit() for c in name)
+
+    if not (_looks_like_product(a) or _looks_like_product(b)):
+        return None
+    return [a, b]
+
+
 def _detect_refinement_action(message: str) -> Optional[str]:
     """Map a refinement-chip message to an action.
 
@@ -665,6 +708,27 @@ class ClarifierAgent(BaseAgent):
                     logger.info(f"[Clarifier Agent] Detected ambiguous brand-only query: {detected_ambiguous} — requesting category clarification")
                     missing_required_slots.append("category")
 
+        # Outcome 5: comparison-mode clarification. An explicit "X vs Y" query gets
+        # exactly ONE question — which dimension should decide the verdict — instead
+        # of the expert use_case/budget/features trio. The named products are stored
+        # so the question generator can offer dimensions appropriate to the pair, and
+        # the answered dimension flows to product_compose via the
+        # comparison_dimension slot (slots pass through whole — no new wiring).
+        comparison_pair = None
+        if intent == "product" and "category" not in missing_required_slots:
+            # The ambiguous-brand check above takes precedence: "Dyson vs Shark"
+            # needs a category before a dimension makes sense.
+            comparison_pair = _detect_comparison_query(
+                state.get("sanitized_text") or state.get("user_message", "")
+            )
+        if comparison_pair and not current_slots.get("comparison_dimension"):
+            logger.info(
+                f"[Clarifier Agent] Comparison query: {comparison_pair[0]!r} vs {comparison_pair[1]!r} "
+                "— asking the deciding dimension (comparison mode)"
+            )
+            current_slots["comparison_products"] = comparison_pair
+            missing_required_slots = ["comparison_dimension"]
+
         # Conversational-expert flow (supersedes the old blueprint §8 budget-first
         # rule): on a substantive product query, ask what a domain specialist would
         # ask — three questions, in this order:
@@ -677,7 +741,8 @@ class ClarifierAgent(BaseAgent):
         #                  the LLM, never a generic "Under $50" tier list
         # All three are OPTIONAL slots on product_search, so the clarifier would
         # never ask them on its own.
-        if intent == "product":
+        # Comparison mode replaces this flow entirely (one dimension question).
+        if intent == "product" and "comparison_dimension" not in missing_required_slots:
             # F5: a different-category context must not satisfy these checks — its
             # budget/use_case/features answers belong to another product entirely.
             _ctx = last_ctx if context_relates else {}
@@ -1035,6 +1100,23 @@ Each option is 1-4 words. Also generate "free_text_hint": a short affordance lik
             if pack:
                 expert_hint += format_pack_hint(pack)
                 logger.info(f"[Clarifier Agent] Using curated question pack (matched on '{matched_on}')")
+
+        # Outcome 5: comparison-dimension question. The user named two specific
+        # products — the only question worth asking is which dimension decides.
+        if intent == "product" and "comparison_dimension" in missing_slots:
+            pair = current_slots.get("comparison_products") or []
+            pair_str = " vs ".join(str(p) for p in pair) if pair else user_message
+            expert_hint += f"""
+COMPARISON MODE — the user is deciding between: {pair_str}
+- "comparison_dimension" slot = ask "What matters most to you?" (or a natural variant that names both products)
+- Its "options" must be the 3-5 dimensions that genuinely differentiate THESE two specific products:
+  * phones → Camera / Battery life / Ecosystem / Price
+  * laptops → Performance / Battery life / Build quality / Price
+  * headphones → Sound quality / Noise cancelling / Comfort / Price
+  Generalize for other product types. ALWAYS include Price as one of the options.
+- This question is single_select — never multi_select.
+- Do NOT ask about use case or budget; the user already knows what they're buying.
+"""
 
         role_prompt = f"""You collect missing information from the user before downstream tools run.
 
