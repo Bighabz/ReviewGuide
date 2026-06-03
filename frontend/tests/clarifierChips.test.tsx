@@ -573,3 +573,81 @@ describe('Clarifier skip-all affordance (Outcome 8)', () => {
     spy.mockRestore()
   })
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 7. Preference-biased chips — "(like last time)" (Outcome 7)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('Clarifier preference chips (Outcome 7)', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  const QUESTION_WITH_PREFERENCE = {
+    slot: 'use_case',
+    question: 'What will you mainly use it for?',
+    // Backend already moved the stored answer to the front
+    options: ['Gaming', 'Student / everyday', 'Creative / video editing', 'Business / office'],
+    free_text_hint: 'or describe your own use',
+    preference_chip: 'Gaming',
+  }
+
+  it('renders "(like last time)" on the preference chip', () => {
+    render(<Message message={makeClarifierMessage([QUESTION_WITH_PREFERENCE]) as any} />)
+
+    const tag = screen.getByTestId('clarifier-preference-tag')
+    expect(tag.textContent).toContain('like last time')
+    // The tag lives inside the Gaming chip
+    const chips = screen.getAllByTestId('clarifier-option-chip')
+    const gamingChip = chips.find((c) => c.textContent?.includes('Gaming'))
+    expect(gamingChip?.contains(tag)).toBe(true)
+  })
+
+  it('only the preference chip carries the tag — other chips are plain', () => {
+    render(<Message message={makeClarifierMessage([QUESTION_WITH_PREFERENCE]) as any} />)
+
+    expect(screen.getAllByTestId('clarifier-preference-tag')).toHaveLength(1)
+    const chips = screen.getAllByTestId('clarifier-option-chip')
+    const studentChip = chips.find((c) => c.textContent?.includes('Student / everyday'))
+    expect(studentChip?.textContent).not.toContain('like last time')
+  })
+
+  it('no tag renders when preference_chip is absent (first-time users)', () => {
+    render(<Message message={makeClarifierMessage([LAPTOP_USE_CASE_QUESTION]) as any} />)
+    expect(screen.queryByTestId('clarifier-preference-tag')).toBeNull()
+  })
+
+  it('tapping the preference chip still sends the bare option text (no tag leakage)', () => {
+    const spy = vi.spyOn(window, 'dispatchEvent').mockImplementation(() => true)
+
+    render(<Message message={makeClarifierMessage([QUESTION_WITH_PREFERENCE]) as any} />)
+    // Single-question card: tapping a single-select chip submits immediately
+    const chips = screen.getAllByTestId('clarifier-option-chip')
+    const gamingChip = chips.find((c) => c.textContent?.includes('Gaming'))!
+    fireEvent.click(gamingChip)
+
+    const sent = spy.mock.calls
+      .map((c) => c[0] as CustomEvent)
+      .find((e) => e.type === 'sendSuggestion')
+    expect(sent).toBeTruthy()
+    // The dispatched answer is the option text only — "(like last time)" never leaks
+    expect((sent as CustomEvent).detail.question).toBe('Gaming')
+    spy.mockRestore()
+  })
+
+  it('preference chip works on multi-question cards too', () => {
+    const budgetWithPreference = {
+      ...LAPTOP_BUDGET_QUESTION,
+      options: ['$500–$800', 'Under $500', '$800–$1,200', '$1,200+'],
+      preference_chip: '$500–$800',
+    }
+    render(
+      <Message
+        message={makeClarifierMessage([QUESTION_WITH_PREFERENCE, budgetWithPreference]) as any}
+      />
+    )
+
+    const tags = screen.getAllByTestId('clarifier-preference-tag')
+    expect(tags).toHaveLength(2)
+  })
+})

@@ -268,7 +268,7 @@ async def test_substantive_product_query_asks_use_case_first_budget_last(agent):
 
     captured = {}
 
-    async def fake_generate_followups(missing_slots, current_slots, user_message, intent, conversation_history=None):
+    async def fake_generate_followups(missing_slots, current_slots, user_message, intent, conversation_history=None, user_preferences=None):
         captured["missing_slots"] = list(missing_slots)
         return {
             "intro": "x",
@@ -360,7 +360,7 @@ async def test_features_rides_along_between_use_case_and_budget(agent):
 
     captured = {}
 
-    async def fake_generate_followups(missing_slots, current_slots, user_message, intent, conversation_history=None):
+    async def fake_generate_followups(missing_slots, current_slots, user_message, intent, conversation_history=None, user_preferences=None):
         captured["missing_slots"] = list(missing_slots)
         return {
             "intro": "x",
@@ -693,7 +693,7 @@ async def test_bare_best_x_query_skips_extraction_llm_call(agent):
 
     captured = {}
 
-    async def fake_generate_followups(missing_slots, current_slots, user_message, intent, conversation_history=None):
+    async def fake_generate_followups(missing_slots, current_slots, user_message, intent, conversation_history=None, user_preferences=None):
         captured["missing_slots"] = list(missing_slots)
         captured["current_slots"] = dict(current_slots)
         return {
@@ -968,7 +968,7 @@ async def test_cross_category_bare_query_asks_questions_despite_context(agent):
 
     captured = {}
 
-    async def fake_generate_followups(missing_slots, current_slots, user_message, intent, conversation_history=None):
+    async def fake_generate_followups(missing_slots, current_slots, user_message, intent, conversation_history=None, user_preferences=None):
         captured["missing_slots"] = list(missing_slots)
         captured["current_slots"] = dict(current_slots)
         return {
@@ -1047,7 +1047,7 @@ async def test_fresh_session_unaffected_by_f5_gates(agent):
 
     captured = {}
 
-    async def fake_generate_followups(missing_slots, current_slots, user_message, intent, conversation_history=None):
+    async def fake_generate_followups(missing_slots, current_slots, user_message, intent, conversation_history=None, user_preferences=None):
         captured["missing_slots"] = list(missing_slots)
         return {
             "intro": "x",
@@ -1373,7 +1373,7 @@ async def test_comparison_query_asks_dimension_not_expert_trio(agent):
         "budget": None, "features": None,
     })
 
-    async def fake_generate_questions(missing_slots, current_slots, user_message, intent, conversation_history=None):
+    async def fake_generate_questions(missing_slots, current_slots, user_message, intent, conversation_history=None, user_preferences=None):
         captured["missing_slots"] = list(missing_slots)
         captured["current_slots"] = dict(current_slots)
         return {
@@ -1421,7 +1421,7 @@ async def test_non_comparison_query_keeps_expert_trio(agent):
         "category": "laptops", "use_case": None, "budget": None, "features": None,
     })
 
-    async def fake_generate_questions(missing_slots, current_slots, user_message, intent, conversation_history=None):
+    async def fake_generate_questions(missing_slots, current_slots, user_message, intent, conversation_history=None, user_preferences=None):
         captured["missing_slots"] = list(missing_slots)
         return {"intro": "", "questions": [
             {"slot": s, "question": f"{s}?", "options": ["a", "b"]} for s in missing_slots
