@@ -1,3 +1,84 @@
+# Eval Harnesses
+
+Two dev/CI-signal harnesses live here. Nothing in the live request path
+imports either of them.
+
+1. **Voice bake-off** (`voice_eval.py`) — compares candidate models on the
+   production blog prompt via OpenRouter. See "Voice Model Bake-Off" below.
+2. **Clarifier question quality** (`clarifier_eval.py`) — scores the
+   production clarifier's generated questions against the curated category
+   packs. See "Clarifier Question-Quality Eval" below.
+
+---
+
+# Clarifier Question-Quality Eval (Outcome 10)
+
+For every category in `CATEGORY_QUESTION_PACKS`, runs the **production**
+question generation (`ClarifierAgent._generate_followup_questions` — real
+prompt assembly, normalization, and pack enforcement) against a live LLM and
+scores the output deterministically against the pack.
+
+## Running
+
+From `backend/` (reads `OPENAI_API_KEY` from env or `backend/.env`):
+
+```bash
+# Sanity check: assemble all prompts, zero API calls
+python -m eval.clarifier_eval --dry-run
+
+# Full eval — one generation per category (~$0.01 total on gpt-4o-mini)
+python -m eval.clarifier_eval
+
+# Subset / model override
+python -m eval.clarifier_eval --categories laptops,phones,mattresses
+python -m eval.clarifier_eval --model gpt-4o
+
+# CI mode: skips cleanly without a key, exits 1 below the pass-rate threshold
+python -m eval.clarifier_eval --ci --threshold 0.9
+```
+
+Smoke tests (no network):
+
+```bash
+pytest eval/test_clarifier_eval_smoke.py
+```
+
+## What gets checked (per category)
+
+| Check | Meaning |
+|---|---|
+| `slots_complete` | One question per missing slot (use_case, features, budget) |
+| `order_ok` | use_case leads, budget closes |
+| `use_case_options_ok` | Options match the pack exactly |
+| `features_options_ok` | Options match the pack exactly |
+| `multi_select_ok` | Features multi-select flag matches the pack; use_case/budget never multi-select |
+| `budget_brackets_ok` | Budget brackets match the pack (no "Under $50" laptops) |
+| `no_fallback_wording` | No "What is the use case?" stubs (means the LLM omitted a slot) |
+| `hints_ok` | Deterministic microcopy per question kind |
+| `intro_ok` | Intro is contextual, not a production fallback string |
+
+Reports land in `eval/results/<timestamp>_clarifier.md` + `.csv` (gitignored).
+
+## CI
+
+The `clarifier-eval` job in `.github/workflows/voice-integration.yml` runs the
+smoke tests plus the live eval as a **non-blocking signal**
+(`continue-on-error: true`) — same pattern as the Claude voice job. It skips
+cleanly when `OPENAI_API_KEY` isn't configured (fork PRs).
+
+## Keeping it honest
+
+- The scorer's microcopy/ordering expectations are guarded by
+  `test_production_enforcement_satisfies_scorer`, which runs the **real**
+  production normalization with a mocked sloppy LLM response and asserts the
+  scorer passes it clean. If clarifier_agent.py enforcement or the scorer
+  drifts, that test fails.
+- Generation parameters are production's own (the harness swaps only the
+  transport, not the call): `settings.CLARIFIER_MODEL`, temperature 0.3,
+  `settings.CLARIFIER_MAX_TOKENS`, JSON object mode.
+
+---
+
 # Voice Model Bake-Off
 
 Same prompt, swap the model. This harness runs the **production** blog_article
