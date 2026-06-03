@@ -63,11 +63,16 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # The composer model that CI tests must match settings.COMPOSER_MODEL.
-  # Update BOTH this and backend/app/core/config.py in lockstep when
-  # rotating models. The pin-assertion step (below) enforces the
-  # invariant — silent drift fails CI.
+  # The OpenAI fallback model (settings.COMPOSER_MODEL). Used only when
+  # OpenRouter is unkeyed. Update BOTH this and backend/app/core/config.py
+  # in lockstep when rotating it.
   CI_COMPOSER_MODEL: gpt-4o-mini
+  # The model prod ACTUALLY composes with: generate_compose routes via
+  # OpenRouter (USE_OPENROUTER_COMPOSE default True + OPENROUTER_API_KEY on
+  # Railway), so the effective compose model is OPENROUTER_COMPOSE_MODEL — NOT
+  # the fallback above. The effective-model pin step enforces this; pinning
+  # only COMPOSER_MODEL let the real model drift unnoticed (PR #6 class).
+  CI_OPENROUTER_COMPOSE_MODEL: anthropic/claude-haiku-4.5
 
 jobs:
   voice-foundation:
@@ -137,12 +142,49 @@ jobs:
           )
           print(f'pin OK: composer model = {actual}')
           "
+      - name: Effective compose-model pin assertion (the model prod really runs)
+        working-directory: backend
+        env:
+          ENV: test
+          SECRET_KEY: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+          ADMIN_PASSWORD: test-admin-password
+          DATABASE_URL: 'sqlite+aiosqlite:///:memory:'
+          REDIS_URL: 'redis://localhost:6379/0'
+          OPENAI_API_KEY: sk-test-placeholder
+          RATE_LIMIT_ENABLED: 'false'
+          LOG_ENABLED: 'false'
+          CI_OPENROUTER_COMPOSE_MODEL: ${{ env.CI_OPENROUTER_COMPOSE_MODEL }}
+        # Prod composes via OpenRouter, so COMPOSER_MODEL (gpt-4o-mini) is only
+        # the fallback. This pins the EFFECTIVE model — a change to the real
+        # compose model now fails CI instead of shipping silently.
+        run: |
+          python -c "
+          import os
+          from app.core.config import settings
+          pin = os.environ['CI_OPENROUTER_COMPOSE_MODEL']
+          assert settings.USE_OPENROUTER_COMPOSE is True, (
+              'USE_OPENROUTER_COMPOSE default flipped off — prod compose routing changed. '
+              'Update config.py + this workflow in lockstep.'
+          )
+          actual = settings.OPENROUTER_COMPOSE_MODEL
+          assert actual == pin, (
+              f'Effective compose-model drift: settings.OPENROUTER_COMPOSE_MODEL={actual!r} '
+              f'but CI_OPENROUTER_COMPOSE_MODEL={pin!r}. This is the model prod ACTUALLY '
+              'runs — update both in lockstep (config.py + voice-integration.yml).'
+          )
+          print(f'effective-model pin OK: compose model = {actual} (via OpenRouter)')
+          "
 
-  voice-live-prod-model:
-    name: Voice live compliance (gpt-4o-mini — prod-model gate)
+  voice-live-fallback-model:
+    name: Voice live compliance (gpt-4o-mini — OpenAI FALLBACK path)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: voice-foundation
+    # NOTE: this exercises the OpenAI fallback (gpt-4o-mini) — the path prod
+    # uses only when OpenRouter is unkeyed. The generate()-based compose tools
+    # (intro/unclear/general_compose) run here; product_compose's real model is
+    # gated in voice-live-openrouter below. Kept because the fallback must also
+    # stay voice-clean.
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python 3.11
@@ -155,15 +197,16 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
-      - name: Live compliance — gpt-4o-mini (prod model)
+      - name: Live compliance — gpt-4o-mini (OpenAI fallback)
         working-directory: backend
         env:
           ENV: test
           SECRET_KEY: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
           DATABASE_URL: 'sqlite+aiosqlite:///:memory:'
           REDIS_URL: 'redis://localhost:6379/0'
-          # Routes composer calls to OpenAI gpt-4o-mini (matches prod).
-          # USE_ANTHROPIC_COMPOSE deliberately omitted (defaults to false).
+          # Routes composer calls to OpenAI gpt-4o-mini (the fallback).
+          # OpenRouter + Anthropic deliberately omitted so generate_compose
+          # falls through to COMPOSER_MODEL.
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || 'sk-test-placeholder' }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           RATE_LIMIT_ENABLED: 'false'
@@ -171,6 +214,48 @@ jobs:
         # Run only the @integration tests; foundation already covered
         # structural in the prior job.
         run: python -m pytest tests/test_voice_integration.py -v -m integration
+
+  voice-live-openrouter:
+    name: Voice live compliance (Haiku 4.5 via OpenRouter — REAL prod-model gate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: voice-foundation
+    # THE honest prod-model gate: product_compose routes via generate_compose →
+    # OpenRouter, so this is the only job that exercises the model prod actually
+    # composes with (OPENROUTER_COMPOSE_MODEL = Haiku 4.5). Merge-blocking when
+    # the OPENROUTER_API_KEY secret is configured; the single live test skips
+    # cleanly (job green) when it isn't (fork PRs / secret unset).
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: requirements.txt
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Live compliance — Haiku 4.5 via OpenRouter (prod compose path)
+        working-directory: backend
+        env:
+          ENV: test
+          SECRET_KEY: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+          DATABASE_URL: 'sqlite+aiosqlite:///:memory:'
+          REDIS_URL: 'redis://localhost:6379/0'
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || 'sk-test-placeholder' }}
+          # The real prod compose route: OpenRouter on, pinned to the effective
+          # model. The product_compose live test skips cleanly without a real key.
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY || 'sk-test-placeholder' }}
+          USE_OPENROUTER_COMPOSE: 'true'
+          OPENROUTER_COMPOSE_MODEL: ${{ env.CI_OPENROUTER_COMPOSE_MODEL }}
+          # Single consolidated call (Tier 3a) — matches prod and keeps the live
+          # test to one OpenRouter round-trip.
+          USE_CONSOLIDATED_COMPOSE: 'true'
+          RATE_LIMIT_ENABLED: 'false'
+          LOG_ENABLED: 'false'
+        run: python -m pytest tests/test_voice_integration.py -v -m integration -k openrouter
 
   clarifier-eval:
     name: Clarifier question quality (non-blocking signal)
