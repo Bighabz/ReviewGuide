@@ -597,11 +597,16 @@ Example: {{"tools": ["product_search"]}} - this will auto-add normalize, affilia
     def _create_standard_product_plan(self, include_extractor: bool = True) -> Dict[str, Any]:
         """
         Standard plan for comparison and recommendation queries.
-        Pipeline: [extractor →] [product_search ∥ evidence] → [review_search →] normalize → affiliate → compose → suggestions
-        Skips ranking (faster). review_search is inserted only when
+        Pipeline: [extractor →] [product_search ∥ evidence] → [review_search →] normalize → affiliate → ranking → compose → suggestions
+        review_search is inserted only when
         USE_REVIEW_GROUNDING is on — it fetches real review evidence (so the
         composer takes the editorial path) at a ~+8s latency cost, and self-gates
         on ENABLE_SERPAPI (empty review_data → concierge path, unchanged).
+
+        product_ranking (Outcome 9) runs after affiliate so it can see real offer
+        prices, and before compose so the composer can mirror its budget-aware
+        value order. It's pure computation — no LLM, no network — so the latency
+        cost is negligible.
         """
         steps = []
         step_num = 1
@@ -619,7 +624,8 @@ Example: {{"tools": ["product_search"]}} - this will auto-add normalize, affilia
         steps.extend([
             {"id": f"step_{step_num}", "tools": ["product_normalize"], "parallel": False},
             {"id": f"step_{step_num + 1}", "tools": ["product_affiliate"], "parallel": False},
-            {"id": f"step_{step_num + 2}", "tools": ["product_compose"], "parallel": False},
+            {"id": f"step_{step_num + 2}", "tools": ["product_ranking"], "parallel": False},
+            {"id": f"step_{step_num + 3}", "tools": ["product_compose"], "parallel": False},
         ])
         return {"steps": steps}
 

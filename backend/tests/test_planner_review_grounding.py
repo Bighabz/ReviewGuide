@@ -65,14 +65,17 @@ def test_review_search_runs_after_search_before_normalize(agent, monkeypatch, co
 
 def test_flag_off_plan_is_unchanged(agent, monkeypatch):
     """Default-off must be a strict no-op: the recommendation plan keeps its
-    exact pre-A1 tool order (search∥evidence → normalize → affiliate → compose),
-    with next_step_suggestion appended."""
+    exact tool order (search∥evidence → normalize → affiliate → ranking → compose),
+    with next_step_suggestion appended. product_ranking joined the standard plan
+    in Outcome 9 (budget-aware value ranking) — it runs after affiliate so it can
+    see real offer prices, before compose so the composer mirrors its order."""
     monkeypatch.setattr(agent.settings, "USE_REVIEW_GROUNDING", False)
     plan = agent._get_product_plan_for_complexity("recommendation")
     assert _ordered_tools(plan) == [
         ["product_search", "product_evidence"],
         ["product_normalize"],
         ["product_affiliate"],
+        ["product_ranking"],
         ["product_compose"],
         ["next_step_suggestion"],
     ]
@@ -88,9 +91,27 @@ def test_flag_on_only_inserts_review_search(agent, monkeypatch):
         ["review_search"],
         ["product_normalize"],
         ["product_affiliate"],
+        ["product_ranking"],
         ["product_compose"],
         ["next_step_suggestion"],
     ]
+
+
+def test_ranking_runs_after_affiliate_before_compose(agent, monkeypatch):
+    """Outcome 9: product_ranking needs affiliate prices (after affiliate) and
+    must finish before compose (which mirrors its value order)."""
+    for flag in (False, True):
+        monkeypatch.setattr(agent.settings, "USE_REVIEW_GROUNDING", flag)
+        for complexity in ("recommendation", "comparison"):
+            plan = agent._get_product_plan_for_complexity(complexity)
+
+            def step_index(tool):
+                for i, step in enumerate(plan["steps"]):
+                    if tool in step["tools"]:
+                        return i
+                raise AssertionError(f"{tool} not in plan")
+
+            assert step_index("product_affiliate") < step_index("product_ranking") < step_index("product_compose")
 
 
 def test_step_ids_are_unique_and_sequential(agent, monkeypatch):

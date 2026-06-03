@@ -924,6 +924,31 @@ async def product_compose(state: Dict[str, Any]) -> Dict[str, Any]:
                 products_with_offers = verified
                 _budget_pruned_names.update(n for n in dropped_names if n)
 
+        # ── Outcome 9: budget-aware value order ──
+        # product_ranking (runs right before compose) scored products by
+        # rating-per-dollar within the user's stated budget. Mirror that order here
+        # so the shortlist, the consensus block, and the writer's product list all
+        # lead with the best-value pick. Only kicks in when value scoring actually
+        # happened (a budget was stated + in-budget priced/rated products exist);
+        # otherwise every ordering below is unchanged. The prose top-pick pinning
+        # (#93) still runs after composition and overrides card/consensus #1.
+        _ranked_products = state.get("ranked_products") or []
+        _value_ranked = [rp for rp in _ranked_products if rp.get("value_per_dollar")]
+
+        def _value_rank_of(name: str) -> int:
+            """Position of a product in the value ranking; unranked products sink last."""
+            for _i, _rp in enumerate(_ranked_products):
+                if _fuzzy_product_match(name, _rp.get("product_name", "")):
+                    return _i
+            return len(_ranked_products)
+
+        if _value_ranked:
+            products_with_offers.sort(key=lambda p: _value_rank_of(p.get("name", "")))
+            logger.info(
+                "[product_compose] Value order applied: "
+                + ", ".join(p.get("name", "?") for p in products_with_offers[:5])
+            )
+
         # Assign editorial labels based on review quality + price
         editorial_labels = _assign_editorial_labels(review_data, products_with_offers)
         if editorial_labels:
@@ -1049,6 +1074,11 @@ async def product_compose(state: Dict[str, Any]) -> Dict[str, Any]:
                 key=lambda kv: kv[1].get("quality_score", 0),
                 reverse=True
             )
+            # Outcome 9: when value ranking is active, it decides which products get
+            # full LLM consensus — the best-value pick must never be relegated to a
+            # template summary just because its review quality_score ranks 4th.
+            if _value_ranked:
+                products_with_sources.sort(key=lambda kv: _value_rank_of(kv[0]))
             top_products = products_with_sources[:MAX_CONSENSUS_PRODUCTS]
             remaining_products = products_with_sources[MAX_CONSENSUS_PRODUCTS:]
 
@@ -1175,11 +1205,32 @@ Products to describe:
             blog_data_parts.append(dimension_directive.strip())
             logger.info(f"[product_compose] Comparison dimension: {comparison_dimension}")
 
+        # Outcome 9: budget-aware value directive. When ranking found in-budget
+        # value picks, tell the writer — rating-per-dollar decides the default #1
+        # unless reviews reveal a dealbreaker. Rides blog_data (USER content), never
+        # blog_role (which is pinned byte-identical to the eval's BLOG_ROLE).
+        if _value_ranked:
+            _value_lines = " ; ".join(
+                f"{i + 1}. {rp['product_name']} (${rp['price']:.0f}, {rp['rating']}★)"
+                for i, rp in enumerate(_value_ranked[:5])
+            )
+            blog_data_parts.append(
+                f"VALUE RANKING (rating per dollar, within the user's stated budget): {_value_lines}. "
+                "Unless the reviews reveal a dealbreaker, your #1 pick should be the best-value product — "
+                "explain the value tradeoff (what the pricier options add, and why it isn't worth it for this budget)."
+            )
+            logger.info(f"[product_compose] Value directive added to blog data: {_value_lines}")
+
         blog_product_names = []  # Track which products are in the blog (for price comparison filtering)
 
         # Products with reviews (use fuzzy matching for offer lookup)
         if review_bundles:
-            for pname, bundle in review_bundles.items():
+            # Outcome 9: present products to the writer in value order when active
+            # (dict order = insertion order = consensus selection order otherwise).
+            _bundle_items = list(review_bundles.items())
+            if _value_ranked:
+                _bundle_items.sort(key=lambda kv: _value_rank_of(kv[0]))
+            for pname, bundle in _bundle_items:
                 # Skip accessory products from the blog data (unless user is asking for accessories)
                 if not any(kw in user_message_lower for kw in ACCESSORY_KEYWORDS):
                     if any(kw in pname.lower() for kw in ACCESSORY_KEYWORDS):
@@ -1593,6 +1644,11 @@ TRANSITIONAL RULES (transitional_reasoning field):
                 key=lambda kv: kv[1].get("quality_score", 0),
                 reverse=True,
             )
+            # Outcome 9: value order (rating per dollar in budget) outranks review
+            # quality_score when a budget was stated. Prose-pick pinning below still
+            # overrides rank 1.
+            if _value_ranked:
+                ranked_bundles.sort(key=lambda kv: _value_rank_of(kv[0]))
             rank = 0
             for pname, bundle in ranked_bundles:
                 consensus_text = _get_result(f'consensus:{pname}', '')
