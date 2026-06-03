@@ -1202,3 +1202,113 @@ async def test_extraction_prompt_says_budget_is_a_string(agent):
     assert "NEVER collapse a range" in system_prompt
     assert "For numbers (duration_days, adults, children): return as number" in system_prompt
     assert "children, budget): return as number" not in system_prompt
+
+
+# ---------------------------------------------------------------------------
+# Outcome 8 — skip-all affordance ("Just show me the best overall")
+# ---------------------------------------------------------------------------
+
+from app.agents.clarifier_agent import _is_skip_all  # noqa: E402
+
+
+def test_is_skip_all_phrases():
+    """The matcher accepts the chip tap, the You-chose prefix, and typed variants —
+    and rejects real answers."""
+    assert _is_skip_all("Just show me the best overall")
+    assert _is_skip_all("You chose: Just show me the best overall")
+    assert _is_skip_all("just show me the best overall!")
+    assert _is_skip_all("Skip the questions")
+    assert _is_skip_all("skip")
+    assert _is_skip_all("Surprise me")
+    # Real answers must never be treated as skip
+    assert not _is_skip_all("Gaming")
+    assert not _is_skip_all("$80–$130")
+    assert not _is_skip_all("show me gaming laptops")
+    assert not _is_skip_all("the best noise cancelling headphones")
+
+
+def _skip_all_halt_state():
+    return {
+        "intent": "product",
+        "slots": {"category": "laptops", "country_code": "US"},
+        "followups": [
+            {"slot": "use_case", "question": "What will you mainly use the laptop for?",
+             "options": ["Schoolwork", "Office tasks", "Creative work"]},
+            {"slot": "budget", "question": "What is your budget?",
+             "options": ["Under $500", "$500–$800"]},
+        ],
+        "missing_required_slots": ["use_case", "budget"],
+        "plan": {"steps": [{"id": "s1", "tools": ["product_search"]}]},
+        "tools_by_required_slot": {},
+    }
+
+
+@pytest.mark.asyncio
+async def test_skip_all_proceeds_without_extraction(agent):
+    """Tapping the skip-all chip proceeds straight to execution: no extraction
+    LLM call, no re-asked questions, halt state cleared, existing slots kept."""
+    state = {
+        "session_id": "test-session",
+        "user_message": "You chose: Just show me the best overall",
+        "sanitized_text": "You chose: Just show me the best overall",
+        "intent": "product",
+        "slots": {},
+        "conversation_history": [],
+        "last_search_context": {},
+        "search_history": [],
+    }
+
+    agent._extract_all_slots_from_answer = AsyncMock(
+        side_effect=AssertionError("extraction must not be called on skip-all")
+    )
+    agent._generate_followup_questions = AsyncMock(
+        side_effect=AssertionError("questions must not be regenerated on skip-all")
+    )
+
+    with patch(
+        "app.agents.clarifier_agent.HaltStateManager.delete_halt_state", new=AsyncMock()
+    ) as mock_delete:
+        result = await agent._handle_user_answer(state, _skip_all_halt_state(), "test-session")
+
+    assert result["proceed_to_execution"] is True
+    assert result["missing_required_slots"] == []
+    assert result["followups"] == []
+    # Slots that already existed (category from the original query) are preserved
+    assert result["slots"]["category"] == "laptops"
+    # The budget/use_case slots stay absent → no budget filter downstream
+    assert "budget" not in result["slots"]
+    mock_delete.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_normal_answer_still_goes_through_extraction(agent):
+    """A real chip answer must NOT trigger the skip-all path."""
+    state = {
+        "session_id": "test-session",
+        "user_message": "You chose: Office tasks",
+        "sanitized_text": "You chose: Office tasks",
+        "intent": "product",
+        "slots": {},
+        "conversation_history": [],
+        "last_search_context": {},
+        "search_history": [],
+    }
+
+    extraction_called = {}
+
+    async def fake_extract(slot_names, user_message, followups, optional_slots=None):
+        extraction_called["yes"] = True
+        return {s: ("Office tasks" if s == "use_case" else None) for s in slot_names}
+
+    agent._extract_all_slots_from_answer = fake_extract
+    agent._generate_followup_questions = AsyncMock(return_value={
+        "intro": "x",
+        "questions": [{"slot": "budget", "question": "Budget?", "options": ["Under $500"]}],
+        "closing": "",
+    })
+
+    with patch("app.agents.clarifier_agent.HaltStateManager.update_halt_state", new=AsyncMock()):
+        result = await agent._handle_user_answer(state, _skip_all_halt_state(), "test-session")
+
+    assert extraction_called.get("yes") is True
+    assert result["proceed_to_execution"] is False  # budget still missing → re-ask

@@ -50,6 +50,30 @@ def _strip_suggestion_prefix(message: str) -> str:
     return msg
 
 
+# ── Outcome 8: skip-all affordance ──────────────────────────────────────────
+# Every clarifier card carries a "Just show me the best overall" escape hatch.
+# Tapping it (or typing an equivalent) proceeds straight to results with
+# whatever slots already exist — no budget filter, no use-case constraint.
+
+_SKIP_ALL_PHRASES = {
+    "just show me the best overall",
+    "just show me the best",
+    "show me the best overall",
+    "just show me results",
+    "just show me the results",
+    "skip the questions",
+    "skip questions",
+    "skip",
+    "surprise me",
+}
+
+
+def _is_skip_all(message: str) -> bool:
+    """True when the user wants results now, with no further clarification."""
+    msg = _strip_suggestion_prefix(message).lower().strip().rstrip(".!?")
+    return msg in _SKIP_ALL_PHRASES
+
+
 def _detect_refinement_action(message: str) -> Optional[str]:
     """Map a refinement-chip message to an action.
 
@@ -755,6 +779,20 @@ class ClarifierAgent(BaseAgent):
 
         if not followups:
             logger.warning(f"[Clarifier Agent] No followups in halt state, proceeding to execution")
+            return {
+                "slots": current_slots,
+                "followups": [],
+                "missing_required_slots": [],
+                "proceed_to_execution": True
+            }
+
+        # Outcome 8 — skip-all: "Just show me the best overall" (chip or typed)
+        # answers nothing and proceeds with whatever slots exist. No budget
+        # filter, no use-case constraint — the search runs on the category alone,
+        # exactly like the card's partial-submit path with zero answers.
+        if _is_skip_all(user_message):
+            logger.info("[Clarifier Agent] Skip-all: proceeding to results with existing slots only")
+            await HaltStateManager.delete_halt_state(session_id)
             return {
                 "slots": current_slots,
                 "followups": [],

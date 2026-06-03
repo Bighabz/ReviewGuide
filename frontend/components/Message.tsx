@@ -261,6 +261,24 @@ function ClarifierCard({
             You can answer the rest or submit now — I&apos;ll work with what you give me.
           </p>
         )}
+        {/* Outcome 8 — skip-all escape hatch: proceed with no constraints at all */}
+        {!submitted && (
+          <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--line)' }}>
+            <button
+              onClick={() => {
+                setSubmitted(true)
+                onSubmit('Just show me the best overall')
+              }}
+              data-testid="clarifier-skip-all"
+              className="inline-flex items-center gap-1.5 text-[13px] font-medium text-[var(--ink-2)] hover:text-[var(--terra)] transition-colors"
+            >
+              <span className="underline underline-offset-4 decoration-[var(--line-2)]">
+                Just show me the best overall
+              </span>
+              <ArrowRight size={13} strokeWidth={1.5} />
+            </button>
+          </div>
+        )}
         {closing && (
           <p className="mt-3 text-[12px] italic text-[var(--ink-3)]">{closing}</p>
         )}
