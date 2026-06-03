@@ -1461,3 +1461,61 @@ async def test_consensus_order_intact_when_blog_has_no_top_pick():
     products = consensus_blocks[0]["data"]["products"]
     assert products[0]["name"] == "Roomba j7+"  # review-score order preserved
     assert all(not p.get("editors_pick") for p in products)
+
+
+# ---------------------------------------------------------------------------
+# Affiliate provider harmony — Skimlinks-wrapped Shopping offers are buy links
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_skimlinks_wrapped_shopping_offer_becomes_buy_link():
+    """A Google Shopping offer whose URL is Skimlinks-wrapped IS monetizable —
+    it must appear as a clickable buy link, unlike raw Shopping URLs (which stay
+    context-only, verified by test_google_shopping_is_context_only_not_a_buy_link)."""
+    fake_service = MagicMock()
+    fake_service.generate_compose = AsyncMock(return_value="mock response text")
+
+    state = {
+        "user_message": "best air fryer",
+        "intent": "product",
+        "slots": {"category": "air fryers"},
+        "normalized_products": [{"name": "Ninja AF101"}],
+        "affiliate_products": {
+            "serper_shopping": [{
+                "product_name": "Ninja AF101",
+                "offers": [{
+                    "title": "Ninja AF101", "price": 89.99, "currency": "USD",
+                    "url": (
+                        "https://go.skimresources.com/?id=12345X6789&xs=1"
+                        "&url=https%3A%2F%2Fwww.walmart.com%2Fip%2F123"
+                    ),
+                    "merchant": "Walmart",
+                    "image_url": "https://img.example.com/ninja.jpg",
+                    "source": "serper_shopping",
+                }],
+            }],
+        },
+        "review_data": {},
+        "comparison_html": None,
+        "comparison_data": None,
+        "general_product_info": "",
+        "conversation_history": [],
+        "last_search_context": {},
+        "search_history": [],
+    }
+
+    with patch("app.services.model_service.model_service", fake_service):
+        result = await product_compose(state)
+
+    review_cards = [b for b in result.get("ui_blocks", []) if b.get("type") == "product_review"]
+    assert review_cards, "expected a product_review card"
+    links = review_cards[0]["data"]["affiliate_links"]
+    urls = [l["affiliate_link"] for l in links]
+
+    assert any("skimresources.com" in u for u in urls), (
+        f"Skimlinks-wrapped offer missing from buy links: {urls}"
+    )
+    # The merchant label stays the real merchant, not "Skimlinks"
+    skim_link = next(l for l in links if "skimresources.com" in l["affiliate_link"])
+    assert skim_link["merchant"] == "Walmart"
+    assert skim_link["price"] == 89.99

@@ -259,7 +259,12 @@ async def product_affiliate(
             # card's product (see _match_curated_entry). Products with no curated
             # match fall through to a tagged Amazon search URL for the correct
             # product name — never a mismatched curated link.
-            if provider_name == "amazon" and curated_amazon_links:
+            #
+            # Harmony Step 1 (shadow fix): this curated path only applies while
+            # PA-API is disabled. Once AMAZON_API_ENABLED=true, the Amazon
+            # provider's real product search must run — without this gate the
+            # curated special-case would shadow PA-API results forever.
+            if provider_name == "amazon" and curated_amazon_links and not settings.AMAZON_API_ENABLED:
                 results = []
                 used_curated = set()
                 matched_count = 0
@@ -368,62 +373,12 @@ async def product_affiliate(
 
         logger.info(f"[product_affiliate] Total providers with results: {list(affiliate_products.keys())}")
 
-        # ── Real prices + images via Serper Google Shopping ──
-        # The affiliate providers above run in mock mode (Amazon returns price=0
-        # without PA-API; eBay mock uses placeholder images that product_compose
-        # filters out), so their offers can't supply a real price. Serper's Google
-        # Shopping endpoint returns REAL prices, product images, and merchant links.
-        # We surface these as a `serper_shopping` provider group — product_compose
-        # already understands this source (PROVIDER_CONFIG + image/offer priority)
-        # and backfills the real price onto the (price-0) Amazon offer so the card
-        # looks as it would with PA-API while keeping the Amazon affiliate buy-link.
-        # Rides the existing `affiliate_products` dict, so no new GraphState field.
-        if settings.ENABLE_SERPAPI and settings.SERPAPI_API_KEY:
-            try:
-                from app.services.serpapi.client import SerpAPIClient
-                serper_client = SerpAPIClient()
-                SHOPPING_TIMEOUT_S = 6
-
-                async def _shopping_with_timeout(name: str):
-                    try:
-                        return await asyncio.wait_for(
-                            serper_client.search_shopping_offer(name),
-                            timeout=SHOPPING_TIMEOUT_S,
-                        )
-                    except Exception:
-                        return None
-
-                shop_results = await asyncio.gather(
-                    *[_shopping_with_timeout(name) for name in products_to_search]
-                )
-
-                serper_groups = []
-                for name, shop_offer in zip(products_to_search, shop_results):
-                    if shop_offer and shop_offer.get("price"):
-                        serper_groups.append({
-                            "product_name": name,
-                            "offers": [{
-                                "merchant": shop_offer.get("merchant") or "Online",
-                                "price": shop_offer["price"],
-                                "currency": shop_offer.get("currency", "USD"),
-                                "url": shop_offer.get("url", ""),
-                                "condition": "new",
-                                "title": shop_offer.get("title", name),
-                                "image_url": shop_offer.get("image_url", ""),
-                                "rating": shop_offer.get("rating"),
-                                "review_count": shop_offer.get("review_count"),
-                                "source": "serper_shopping",
-                            }],
-                        })
-
-                if serper_groups:
-                    affiliate_products["serper_shopping"] = serper_groups
-                    logger.info(
-                        f"[product_affiliate] Serper Shopping: real prices for "
-                        f"{len(serper_groups)}/{len(products_to_search)} products"
-                    )
-            except Exception as e:
-                logger.warning(f"[product_affiliate] Serper Shopping enrichment failed: {e}")
+        # NOTE (affiliate provider harmony, Step 1): the Serper Google Shopping
+        # enrichment that used to be bolted on here is now a real registered
+        # provider — app/services/affiliate/providers/serper_shopping_provider.py.
+        # It runs in the provider fan-out above and emits the same
+        # `serper_shopping` group (real prices/images/merchants), plus optional
+        # Skimlinks monetization of non-Amazon/non-eBay merchant URLs.
 
         return {
             "affiliate_products": affiliate_products,

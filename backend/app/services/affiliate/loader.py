@@ -67,6 +67,10 @@ _PROVIDER_INIT_MAP = {
         "api_key": settings.CJ_API_KEY,
         "website_id": settings.CJ_WEBSITE_ID,
     },
+    "serper_shopping": lambda: {
+        "skimlinks_publisher_id": settings.SKIMLINKS_PUBLISHER_ID,
+        "skimlinks_enabled": settings.SKIMLINKS_API_ENABLED,
+    },
 }
 
 

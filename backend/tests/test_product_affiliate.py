@@ -172,28 +172,41 @@ async def test_planner_fast_path_includes_review_and_affiliate():
 
 
 # ---------------------------------------------------------------------------
-# Serper Google Shopping enrichment — the REAL-price source.
-# Affiliate providers run in mock mode (Amazon price=0, eBay placeholder images),
-# so product_affiliate calls Serper /shopping per product and surfaces the result
-# as a `serper_shopping` provider group carrying a real price + image + merchant.
+# Serper Google Shopping — the REAL-price source, now a registered provider
+# (affiliate provider harmony Step 1: the bolt-on moved into
+# providers/serper_shopping_provider.py and runs in the provider fan-out).
+# These tests exercise the provider THROUGH the tool, preserving the original
+# bolt-on behavioral contract.
 # ---------------------------------------------------------------------------
+
+def _serper_provider_with_offer(offer):
+    """Real SerperShoppingProvider wired to a mocked Serper client."""
+    from app.services.affiliate.providers.serper_shopping_provider import (
+        SerperShoppingProvider,
+    )
+    provider = SerperShoppingProvider(skimlinks_publisher_id="", skimlinks_enabled=False)
+    client = MagicMock()
+    client.search_shopping_offer = AsyncMock(return_value=offer)
+    provider._client = client
+    return provider, client
+
 
 @pytest.mark.asyncio
 async def test_affiliate_adds_serper_shopping_offers_with_real_price():
-    """When Serper returns a priced shopping offer, product_affiliate adds a
-    `serper_shopping` provider group with that real price/image/merchant."""
+    """When Google Shopping returns a priced offer, the tool's provider fan-out
+    surfaces a `serper_shopping` group with that real price/image/merchant —
+    same contract as the old bolt-on."""
     state = {
         "normalized_products": [{"title": "Sony WH-1000XM5"}],
         "slots": {},
         "last_search_context": {},
     }
 
-    serper_instance = MagicMock()
-    serper_instance.search_shopping_offer = AsyncMock(return_value={
+    provider, client = _serper_provider_with_offer({
         "price": 348.0,
         "currency": "USD",
-        "merchant": "Amazon",
-        "url": "https://www.google.com/shopping/product/123",
+        "merchant": "Walmart",
+        "url": "https://www.walmart.com/ip/sony/123",
         "image_url": "https://img.example.com/sony.jpg",
         "title": "Sony WH-1000XM5",
         "rating": 4.7,
@@ -202,13 +215,13 @@ async def test_affiliate_adds_serper_shopping_offers_with_real_price():
 
     with patch("app.services.affiliate.manager.affiliate_manager") as mock_manager, \
          patch("app.core.config.settings") as mock_settings, \
-         patch("app.services.serpapi.client.SerpAPIClient", return_value=serper_instance):
+         patch("app.services.affiliate.providers.serper_shopping_provider.settings") as provider_settings:
         mock_settings.MAX_AFFILIATE_OFFERS_PER_PRODUCT = 3
         mock_settings.AMAZON_DEFAULT_COUNTRY = "US"
-        mock_settings.ENABLE_SERPAPI = True
-        mock_settings.SERPAPI_API_KEY = "test-serper-key"
-        # No real affiliate providers — isolate the Serper path.
-        mock_manager.get_available_providers.return_value = []
+        provider_settings.ENABLE_SERPAPI = True
+        provider_settings.SERPAPI_API_KEY = "test-serper-key"
+        mock_manager.get_available_providers.return_value = ["serper_shopping"]
+        mock_manager.get_provider.return_value = provider
 
         result = await product_affiliate(state)
 
@@ -220,36 +233,41 @@ async def test_affiliate_adds_serper_shopping_offers_with_real_price():
     assert offer["price"] == 348.0
     assert offer["source"] == "serper_shopping"
     assert offer["image_url"] == "https://img.example.com/sony.jpg"
-    serper_instance.search_shopping_offer.assert_awaited_once_with("Sony WH-1000XM5")
+    # Skimlinks dormant → raw merchant URL passes through
+    assert offer["url"] == "https://www.walmart.com/ip/sony/123"
+    client.search_shopping_offer.assert_awaited_once_with("Sony WH-1000XM5")
 
 
 @pytest.mark.asyncio
 async def test_affiliate_skips_serper_when_disabled():
-    """ENABLE_SERPAPI=False ⇒ no serper_shopping group, no client constructed."""
+    """ENABLE_SERPAPI=False ⇒ the provider self-gates ⇒ no serper_shopping group."""
     state = {
         "normalized_products": [{"title": "Sony WH-1000XM5"}],
         "slots": {},
         "last_search_context": {},
     }
 
+    provider, client = _serper_provider_with_offer({"price": 348.0, "url": "https://x.com"})
+
     with patch("app.services.affiliate.manager.affiliate_manager") as mock_manager, \
          patch("app.core.config.settings") as mock_settings, \
-         patch("app.services.serpapi.client.SerpAPIClient") as mock_client_cls:
+         patch("app.services.affiliate.providers.serper_shopping_provider.settings") as provider_settings:
         mock_settings.MAX_AFFILIATE_OFFERS_PER_PRODUCT = 3
         mock_settings.AMAZON_DEFAULT_COUNTRY = "US"
-        mock_settings.ENABLE_SERPAPI = False
-        mock_settings.SERPAPI_API_KEY = ""
-        mock_manager.get_available_providers.return_value = []
+        provider_settings.ENABLE_SERPAPI = False
+        provider_settings.SERPAPI_API_KEY = ""
+        mock_manager.get_available_providers.return_value = ["serper_shopping"]
+        mock_manager.get_provider.return_value = provider
 
         result = await product_affiliate(state)
 
     assert "serper_shopping" not in result["affiliate_products"]
-    mock_client_cls.assert_not_called()
+    client.search_shopping_offer.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_affiliate_serper_unpriced_result_is_skipped():
-    """A Serper lookup that returns None (no priced result) adds no group and
+    """A Shopping lookup that returns None (no priced result) adds no group and
     does not raise."""
     state = {
         "normalized_products": [{"title": "Obscure Product"}],
@@ -257,19 +275,104 @@ async def test_affiliate_serper_unpriced_result_is_skipped():
         "last_search_context": {},
     }
 
-    serper_instance = MagicMock()
-    serper_instance.search_shopping_offer = AsyncMock(return_value=None)
+    provider, _ = _serper_provider_with_offer(None)
 
     with patch("app.services.affiliate.manager.affiliate_manager") as mock_manager, \
          patch("app.core.config.settings") as mock_settings, \
-         patch("app.services.serpapi.client.SerpAPIClient", return_value=serper_instance):
+         patch("app.services.affiliate.providers.serper_shopping_provider.settings") as provider_settings:
         mock_settings.MAX_AFFILIATE_OFFERS_PER_PRODUCT = 3
         mock_settings.AMAZON_DEFAULT_COUNTRY = "US"
-        mock_settings.ENABLE_SERPAPI = True
-        mock_settings.SERPAPI_API_KEY = "test-serper-key"
-        mock_manager.get_available_providers.return_value = []
+        provider_settings.ENABLE_SERPAPI = True
+        provider_settings.SERPAPI_API_KEY = "test-serper-key"
+        mock_manager.get_available_providers.return_value = ["serper_shopping"]
+        mock_manager.get_provider.return_value = provider
 
         result = await product_affiliate(state)
 
     assert result["success"] is True
     assert "serper_shopping" not in result["affiliate_products"]
+
+
+# ---------------------------------------------------------------------------
+# Harmony Step 1 — Amazon shadow fix: the curated special-case must yield to
+# PA-API once AMAZON_API_ENABLED=true.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_amazon_curated_path_yields_to_pa_api_when_enabled():
+    """With AMAZON_API_ENABLED=true, the tool must call the Amazon provider's
+    real search_products instead of taking the curated/search-URL shortcut."""
+    state = {
+        "normalized_products": [{"title": "Bose QuietComfort Ultra"}],
+        "user_message": "best noise cancelling headphones",
+        "slots": {},
+        "last_search_context": {},
+    }
+
+    pa_api_result = MagicMock()
+    pa_api_result.merchant = "Amazon"
+    pa_api_result.price = 379.0
+    pa_api_result.currency = "USD"
+    pa_api_result.affiliate_link = "https://www.amazon.com/dp/B0CCZ1L489?tag=revguide-20"
+    pa_api_result.condition = "new"
+    pa_api_result.title = "Bose QuietComfort Ultra"
+    pa_api_result.image_url = "https://m.media-amazon.com/images/I/bose.jpg"
+    pa_api_result.rating = 4.5
+    pa_api_result.review_count = 5000
+    pa_api_result.product_id = "B0CCZ1L489"
+
+    amazon_provider = MagicMock()
+    amazon_provider.search_products = AsyncMock(return_value=[pa_api_result])
+
+    with patch("app.services.affiliate.manager.affiliate_manager") as mock_manager, \
+         patch("app.core.config.settings") as mock_settings:
+        mock_settings.MAX_AFFILIATE_OFFERS_PER_PRODUCT = 3
+        mock_settings.AMAZON_DEFAULT_COUNTRY = "US"
+        mock_settings.AMAZON_API_ENABLED = True  # PA-API on → curated path must yield
+        mock_manager.get_available_providers.return_value = ["amazon"]
+        mock_manager.get_provider.return_value = amazon_provider
+
+        result = await product_affiliate(state)
+
+    # The real provider was called — the curated shortcut did not shadow it
+    assert amazon_provider.search_products.await_count == 1
+    assert "amazon" in result["affiliate_products"]
+    offer = result["affiliate_products"]["amazon"][0]["offers"][0]
+    assert offer["url"] == "https://www.amazon.com/dp/B0CCZ1L489?tag=revguide-20"
+    assert offer["price"] == 379.0
+
+
+@pytest.mark.asyncio
+async def test_amazon_curated_path_still_used_while_pa_api_disabled():
+    """With AMAZON_API_ENABLED=false (today's prod state), the curated/search-URL
+    path keeps working exactly as before."""
+    state = {
+        "normalized_products": [{"title": "Bose QuietComfort Ultra"}],
+        "user_message": "best noise cancelling headphones",
+        "slots": {},
+        "last_search_context": {},
+    }
+
+    amazon_provider = MagicMock()
+    amazon_provider.search_products = AsyncMock(return_value=[])
+
+    with patch("app.services.affiliate.manager.affiliate_manager") as mock_manager, \
+         patch("app.core.config.settings") as mock_settings:
+        mock_settings.MAX_AFFILIATE_OFFERS_PER_PRODUCT = 3
+        mock_settings.AMAZON_DEFAULT_COUNTRY = "US"
+        mock_settings.AMAZON_API_ENABLED = False
+        mock_manager.get_available_providers.return_value = ["amazon"]
+        mock_manager.get_provider.return_value = amazon_provider
+        mock_manager.get_amazon_search_url.return_value = (
+            "https://www.amazon.com/s?k=Bose+QuietComfort+Ultra&tag=revguide-20"
+        )
+
+        result = await product_affiliate(state)
+
+    # The provider's real search was NOT called — curated/search-URL path served it
+    amazon_provider.search_products.assert_not_awaited()
+    assert "amazon" in result["affiliate_products"]
+    offers = result["affiliate_products"]["amazon"][0]["offers"]
+    assert offers, "curated path must still produce an Amazon offer"
+    # Curated entries use amzn.to short links; search-URL fallbacks use amazon.com
+    assert "amzn.to" in offers[0]["url"] or "amazon.com" in offers[0]["url"]

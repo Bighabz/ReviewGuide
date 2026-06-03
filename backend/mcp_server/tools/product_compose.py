@@ -1727,8 +1727,14 @@ TRANSITIONAL RULES (transitional_reasoning field):
             # data is used for price/image/rating CONTEXT only (it still backfills the
             # Amazon offer's price and supplies the card image above) — never as a buy
             # destination to a merchant we aren't an affiliate of.
+            #
+            # EXCEPTION (affiliate provider harmony): a Shopping offer whose URL is
+            # Skimlinks-wrapped (go.skimresources.com) IS our affiliate link — the
+            # sub-affiliate network monetizes the click — so it gets to be a buy link.
             link_offers = [
-                o for o in real_offers if o.get("source", "").lower() != "serper_shopping"
+                o for o in real_offers
+                if o.get("source", "").lower() != "serper_shopping"
+                or "skimresources.com" in (o.get("url") or "").lower()
             ]
             # F1 (QA Round 5): every card must carry a monetizable AMAZON link.
             # eBay links are unmonetized until a real EPN campaign id is set, and

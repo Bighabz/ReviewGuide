@@ -356,6 +356,13 @@ class Settings(BaseSettings):
     CJ_CACHE_TTL: int = Field(default=28800, description="CJ search cache TTL in seconds (8 hours)")
     CJ_MAX_RESULTS: int = Field(default=20, description="Max CJ products per search request")
 
+    # Skimlinks (sub-affiliate network — wraps non-Amazon/non-eBay merchant URLs
+    # from Google Shopping into monetizable go.skimresources.com redirects).
+    # DORMANT until both are set: the SerperShoppingProvider passes raw URLs
+    # through unchanged when disabled, exactly the pre-Skimlinks behavior.
+    SKIMLINKS_API_ENABLED: bool = Field(default=False, description="Enable Skimlinks wrapping of Google Shopping merchant URLs")
+    SKIMLINKS_PUBLISHER_ID: str = Field(default="", description="Skimlinks publisher site ID (format 12345X6789, from accounts.skimlinks.com/sites)")
+
     # IP Geolocation
     IPINFO_TOKEN: str = Field(default="", description="IPInfo.io API token for IP geolocation")
 
