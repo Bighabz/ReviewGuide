@@ -86,6 +86,96 @@ Before you output the JSON, silently revise your own body for maximum voice adhe
 Emit only the final, revised JSON — do not show your editing or the draft."""
 
 
+# ---------------------------------------------------------------------------
+# Tier 2 — prose / JSON decouple
+# ---------------------------------------------------------------------------
+# When USE_DECOUPLED_COMPOSE is on (consolidated only), the single call emits the
+# prose body as plain markdown followed by a <data>{...}</data> tail carrying the
+# structured fields — instead of one json_object. This removes the json_object
+# dependency (any model works natively) and lets the prose be token-streamed.
+# The OUTPUT FORMAT section of the (consolidated) role is rewritten at the call
+# site; the rest of the role — RANK AND COMMIT, BODY RULES, CONSENSUS RULES,
+# etc. — is unchanged, so voice quality is governed by the same instructions.
+
+_DATA_OPEN = "<data>"
+_DATA_CLOSE = "</data>"
+
+_DECOUPLED_OUTPUT_FORMAT = """OUTPUT FORMAT — two parts, in this exact order:
+
+1. THE BODY: write the buying-guide body FIRST, as plain markdown (3-5 paragraphs,
+   no per-product headings). Do NOT wrap it in JSON, quotes, or code fences.
+
+2. THE DATA BLOCK: immediately after the body, on their own lines, emit exactly:
+<data>
+{
+  "follow_up_question": "<exactly one contextual curious question that references something specific from the body — a product name, a tradeoff just mentioned, or the user's stated situation>",
+  "transitional_reasoning": "<OPTIONAL — exactly one short sentence, OR an empty string. See TRANSITIONAL RULES.>",
+  "top_pick": "<the EXACT product name of your #1 pick, copied verbatim from the product list — the same product your body names first>",
+  "consensus": {"<product name>": "<3-5 sentence review consensus summary>", "...": "..."},
+  "descriptions": {"<product name>": "<15-25 word factual description>", "...": "..."}
+}
+</data>
+
+The body must NOT appear inside the data block. Emit the body, then the
+<data>...</data> block, and NOTHING after </data>."""
+
+# Matches the JSON-object OUTPUT FORMAT block in the (consolidated) role: the
+# header line through the first standalone closing brace.
+_OUTPUT_FORMAT_RE = re.compile(
+    r"OUTPUT FORMAT — return a JSON object with these string fields:\n\{.*?\n\}",
+    re.DOTALL,
+)
+
+
+def _decoupled_blog_role(consolidated_role: str) -> str:
+    """Rewrite the consolidated role's JSON OUTPUT FORMAT into the prose+<data> form."""
+    return _OUTPUT_FORMAT_RE.sub(lambda _m: _DECOUPLED_OUTPUT_FORMAT, consolidated_role, count=1)
+
+
+def _parse_blog_output(raw: str, decoupled: bool) -> Optional[dict]:
+    """Parse the blog call's raw output into the structured payload.
+
+    Returns a dict with ``body`` plus whatever structured fields were present
+    (follow_up_question, transitional_reasoning, top_pick, consensus,
+    descriptions), or None if nothing usable could be extracted.
+
+    In decoupled mode the body is the markdown before ``<data>`` and the fields
+    come from the JSON inside ``<data>...</data>`` (a missing/garbled data block
+    degrades to body-only). In json mode it's a single json.loads.
+    """
+    if not raw or not raw.strip():
+        return None
+    if not decoupled:
+        try:
+            parsed = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return None
+        return parsed if isinstance(parsed, dict) else None
+
+    # Decoupled: split prose body from the <data> tail.
+    open_idx = raw.find(_DATA_OPEN)
+    if open_idx == -1:
+        # No data block — treat the whole thing as body (strip an accidental fence).
+        body = raw.strip()
+        if body.startswith("```"):
+            body = body.strip("`").lstrip("json").strip()
+        return {"body": body}
+    body = raw[:open_idx].strip()
+    data: dict = {}
+    close_idx = raw.find(_DATA_CLOSE, open_idx)
+    inner = raw[open_idx + len(_DATA_OPEN): close_idx if close_idx != -1 else len(raw)].strip()
+    if inner.startswith("```"):
+        inner = inner.strip("`").lstrip("json").strip()
+    try:
+        loaded = json.loads(inner)
+        if isinstance(loaded, dict):
+            data = loaded
+    except (json.JSONDecodeError, TypeError):
+        data = {}
+    data["body"] = body
+    return data
+
+
 # Tool contract for planner
 TOOL_CONTRACT = {
     "name": "product_compose",
@@ -1213,6 +1303,8 @@ async def product_compose(state: Dict[str, Any]) -> Dict[str, Any]:
         # registering the separate consensus:* / descriptions calls below and
         # inject those fields from the blog JSON after the gather instead.
         _consolidated = getattr(settings, "USE_CONSOLIDATED_COMPOSE", False)
+        # Tier 2: prose/JSON decouple only applies on top of consolidation.
+        _decoupled = _consolidated and getattr(settings, "USE_DECOUPLED_COMPOSE", False)
 
         llm_tasks = {}  # key -> coroutine
 
@@ -1670,6 +1762,12 @@ TRANSITIONAL RULES (transitional_reasoning field):
             if getattr(settings, "USE_VOICE_PASS", False):
                 blog_role_effective += _SELF_EDIT_SECTION
                 logger.info("[product_compose] Voice pass folded into single call (Tier 3b self-edit)")
+            # Tier 2: rewrite the OUTPUT FORMAT to prose + <data> tail (drops the
+            # json_object dependency). Applied LAST so it transforms the schema
+            # the consolidated/self-edit steps assembled.
+            if _decoupled:
+                blog_role_effective = _decoupled_blog_role(blog_role_effective)
+                logger.info("[product_compose] Decoupled compose ON (Tier 2: prose + <data> tail)")
             logger.info(f"[product_compose] Consolidated compose ON: blog_max_tokens={blog_max_tokens}")
 
         if getattr(settings, "USE_GROUNDED_COMPOSE", False):
@@ -1699,7 +1797,9 @@ TRANSITIONAL RULES (transitional_reasoning field):
             messages=blog_messages,
             temperature=0.7,
             max_tokens=blog_max_tokens,
-            response_format={"type": "json_object"},
+            # Tier 2: decoupled mode emits prose + a <data> tail (not one JSON
+            # object), so drop the json_object constraint and parse it ourselves.
+            response_format=None if _decoupled else {"type": "json_object"},
             agent_name="blog_article_composer"
         )
 
@@ -1741,15 +1841,11 @@ TRANSITIONAL RULES (transitional_reasoning field):
         # (QA Round 6: "skip the Roomba" prose while the Roomba ranked #1 in
         # "How They Compare"). The full blog parse for assistant_text happens later.
         prose_top_pick = ""
-        _blog_parsed_early = None
         _blog_raw_early = _get_result('blog_article', '')
-        if _blog_raw_early:
-            try:
-                _blog_parsed_early = json.loads(_blog_raw_early)
-                prose_top_pick = (_blog_parsed_early.get("top_pick") or "").strip()
-            except (json.JSONDecodeError, TypeError, AttributeError):
-                _blog_parsed_early = None
-                prose_top_pick = ""
+        # Decoupled mode parses prose + <data> tail; json mode does json.loads.
+        _blog_parsed_early = _parse_blog_output(_blog_raw_early, _decoupled)
+        if isinstance(_blog_parsed_early, dict):
+            prose_top_pick = (_blog_parsed_early.get("top_pick") or "").strip()
         if prose_top_pick:
             logger.info(f"[product_compose] Prose top pick: {prose_top_pick}")
 
@@ -2253,9 +2349,11 @@ TRANSITIONAL RULES (transitional_reasoning field):
         follow_up_text: str = ""
         transitional_text: str = ""
         if blog_article:
-            try:
-                parsed = json.loads(blog_article)
-                body = (parsed.get("body") or "").strip()
+            # Reuse the early parse (same raw string, same mode) — decoupled splits
+            # prose + <data> tail, json mode does json.loads.
+            parsed = _blog_parsed_early
+            body = (parsed.get("body") or "").strip() if isinstance(parsed, dict) else ""
+            if body:
                 follow_up_text = (parsed.get("follow_up_question") or "").strip()
                 # Quiz-path transitional reasoning — emitted only when the latest
                 # constraint changed the shortlist (LLM-judged; empty otherwise).
@@ -2281,9 +2379,9 @@ TRANSITIONAL RULES (transitional_reasoning field):
                         transitional_text = (_revised.get("transitional_reasoning") or transitional_text).strip()
                         assistant_text = body
                         logger.info("[product_compose] Voice pass applied (Tier 3)")
-            except (json.JSONDecodeError, TypeError, AttributeError) as e:
+            else:
                 logger.warning(
-                    f"[product_compose] Blog JSON parse failed ({e}); "
+                    f"[product_compose] Blog output had no usable body (decoupled={_decoupled}); "
                     f"using raw text. Raw prefix: {blog_article[:120]!r}"
                 )
                 assistant_text = blog_article

@@ -28,7 +28,12 @@ os.environ.setdefault("RATE_LIMIT_ENABLED", "false")
 os.environ.setdefault("LOG_ENABLED", "false")
 
 from app.core.config import settings
-from mcp_server.tools.product_compose import product_compose
+from mcp_server.tools.product_compose import (
+    product_compose,
+    _parse_blog_output,
+    _decoupled_blog_role,
+    _consolidated_blog_role,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -300,6 +305,136 @@ async def test_legacy_voice_pass_still_a_separate_call_when_not_consolidated(mon
         await product_compose(state)
 
     assert "voice_pass_reviser" in _agent_names(fake_service)
+
+
+# ---------------------------------------------------------------------------
+# Tier 2 — prose / JSON decouple
+# ---------------------------------------------------------------------------
+
+# A decoupled response: prose body, then a <data> tail with the structured fields.
+_DECOUPLED_BLOG = (
+    "Under $300, the Sony WH-1000XM5 is the pick for most people — the ANC leads "
+    "the class. The Bose QuietComfort 45 is the call if comfort matters more.\n\n"
+    "Skip the AirPods Max at this budget.\n\n"
+    "<data>\n"
+    + json.dumps({
+        "follow_up_question": "Is the Sony's bulkier case a problem for how you travel?",
+        "transitional_reasoning": "Under $300, ANC quality decides it.",
+        "top_pick": "Sony WH-1000XM5",
+        "consensus": {
+            "Sony WH-1000XM5": "Reviewers praise the class-leading ANC and comfort. Case is bulky. Best for flyers.",
+            "Bose QuietComfort 45": "Praised for light fit and natural sound. ANC trails slightly. Best for all-day wear.",
+        },
+        "descriptions": {
+            "Sony WH-1000XM5": "Class-leading ANC and 30-hour battery for travelers under $300.",
+            "Bose QuietComfort 45": "Light, comfortable over-ears ideal for all-day office listening.",
+        },
+    })
+    + "\n</data>"
+)
+
+
+def test_parse_blog_output_json_mode():
+    parsed = _parse_blog_output(_CONSOLIDATED_BLOG, decoupled=False)
+    assert parsed["top_pick"] == "Sony WH-1000XM5"
+    assert "Sony WH-1000XM5" in parsed["consensus"]
+    assert parsed["body"].startswith("Under $300")
+
+
+def test_parse_blog_output_decoupled_splits_prose_and_data():
+    parsed = _parse_blog_output(_DECOUPLED_BLOG, decoupled=True)
+    # Body is the prose before <data>, with no data block leaking in.
+    assert parsed["body"].startswith("Under $300")
+    assert "<data>" not in parsed["body"]
+    assert "follow_up_question" not in parsed["body"]
+    # Structured fields came from the <data> tail.
+    assert parsed["top_pick"] == "Sony WH-1000XM5"
+    assert parsed["follow_up_question"].startswith("Is the Sony")
+    assert "Sony WH-1000XM5" in parsed["consensus"]
+    assert "Bose QuietComfort 45" in parsed["descriptions"]
+
+
+def test_parse_blog_output_decoupled_missing_data_block_degrades_to_body():
+    parsed = _parse_blog_output("Just prose, no data block.", decoupled=True)
+    assert parsed["body"] == "Just prose, no data block."
+    assert "top_pick" not in parsed
+
+
+def test_parse_blog_output_decoupled_garbled_data_keeps_body():
+    raw = "Prose here.\n\n<data>\n{not valid json,,,}\n</data>"
+    parsed = _parse_blog_output(raw, decoupled=True)
+    assert parsed["body"] == "Prose here."
+    assert "top_pick" not in parsed  # garbled JSON → fields dropped, body survives
+
+
+def test_parse_blog_output_empty_returns_none():
+    assert _parse_blog_output("", decoupled=True) is None
+    assert _parse_blog_output("   ", decoupled=False) is None
+
+
+def test_decoupled_role_rewrites_output_format():
+    consolidated = _consolidated_blog_role(
+        # minimal fake base role carrying the json OUTPUT FORMAT block
+        'Write a guide.\n\nOUTPUT FORMAT — return a JSON object with these string fields:\n'
+        '{\n  "body": "<x>",\n  "top_pick": "<the EXACT product name of your #1 pick, copied verbatim from the product list — the same product your body names first>"\n}\n\nRANK AND COMMIT: ...'
+    )
+    decoupled = _decoupled_blog_role(consolidated)
+    # JSON-object framing gone; prose + <data> framing in.
+    assert "return a JSON object with these string fields" not in decoupled
+    assert "<data>" in decoupled
+    assert "THE BODY" in decoupled
+    # Downstream sections survive the rewrite.
+    assert "RANK AND COMMIT" in decoupled
+    assert "CONSENSUS RULES" in decoupled
+
+
+@pytest.mark.asyncio
+async def test_decoupled_blog_call_drops_json_object_response_format(monkeypatch):
+    monkeypatch.setattr(settings, "USE_CONSOLIDATED_COMPOSE", True)
+    monkeypatch.setattr(settings, "USE_DECOUPLED_COMPOSE", True)
+    monkeypatch.setattr(settings, "USE_VOICE_PASS", False)
+    fake_service = _fake_service(blog_response=_DECOUPLED_BLOG)
+    state = _base_state(review_data=_REVIEW_DATA)
+
+    with patch("app.services.model_service.model_service", fake_service):
+        result = await product_compose(state)
+
+    blog_call = next(
+        c for c in fake_service.generate_compose.call_args_list
+        if c.kwargs.get("agent_name") == "blog_article_composer"
+    )
+    # Decoupled → no json_object constraint; role carries the <data> framing.
+    assert blog_call.kwargs.get("response_format") is None
+    assert "<data>" in blog_call.kwargs["messages"][0]["content"]
+
+    # Prose body reached assistant_text (without the data block leaking in).
+    assert "Under $300" in result.get("assistant_text", "")
+    assert "<data>" not in result.get("assistant_text", "")
+
+    # Consensus block built from the <data> tail.
+    consensus_blocks = [b for b in result.get("ui_blocks", []) if b.get("type") == "review_consensus"]
+    assert consensus_blocks
+    names = {p["name"] for p in consensus_blocks[0]["data"]["products"]}
+    assert "Sony WH-1000XM5" in names
+
+
+@pytest.mark.asyncio
+async def test_decoupled_requires_consolidated(monkeypatch):
+    """USE_DECOUPLED_COMPOSE without USE_CONSOLIDATED_COMPOSE is inert — the
+    call stays on the json_object path."""
+    monkeypatch.setattr(settings, "USE_CONSOLIDATED_COMPOSE", False)
+    monkeypatch.setattr(settings, "USE_DECOUPLED_COMPOSE", True)
+    fake_service = _fake_service()
+    state = _base_state(review_data=_REVIEW_DATA)
+
+    with patch("app.services.model_service.model_service", fake_service):
+        await product_compose(state)
+
+    blog_call = next(
+        c for c in fake_service.generate_compose.call_args_list
+        if c.kwargs.get("agent_name") == "blog_article_composer"
+    )
+    assert blog_call.kwargs.get("response_format") == {"type": "json_object"}
 
 
 # ---------------------------------------------------------------------------
