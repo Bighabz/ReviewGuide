@@ -104,3 +104,60 @@ async def test_streaming_dispatches_nothing_past_marker_even_split_across_chunks
     streamed = "".join(dispatched)
     assert streamed == "Prose body here."  # exactly up to the marker, nothing after
     assert result == "Prose body here.<data>{\"top_pick\": \"X\"}</data>"
+
+
+@pytest.mark.asyncio
+async def test_streaming_marker_split_exactly_at_chunk_boundary_does_not_leak(monkeypatch):
+    """Regression (prod-verify caught a leaked '<data' paragraph): when the
+    marker is split across chunks ('...<dat' then 'a>...'), the partial prefix
+    must NOT be dispatched. Any prefix of the marker at a chunk boundary is held
+    back until it resolves."""
+    monkeypatch.setattr(settings, "USE_OPENROUTER_COMPOSE", True)
+    monkeypatch.setattr(settings, "OPENROUTER_API_KEY", "test-openrouter-key")
+
+    # Every adversarial split point of the marker, plus a clean prose tail.
+    chunks = ["The pick is the Sony.", "<", "da", "ta", ">", "{\"top_pick\": \"Sony\"}", "</data>"]
+    dispatched = []
+
+    async def _capture(event_name, payload):
+        if event_name == "stream_token":
+            dispatched.append(payload["token"])
+
+    monkeypatch.setattr(model_service, "_get_llm", lambda **kw: _fake_llm(chunks))
+    with patch("langchain_core.callbacks.manager.adispatch_custom_event", _capture):
+        result = await model_service.generate_compose_with_streaming(
+            messages=[{"role": "user", "content": "x"}], agent_name="test",
+        )
+
+    streamed = "".join(dispatched)
+    # NO part of the marker leaked — not even "<" or "<da".
+    assert streamed == "The pick is the Sony."
+    assert "<" not in streamed
+    assert "data" not in streamed
+    # Full text still returned intact for parsing.
+    assert result == "The pick is the Sony.<data>{\"top_pick\": \"Sony\"}</data>"
+
+
+@pytest.mark.asyncio
+async def test_streaming_angle_bracket_prose_not_held_forever(monkeypatch):
+    """A '<' that is NOT the marker (real prose) must still be emitted once
+    disambiguated, not swallowed."""
+    monkeypatch.setattr(settings, "USE_OPENROUTER_COMPOSE", True)
+    monkeypatch.setattr(settings, "OPENROUTER_API_KEY", "test-openrouter-key")
+
+    chunks = ["Battery lasts <", "24 hours.", "<data>", "{}", "</data>"]
+    dispatched = []
+
+    async def _capture(event_name, payload):
+        if event_name == "stream_token":
+            dispatched.append(payload["token"])
+
+    monkeypatch.setattr(model_service, "_get_llm", lambda **kw: _fake_llm(chunks))
+    with patch("langchain_core.callbacks.manager.adispatch_custom_event", _capture):
+        await model_service.generate_compose_with_streaming(
+            messages=[{"role": "user", "content": "x"}], agent_name="test",
+        )
+
+    streamed = "".join(dispatched)
+    assert streamed == "Battery lasts <24 hours."  # the non-marker '<' survives
+    assert "<data" not in streamed

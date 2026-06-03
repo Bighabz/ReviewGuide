@@ -344,7 +344,18 @@ class ModelService:
                 joined = "".join(full_text_parts)
                 marker = joined.find(_DATA_MARKER)
                 # Dispatch only up to the marker (or all of it so far if no marker yet).
-                visible_end = marker if marker != -1 else len(joined)
+                if marker != -1:
+                    visible_end = marker
+                else:
+                    # No full marker yet — but the marker can split across chunks
+                    # (e.g. "...<dat" then "a>..."). Hold back any trailing suffix
+                    # that is a prefix of the marker so a partial "<data" never
+                    # leaks to the user; it resolves once more text arrives.
+                    visible_end = len(joined)
+                    for k in range(min(len(_DATA_MARKER) - 1, len(joined)), 0, -1):
+                        if joined.endswith(_DATA_MARKER[:k]):
+                            visible_end = len(joined) - k
+                            break
                 if visible_end > _emitted_len:
                     delta = joined[_emitted_len:visible_end]
                     if delta:
