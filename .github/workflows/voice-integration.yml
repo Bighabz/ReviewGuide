@@ -23,6 +23,13 @@ name: Voice Integration
 #    regression to block PRs; this is signal for "what would change if
 #    we swapped to Claude" rather than a gate.
 #
+# 4. clarifier-eval — Outcome 10. Runs the clarifier question-quality
+#    eval (backend/eval/clarifier_eval.py): production question
+#    generation for every curated category pack, scored against the
+#    pack (slot order, options, multi-select flags, budget brackets).
+#    Non-blocking (continue-on-error) — drift signal, not a gate.
+#    Skips cleanly when OPENAI_API_KEY isn't available (fork PRs).
+#
 # Pin protection: every live job runs a startup assertion that
 # settings.COMPOSER_MODEL matches the CI_COMPOSER_MODEL env pin. If a
 # future PR changes settings.COMPOSER_MODEL default without updating
@@ -38,6 +45,7 @@ on:
       - 'backend/mcp_server/tools/**'
       - 'backend/app/agents/**'
       - 'backend/tests/test_voice_*.py'
+      - 'backend/eval/**'
       - '.github/workflows/voice-integration.yml'
   push:
     branches: [main, feat/voice-rebuild, feat/voice-hotfix]
@@ -46,6 +54,7 @@ on:
       - 'backend/mcp_server/tools/**'
       - 'backend/app/agents/**'
       - 'backend/tests/test_voice_*.py'
+      - 'backend/eval/**'
       - '.github/workflows/voice-integration.yml'
   workflow_dispatch:
 
@@ -162,6 +171,59 @@ jobs:
         # Run only the @integration tests; foundation already covered
         # structural in the prior job.
         run: python -m pytest tests/test_voice_integration.py -v -m integration
+
+  clarifier-eval:
+    name: Clarifier question quality (non-blocking signal)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: voice-foundation
+    # Non-blocking — this measures clarifier question-quality drift against
+    # the curated category packs; it is signal, not a merge gate.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: requirements.txt
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Eval smoke tests (deterministic, no API)
+        working-directory: backend
+        env:
+          ENV: test
+          SECRET_KEY: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+          ADMIN_PASSWORD: test-admin-password
+          DATABASE_URL: 'sqlite+aiosqlite:///:memory:'
+          REDIS_URL: 'redis://localhost:6379/0'
+          OPENAI_API_KEY: sk-test-placeholder
+          RATE_LIMIT_ENABLED: 'false'
+          LOG_ENABLED: 'false'
+        run: python -m pytest eval/test_clarifier_eval_smoke.py eval/test_eval_smoke.py -v
+      - name: Clarifier eval — live (production model)
+        working-directory: backend
+        env:
+          ENV: test
+          SECRET_KEY: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+          ADMIN_PASSWORD: test-admin-password
+          DATABASE_URL: 'sqlite+aiosqlite:///:memory:'
+          REDIS_URL: 'redis://localhost:6379/0'
+          # Real key when configured; the eval skips cleanly on the placeholder.
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || 'sk-test-placeholder' }}
+          RATE_LIMIT_ENABLED: 'false'
+          LOG_ENABLED: 'false'
+        run: python -m eval.clarifier_eval --ci
+      - name: Upload eval report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clarifier-eval-results
+          path: backend/eval/results/
+          if-no-files-found: ignore
 
   voice-live-claude:
     name: Voice live compliance (Claude — non-blocking signal)
