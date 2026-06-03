@@ -20,6 +20,9 @@ interface ConsensusProduct {
   total_reviews: number
   consensus: string
   rank: number
+  // QA Round 6: the product the prose names as its #1 — pinned to rank 1 by
+  // the backend and badged here so the ranking visibly agrees with the guide.
+  editors_pick?: boolean
 }
 
 interface ReviewConsensusProps {
@@ -77,6 +80,21 @@ export default function ReviewConsensus({ data, title = 'How They Compare' }: Re
               <h4 className="font-serif text-base font-semibold tracking-tight" style={{ color: 'var(--ink)' }}>
                 {product.name}
               </h4>
+              {product.editors_pick && (
+                <span
+                  data-testid="editors-pick-badge"
+                  className="uppercase px-1.5 py-0.5 rounded-full whitespace-nowrap rg-sans"
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 600,
+                    letterSpacing: '0.06em',
+                    color: 'var(--paper-hi)',
+                    background: 'var(--terra)',
+                  }}
+                >
+                  Editor&apos;s pick
+                </span>
+              )}
               {product.avg_rating > 0 && (
                 <span className="flex items-center gap-1.5">
                   {/* Clamp defensively — upstream normalizes mixed /10 + /5

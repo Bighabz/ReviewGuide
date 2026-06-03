@@ -1288,7 +1288,8 @@ OUTPUT FORMAT — return a JSON object with these string fields:
 {
   "body": "<3-5 paragraphs of markdown, no per-product headings>",
   "follow_up_question": "<exactly one contextual curious question that references something specific from the body — a product name, a tradeoff just mentioned, or the user's stated situation>",
-  "transitional_reasoning": "<OPTIONAL — exactly one short sentence, OR an empty string. See TRANSITIONAL RULES.>"
+  "transitional_reasoning": "<OPTIONAL — exactly one short sentence, OR an empty string. See TRANSITIONAL RULES.>",
+  "top_pick": "<the EXACT product name of your #1 pick, copied verbatim from the product list — the same product your body names first>"
 }
 
 RANK AND COMMIT (load-bearing — read first):
@@ -1459,6 +1460,20 @@ TRANSITIONAL RULES (transitional_reasoning field):
                 return fallback
             return val.strip()
 
+        # The prose names its own #1 (RANK AND COMMIT). Pre-parse just that name
+        # here so the consensus block and the card order can agree with the prose
+        # (QA Round 6: "skip the Roomba" prose while the Roomba ranked #1 in
+        # "How They Compare"). The full blog parse for assistant_text happens later.
+        prose_top_pick = ""
+        _blog_raw_early = _get_result('blog_article', '')
+        if _blog_raw_early:
+            try:
+                prose_top_pick = (json.loads(_blog_raw_early).get("top_pick") or "").strip()
+            except (json.JSONDecodeError, TypeError, AttributeError):
+                prose_top_pick = ""
+        if prose_top_pick:
+            logger.info(f"[product_compose] Prose top pick: {prose_top_pick}")
+
         # ── Phase 4: Assemble blog-style article ──
 
         ui_blocks = []
@@ -1574,6 +1589,25 @@ TRANSITIONAL RULES (transitional_reasoning field):
                     "rank": rank,
                 })
 
+        # Prose-consensus agreement (QA Round 6): when the prose names a top pick
+        # that's in this block, pin it to rank 1 and mark it as the Editor's pick.
+        # Review-score order decides the rest. Without this, the block can rank #1
+        # the very product the prose tells the user to skip.
+        if prose_top_pick and consensus_products:
+            for i, cp in enumerate(consensus_products):
+                if _fuzzy_product_match(cp["name"], prose_top_pick, threshold=0.5):
+                    pinned = consensus_products.pop(i)
+                    pinned["editors_pick"] = True
+                    consensus_products.insert(0, pinned)
+                    for new_rank, cp2 in enumerate(consensus_products, 1):
+                        cp2["rank"] = new_rank
+                    if i > 0:
+                        logger.info(
+                            f"[product_compose] Consensus re-pinned to prose top pick: {pinned['name']} "
+                            f"(was rank {i + 1})"
+                        )
+                    break
+
         if consensus_products:
             ui_blocks.append({
                 "type": "review_consensus",
@@ -1630,6 +1664,22 @@ TRANSITIONAL RULES (transitional_reasoning field):
         # ── Build unified product_review cards (one per product, multi-retailer) ──
         # Only include products that have offers from 2+ providers (e.g., both Amazon + eBay)
         # Skip products with placeholder/mock images or hallucinated data
+
+        # Prose-card agreement (QA Round 6): card #1 carries the "Top pick · for
+        # you" label, so it must be the product the prose names as its #1 — not
+        # whatever order search returned. Stable move-to-front: everything else
+        # keeps its relative order.
+        if prose_top_pick:
+            _pick_idx = next(
+                (i for i, p in enumerate(products_with_offers)
+                 if _fuzzy_product_match(p.get("name", ""), prose_top_pick, threshold=0.5)),
+                None,
+            )
+            if _pick_idx is not None and _pick_idx > 0:
+                products_with_offers.insert(0, products_with_offers.pop(_pick_idx))
+                logger.info(
+                    f"[product_compose] Cards reordered: prose top pick '{prose_top_pick}' is card #1"
+                )
 
         review_card_count = 0
         seen_card_names = set()

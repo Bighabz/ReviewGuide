@@ -103,4 +103,41 @@ describe('ReviewConsensus', () => {
     const { container } = render(<ReviewConsensus data={{ products: [] }} />)
     expect(container.firstChild).toBeNull()
   })
+
+  it('shows the "Editor\'s pick" badge only on the product flagged editors_pick', () => {
+    render(
+      <ReviewConsensus
+        data={{
+          products: [
+            {
+              name: 'Shark AI Ultra',
+              avg_rating: 4.4,
+              total_reviews: 900,
+              consensus: 'The prose pick — pinned to rank 1 by the backend.',
+              rank: 1,
+              editors_pick: true,
+            },
+            {
+              name: 'Roomba j7+',
+              avg_rating: 4.6,
+              total_reviews: 2100,
+              consensus: 'The review-score leader, ranked 2 here.',
+              rank: 2,
+            },
+          ],
+        }}
+      />
+    )
+
+    const badges = screen.getAllByTestId('editors-pick-badge')
+    expect(badges).toHaveLength(1)
+    expect(badges[0]).toHaveTextContent("Editor's pick")
+    // The badge sits in the same article row as the pinned product
+    expect(badges[0].closest('article')).toHaveTextContent('Shark AI Ultra')
+  })
+
+  it('renders no badge when no product is flagged', () => {
+    render(<ReviewConsensus data={TWO_PRODUCTS} />)
+    expect(screen.queryByTestId('editors-pick-badge')).not.toBeInTheDocument()
+  })
 })
