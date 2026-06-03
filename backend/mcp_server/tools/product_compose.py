@@ -1943,13 +1943,51 @@ TRANSITIONAL RULES (transitional_reasoning field):
             # overrides rank 1.
             if _value_ranked:
                 ranked_bundles.sort(key=lambda kv: _value_rank_of(kv[0]))
-            rank = 0
+
+            # Build the full eligible list first (rank order preserved).
+            _eligible_consensus = []
             for pname, bundle in ranked_bundles:
                 consensus_text = _get_result(f'consensus:{pname}', '')
                 if not consensus_text:
                     continue
                 if not _eligible_for_consensus(pname):
                     continue
+                _eligible_consensus.append((pname, bundle, consensus_text))
+
+            # Diversity pass: keep the best-ranked representative of each model
+            # family and collapse trim variants ("iPhone 15" absorbs "iPhone 15
+            # Pro"/"Pro Max"). Without this, a head-to-head ask like "iPhone 15 vs
+            # Pixel 8" could fill all 3 slots with iPhone trims (more reviews →
+            # higher quality_score) and crowd out the Pixel — and two near-identical
+            # variants would also get the same fuzzy-matched consensus blurb. A name
+            # is a trim variant of another when one's whitespace tokens are a prefix
+            # of the other's (≥2 shared leading tokens), so distinct models
+            # ("iPhone 15"/"iPhone 16", "Sony XM5"/"Sony XM4") are never collapsed.
+            def _is_trim_variant(name_a: str, name_b: str) -> bool:
+                ta = (name_a or "").lower().split()
+                tb = (name_b or "").lower().split()
+                if len(ta) < 2 or len(tb) < 2:
+                    return False
+                short, long = (ta, tb) if len(ta) <= len(tb) else (tb, ta)
+                return long[:len(short)] == short
+
+            _diverse_consensus = []
+            for entry in _eligible_consensus:
+                pname = entry[0]
+                if any(_is_trim_variant(pname, kept[0]) for kept in _diverse_consensus):
+                    logger.info(
+                        f"[product_compose] Consensus diversity: collapsed trim variant '{pname}'"
+                    )
+                    continue
+                _diverse_consensus.append(entry)
+
+            # Never make the block emptier than 2 when we have the material: if
+            # diversity collapsed it below 2 (only trims of one model were reviewed),
+            # fall back to the full eligible list rather than show a lone card.
+            _final_consensus = _diverse_consensus if len(_diverse_consensus) >= 2 else _eligible_consensus
+
+            rank = 0
+            for pname, bundle, consensus_text in _final_consensus:
                 rank += 1  # rank AFTER filtering so the list stays 1..N with no gaps
                 consensus_products.append({
                     "name": pname,
