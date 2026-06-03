@@ -274,6 +274,14 @@ class Settings(BaseSettings):
     # fallback fills it. Default off.
     USE_CONSOLIDATED_COMPOSE: bool = Field(default=False, description="Fold review consensus + descriptions into the single blog compose call (Tier 3a)")
 
+    # Tier 2 compose decouple: when consolidated, emit the prose body as plain
+    # markdown followed by a <data>{...}</data> JSON tail (structured fields)
+    # instead of one json_object. Removes the json_object dependency → any model
+    # works natively (incl. direct Anthropic + prompt caching) and the prose can
+    # be token-streamed later (Tier 2.1). Only takes effect with
+    # USE_CONSOLIDATED_COMPOSE also on. Default off.
+    USE_DECOUPLED_COMPOSE: bool = Field(default=False, description="Emit prose + a <data> JSON tail instead of one json_object (Tier 2; requires USE_CONSOLIDATED_COMPOSE)")
+
     # Outcome 6 PROTOTYPE (conversational engine): answer-aware follow-ups.
     # The clarifier asks use_case ALONE first; once answered, the features
     # question is generated with knowledge of that answer, so it can adapt
