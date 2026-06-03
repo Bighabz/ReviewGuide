@@ -87,6 +87,7 @@ function ClarifierQuestionGroup({
   selected,
   onSelect,
   locked,
+  preferenceOption,
 }: {
   question: string
   options: string[]
@@ -95,6 +96,8 @@ function ClarifierQuestionGroup({
   selected: string[]
   onSelect: (next: string[]) => void
   locked: boolean
+  /** Outcome 7: the user's stored past answer — rendered with "(like last time)" */
+  preferenceOption?: string
 }) {
   const toggle = (option: string) => {
     if (locked) return
@@ -128,6 +131,16 @@ function ClarifierQuestionGroup({
                 style={{ background: isSelected ? '#fff' : 'var(--terra)' }}
               />
               {option}
+              {/* Outcome 7: returning users see their past answer tagged */}
+              {option === preferenceOption && (
+                <span
+                  data-testid="clarifier-preference-tag"
+                  className="text-[11px] italic"
+                  style={{ opacity: 0.7 }}
+                >
+                  (like last time)
+                </span>
+              )}
             </button>
           )
         })}
@@ -143,6 +156,8 @@ interface ClarifierQuestion {
   options?: string[]
   free_text_hint?: string
   type?: string
+  /** Outcome 7: the stored past answer the backend moved to the front of options */
+  preference_chip?: string
 }
 
 /** The whole clarifying-questions card: question groups + one submit. */
@@ -226,6 +241,7 @@ function ClarifierCard({
                   selected={selections[q.slot] ?? []}
                   onSelect={(next) => handleSelect(q, next)}
                   locked={submitted}
+                  preferenceOption={q.preference_chip}
                 />
               )
             }
