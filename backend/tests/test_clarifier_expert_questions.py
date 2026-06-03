@@ -1312,3 +1312,156 @@ async def test_normal_answer_still_goes_through_extraction(agent):
 
     assert extraction_called.get("yes") is True
     assert result["proceed_to_execution"] is False  # budget still missing → re-ask
+
+
+# ---------------------------------------------------------------------------
+# Outcome 5 — comparison-mode clarification ("X vs Y" → dimension question)
+# ---------------------------------------------------------------------------
+
+from app.agents.clarifier_agent import _detect_comparison_query  # noqa: E402
+
+
+def test_detect_comparison_query_product_pairs():
+    """Explicit two-product 'vs' queries are detected; the lead words strip."""
+    assert _detect_comparison_query("iPhone 15 vs Pixel 8") == ["iPhone 15", "Pixel 8"]
+    assert _detect_comparison_query("iPhone 15 Pro vs. Samsung Galaxy S24?") == [
+        "iPhone 15 Pro", "Samsung Galaxy S24"
+    ]
+    assert _detect_comparison_query("compare MacBook Air vs Surface Laptop") == [
+        "MacBook Air", "Surface Laptop"
+    ]
+    assert _detect_comparison_query("which is better: Sony WH-1000XM5 versus Bose QC Ultra") == [
+        "Sony WH-1000XM5", "Bose QC Ultra"
+    ]
+
+
+def test_detect_comparison_query_rejects_non_comparisons():
+    """Regular queries, brand-only pairs, and 3-way comparisons stay in the
+    generic flow."""
+    # Not a comparison at all
+    assert _detect_comparison_query("best running shoes for long distances") is None
+    assert _detect_comparison_query("") is None
+    assert _detect_comparison_query(None) is None
+    # Brand-vs-brand (single words, no digits) → needs the category question first
+    assert _detect_comparison_query("Dyson vs Shark") is None
+    assert _detect_comparison_query("Sony versus Bose") is None
+    # Three-way → generic flow
+    assert _detect_comparison_query("iPhone 15 vs Pixel 8 vs Galaxy S24") is None
+
+
+@pytest.mark.asyncio
+async def test_comparison_query_asks_dimension_not_expert_trio(agent):
+    """'iPhone 15 vs Pixel 8' must ask ONE comparison_dimension question — never
+    use_case/budget/features."""
+    state = {
+        "plan": {"steps": [{"id": "s1", "tools": ["product_search"]}]},
+        "slots": {},
+        "user_message": "iPhone 15 vs Pixel 8",
+        "sanitized_text": "iPhone 15 vs Pixel 8",
+        "intent": "product",
+        "session_id": "test-session",
+        "conversation_history": [],
+        "last_search_context": {},
+        "search_history": [],
+    }
+
+    captured = {}
+
+    # Initial slot extraction from the query finds the products but no category info
+    agent._extract_all_slots_from_conversation = AsyncMock(return_value={
+        "category": "phones", "product_name": "iPhone 15", "use_case": None,
+        "budget": None, "features": None,
+    })
+
+    async def fake_generate_questions(missing_slots, current_slots, user_message, intent, conversation_history=None):
+        captured["missing_slots"] = list(missing_slots)
+        captured["current_slots"] = dict(current_slots)
+        return {
+            "intro": "Which matters most?",
+            "questions": [{
+                "slot": "comparison_dimension",
+                "question": "What matters most when choosing between the iPhone 15 and Pixel 8?",
+                "options": ["Camera", "Battery life", "Ecosystem", "Price"],
+                "free_text_hint": "or type your own answer",
+            }],
+            "closing": "Then I'll call the winner.",
+        }
+
+    agent._generate_followup_questions = fake_generate_questions
+
+    with patch("app.agents.clarifier_agent.HaltStateManager.update_halt_state", new=AsyncMock()):
+        result = await agent._handle_new_plan(state, "test-session")
+
+    assert captured["missing_slots"] == ["comparison_dimension"], (
+        f"comparison mode must ask only the dimension, got: {captured['missing_slots']}"
+    )
+    # The named products are stored for the question generator
+    assert captured["current_slots"].get("comparison_products") == ["iPhone 15", "Pixel 8"]
+    assert result["proceed_to_execution"] is False
+
+
+@pytest.mark.asyncio
+async def test_non_comparison_query_keeps_expert_trio(agent):
+    """A regular substantive query still gets the use_case/features/budget flow."""
+    state = {
+        "plan": {"steps": [{"id": "s1", "tools": ["product_search"]}]},
+        "slots": {},
+        "user_message": "best laptop",
+        "sanitized_text": "best laptop",
+        "intent": "product",
+        "session_id": "test-session",
+        "conversation_history": [],
+        "last_search_context": {},
+        "search_history": [],
+    }
+
+    captured = {}
+
+    agent._extract_all_slots_from_conversation = AsyncMock(return_value={
+        "category": "laptops", "use_case": None, "budget": None, "features": None,
+    })
+
+    async def fake_generate_questions(missing_slots, current_slots, user_message, intent, conversation_history=None):
+        captured["missing_slots"] = list(missing_slots)
+        return {"intro": "", "questions": [
+            {"slot": s, "question": f"{s}?", "options": ["a", "b"]} for s in missing_slots
+        ], "closing": ""}
+
+    agent._generate_followup_questions = fake_generate_questions
+
+    with patch("app.agents.clarifier_agent.HaltStateManager.update_halt_state", new=AsyncMock()):
+        await agent._handle_new_plan(state, "test-session")
+
+    assert "comparison_dimension" not in captured["missing_slots"]
+    assert captured["missing_slots"][0] == "use_case"
+    assert captured["missing_slots"][-1] == "budget"
+
+
+@pytest.mark.asyncio
+async def test_comparison_question_prompt_carries_pair_and_dimension_rules(agent):
+    """_generate_followup_questions' prompt names both products and the
+    dimension-question rules when comparison_dimension is requested."""
+    agent.generate = AsyncMock(return_value=json.dumps({
+        "intro": "x",
+        "questions": [{
+            "slot": "comparison_dimension",
+            "question": "What matters most?",
+            "options": ["Camera", "Battery life", "Price"],
+        }],
+        "closing": "",
+    }))
+
+    result = await agent._generate_followup_questions(
+        missing_slots=["comparison_dimension"],
+        current_slots={"comparison_products": ["iPhone 15", "Pixel 8"], "category": "phones"},
+        user_message="iPhone 15 vs Pixel 8",
+        intent="product",
+    )
+
+    system_prompt = agent.generate.call_args.kwargs["messages"][0]["content"]
+    assert "COMPARISON MODE" in system_prompt
+    assert "iPhone 15 vs Pixel 8" in system_prompt
+    assert "What matters most to you?" in system_prompt
+    # The generated question survives normalization
+    assert result["questions"][0]["slot"] == "comparison_dimension"
+    assert "Camera" in result["questions"][0]["options"]

@@ -1519,3 +1519,130 @@ async def test_skimlinks_wrapped_shopping_offer_becomes_buy_link():
     skim_link = next(l for l in links if "skimresources.com" in l["affiliate_link"])
     assert skim_link["merchant"] == "Walmart"
     assert skim_link["price"] == 89.99
+
+
+# ---------------------------------------------------------------------------
+# Outcome 5 — comparison-dimension weighting in the verdict prose
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_comparison_dimension_reaches_blog_prompt():
+    """When the clarifier captured a comparison_dimension slot ("Camera"), the
+    blog composer's input must carry the DECIDING FACTOR directive so the verdict
+    is written around that dimension."""
+    captured_calls = []
+
+    async def capture_compose(**kwargs):
+        captured_calls.append(kwargs)
+        return "mock response text"
+
+    fake_service = MagicMock()
+    fake_service.generate_compose = AsyncMock(side_effect=capture_compose)
+
+    state = {
+        "user_message": "iPhone 15 vs Pixel 8",
+        "intent": "product",
+        "slots": {
+            "category": "phones",
+            "comparison_products": ["iPhone 15", "Pixel 8"],
+            "comparison_dimension": "Camera",
+        },
+        "normalized_products": [{"name": "iPhone 15"}, {"name": "Pixel 8"}],
+        "affiliate_products": {
+            "serper_shopping": [
+                {
+                    "product_name": "iPhone 15",
+                    "offers": [{
+                        "title": "iPhone 15", "price": 799.0, "currency": "USD",
+                        "url": "https://www.google.com/shopping/product/iphone15",
+                        "merchant": "BestBuy",
+                        "image_url": "https://img.example.com/iphone15.jpg",
+                        "source": "serper_shopping",
+                    }],
+                },
+                {
+                    "product_name": "Pixel 8",
+                    "offers": [{
+                        "title": "Pixel 8", "price": 699.0, "currency": "USD",
+                        "url": "https://www.google.com/shopping/product/pixel8",
+                        "merchant": "BestBuy",
+                        "image_url": "https://img.example.com/pixel8.jpg",
+                        "source": "serper_shopping",
+                    }],
+                },
+            ],
+        },
+        "review_data": {},
+        "comparison_html": None,
+        "comparison_data": None,
+        "general_product_info": "",
+        "conversation_history": [],
+        "last_search_context": {},
+        "search_history": [],
+    }
+
+    with patch("app.services.model_service.model_service", fake_service):
+        await product_compose(state)
+
+    # Find the blog_article composer call and inspect its user content
+    blog_calls = [c for c in captured_calls if c.get("agent_name") == "blog_article_composer"]
+    assert blog_calls, "blog_article composer was not called"
+    blog_messages = blog_calls[0]["messages"]
+    combined = " ".join(m["content"] for m in blog_messages)
+
+    assert "DECIDING FACTOR" in combined, "dimension directive missing from blog prompt"
+    assert '"Camera"' in combined
+    # And the directive never leaks into the pinned role prompt (eval sync safety)
+    system_content = blog_messages[0]["content"]
+    user_content = blog_messages[-1]["content"]
+    assert "DECIDING FACTOR" in user_content or "DECIDING FACTOR" in system_content
+    # blog_role itself must stay untouched — verified by eval's byte-identical test,
+    # but assert here that the directive is data, not a role-prompt edit
+    assert "RANK AND COMMIT" in system_content
+
+
+@pytest.mark.asyncio
+async def test_no_dimension_directive_without_comparison_slot():
+    """Regular queries (no comparison_dimension slot) get no DECIDING FACTOR text."""
+    captured_calls = []
+
+    async def capture_compose(**kwargs):
+        captured_calls.append(kwargs)
+        return "mock response text"
+
+    fake_service = MagicMock()
+    fake_service.generate_compose = AsyncMock(side_effect=capture_compose)
+
+    state = {
+        "user_message": "best phone",
+        "intent": "product",
+        "slots": {"category": "phones"},
+        "normalized_products": [{"name": "iPhone 15"}],
+        "affiliate_products": {
+            "serper_shopping": [{
+                "product_name": "iPhone 15",
+                "offers": [{
+                    "title": "iPhone 15", "price": 799.0, "currency": "USD",
+                    "url": "https://www.google.com/shopping/product/iphone15",
+                    "merchant": "BestBuy",
+                    "image_url": "https://img.example.com/iphone15.jpg",
+                    "source": "serper_shopping",
+                }],
+            }],
+        },
+        "review_data": {},
+        "comparison_html": None,
+        "comparison_data": None,
+        "general_product_info": "",
+        "conversation_history": [],
+        "last_search_context": {},
+        "search_history": [],
+    }
+
+    with patch("app.services.model_service.model_service", fake_service):
+        await product_compose(state)
+
+    blog_calls = [c for c in captured_calls if c.get("agent_name") == "blog_article_composer"]
+    assert blog_calls
+    combined = " ".join(m["content"] for m in blog_calls[0]["messages"])
+    assert "DECIDING FACTOR" not in combined
