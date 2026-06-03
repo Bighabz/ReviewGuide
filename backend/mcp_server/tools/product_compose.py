@@ -67,6 +67,25 @@ def _consolidated_blog_role(base_role: str) -> str:
     return base_role.replace(_BLOG_SCHEMA_TAIL, _CONSOLIDATED_SCHEMA_TAIL) + _CONSOLIDATED_EXTRA_RULES
 
 
+# Tier 3b: the draft→revise voice pass (formerly a second LLM round-trip in
+# _voice_revise_body) folded into the single call as a self-edit directive. It
+# carries the same instructions as the revise prompt, reframed as "edit your own
+# draft before emitting". Appended to the consolidated role at the CALL SITE only
+# (gated by USE_VOICE_PASS), so the pinned consolidated role stays stable — same
+# pattern as the two-speed LENGTH OVERRIDE.
+_SELF_EDIT_SECTION = """
+
+SELF-EDIT BEFORE EMITTING (final voice pass):
+Before you output the JSON, silently revise your own body for maximum voice adherence:
+- Commit to a ranked #1 and #2 with a clear WHY the #1 wins for the default buyer.
+- Cut every trace of glaze, empty affirmation, or hedging.
+- Position alternatives by who they fit — never call anything "bad".
+- Keep it tight and skimmable; preserve EVERY concrete fact already grounded in the product list.
+- Do NOT add products, specs, prices, numbers, or URLs that are not in the product list.
+- Keep follow_up_question to exactly one specific question.
+Emit only the final, revised JSON — do not show your editing or the draft."""
+
+
 # Tool contract for planner
 TOOL_CONTRACT = {
     "name": "product_compose",
@@ -1644,6 +1663,13 @@ TRANSITIONAL RULES (transitional_reasoning field):
         if _consolidated:
             blog_role_effective = _consolidated_blog_role(blog_role_effective)
             blog_max_tokens += 700  # headroom for top-3 consensus + per-product descriptions (bake-off: ~924 tok used at 1400)
+            # Tier 3b: fold the voice pass into THIS call as a self-edit directive
+            # instead of a second round-trip. Only in consolidated mode — the
+            # legacy (non-consolidated) path keeps the separate _voice_revise_body
+            # call below.
+            if getattr(settings, "USE_VOICE_PASS", False):
+                blog_role_effective += _SELF_EDIT_SECTION
+                logger.info("[product_compose] Voice pass folded into single call (Tier 3b self-edit)")
             logger.info(f"[product_compose] Consolidated compose ON: blog_max_tokens={blog_max_tokens}")
 
         if getattr(settings, "USE_GROUNDED_COMPOSE", False):
@@ -2245,7 +2271,9 @@ TRANSITIONAL RULES (transitional_reasoning field):
                     f"follow_up={len(follow_up_text)} chars"
                 )
                 # Tier 3 (Option B): draft→revise voice pass over the assembled body.
-                if getattr(settings, "USE_VOICE_PASS", False) and body:
+                # Tier 3b: in consolidated mode the voice pass is already baked into
+                # the single call (self-edit directive), so skip the second round-trip.
+                if getattr(settings, "USE_VOICE_PASS", False) and body and not _consolidated:
                     _revised = await _voice_revise_body(body, follow_up_text, transitional_text, user_message)
                     if _revised:
                         body = (_revised.get("body") or body).strip()
