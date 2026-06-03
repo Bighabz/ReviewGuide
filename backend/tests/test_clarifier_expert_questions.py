@@ -1063,3 +1063,142 @@ async def test_fresh_session_unaffected_by_f5_gates(agent):
     assert result["proceed_to_execution"] is False
     assert "use_case" in captured["missing_slots"]
     extraction_mock.assert_not_called()  # F6 fast path
+
+
+# ---------------------------------------------------------------------------
+# F2 (QA Round 6) — budget ranges must survive slot extraction
+# ---------------------------------------------------------------------------
+
+from app.agents.clarifier_agent import _find_budget_phrase  # noqa: E402
+
+BUDGET_FOLLOWUPS = [
+    {
+        "slot": "budget",
+        "question": "What's your budget for these running shoes?",
+        "options": ["Under $80", "$80–$130", "$130–$180", "$180+"],
+        "free_text_hint": "or type an amount",
+    }
+]
+
+
+def test_find_budget_phrase_shapes():
+    """The literal-phrase finder preserves every budget shape _parse_budget understands."""
+    assert _find_budget_phrase("$80–$130") == "$80–$130"
+    assert _find_budget_phrase("You chose: $80–$130") == "$80–$130"
+    assert _find_budget_phrase("100-200") == "100-200"
+    assert _find_budget_phrase("100 to 200") == "100 to 200"
+    assert _find_budget_phrase("$1,200+") == "$1,200+"
+    assert _find_budget_phrase("under $500 please") == "under $500"
+    assert _find_budget_phrase("somewhere around $150") == "around $150"
+    # No budget phrase → empty (bare numbers are NOT a range/qualifier)
+    assert _find_budget_phrase("my budget is 100 dollars") == ""
+    assert _find_budget_phrase("Gaming") == ""
+    assert _find_budget_phrase("") == ""
+    assert _find_budget_phrase(None) == ""
+
+
+def test_find_budget_phrase_prefers_dollar_and_last_in_combined_answers():
+    """A combined card answer can contain non-budget number ranges (battery hours).
+    The finder must pick the dollar-denominated / right-most phrase — budget is
+    always the last question on the card."""
+    combined = "4–8 hours; Lumbar support, Breathable mesh; $150–$350"
+    assert _find_budget_phrase(combined) == "$150–$350"
+    # No dollar signs anywhere → right-most range still wins
+    assert _find_budget_phrase("4-8 hours; lumbar; 150-350") == "150-350"
+
+
+@pytest.mark.asyncio
+async def test_extraction_keeps_budget_range_string(agent):
+    """When the extractor LLM behaves, the range string passes through untouched."""
+    agent.generate = AsyncMock(return_value=json.dumps({"budget": "$80–$130"}))
+
+    extracted = await agent._extract_all_slots_from_answer(
+        slot_names=["budget"],
+        user_message="$80–$130",
+        followups=BUDGET_FOLLOWUPS,
+    )
+
+    assert extracted == {"budget": "$80–$130"}
+
+
+@pytest.mark.asyncio
+async def test_extraction_guard_restores_collapsed_budget_range(agent):
+    """THE F2 prod bug: the extractor collapsed "$80–$130" to the number 100, which
+    reads as a ceiling downstream and erases the floor. The deterministic guard
+    must restore the literal phrase from the user's answer."""
+    agent.generate = AsyncMock(return_value=json.dumps({"budget": 100}))
+
+    extracted = await agent._extract_all_slots_from_answer(
+        slot_names=["budget"],
+        user_message="$80–$130",
+        followups=BUDGET_FOLLOWUPS,
+    )
+
+    assert extracted == {"budget": "$80–$130"}, (
+        "a collapsed numeric budget must be replaced by the literal range the user gave"
+    )
+
+
+@pytest.mark.asyncio
+async def test_extraction_guard_restores_range_in_combined_card_answer(agent):
+    """Same guard, multi-question card format: the budget is the last segment."""
+    agent.generate = AsyncMock(return_value=json.dumps({
+        "use_case": "Long-distance running",
+        "features": "Max cushion",
+        "budget": "130",
+    }))
+
+    extracted = await agent._extract_all_slots_from_answer(
+        slot_names=["use_case", "features", "budget"],
+        user_message="Long-distance running; Max cushion; $80–$130",
+        followups=BUDGET_FOLLOWUPS,
+    )
+
+    assert extracted["budget"] == "$80–$130"
+    assert extracted["use_case"] == "Long-distance running"
+
+
+@pytest.mark.asyncio
+async def test_extraction_guard_does_not_fire_on_legit_qualifiers(agent):
+    """LLM answers that already carry the shape ("under $80") are kept as-is."""
+    agent.generate = AsyncMock(return_value=json.dumps({"budget": "under $80"}))
+
+    extracted = await agent._extract_all_slots_from_answer(
+        slot_names=["budget"],
+        user_message="Under $80",
+        followups=BUDGET_FOLLOWUPS,
+    )
+
+    assert extracted == {"budget": "under $80"}
+
+
+@pytest.mark.asyncio
+async def test_extraction_guard_keeps_bare_number_when_user_gave_no_range(agent):
+    """A user who really typed a bare number keeps it (treated as a ceiling)."""
+    agent.generate = AsyncMock(return_value=json.dumps({"budget": 100}))
+
+    extracted = await agent._extract_all_slots_from_answer(
+        slot_names=["budget"],
+        user_message="100 dollars max",
+        followups=BUDGET_FOLLOWUPS,
+    )
+
+    assert extracted == {"budget": 100}
+
+
+@pytest.mark.asyncio
+async def test_extraction_prompt_says_budget_is_a_string(agent):
+    """Both extraction prompts must instruct: budget keeps its range/qualifier
+    shape as a STRING, and budget is NOT in the return-as-number list."""
+    agent.generate = AsyncMock(return_value=json.dumps({"budget": "$80–$130"}))
+
+    await agent._extract_all_slots_from_answer(
+        slot_names=["budget"],
+        user_message="$80–$130",
+        followups=BUDGET_FOLLOWUPS,
+    )
+
+    system_prompt = agent.generate.call_args.kwargs["messages"][0]["content"]
+    assert "NEVER collapse a range" in system_prompt
+    assert "For numbers (duration_days, adults, children): return as number" in system_prompt
+    assert "children, budget): return as number" not in system_prompt
