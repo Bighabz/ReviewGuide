@@ -1305,6 +1305,9 @@ async def product_compose(state: Dict[str, Any]) -> Dict[str, Any]:
         _consolidated = getattr(settings, "USE_CONSOLIDATED_COMPOSE", False)
         # Tier 2: prose/JSON decouple only applies on top of consolidation.
         _decoupled = _consolidated and getattr(settings, "USE_DECOUPLED_COMPOSE", False)
+        # Tier 2.1: true token streaming of the prose body — only meaningful when
+        # the prose is plain text (decoupled), not wrapped in json_object.
+        _streaming = _decoupled and getattr(settings, "USE_COMPOSE_STREAMING", False)
 
         llm_tasks = {}  # key -> coroutine
 
@@ -1793,15 +1796,27 @@ TRANSITIONAL RULES (transitional_reasoning field):
                 {"role": "system", "content": build_system_prompt(role_prompt=blog_role_effective, kind="response")},
                 {"role": "user", "content": blog_data},
             ]
-        llm_tasks['blog_article'] = model_service.generate_compose(
-            messages=blog_messages,
-            temperature=0.7,
-            max_tokens=blog_max_tokens,
-            # Tier 2: decoupled mode emits prose + a <data> tail (not one JSON
-            # object), so drop the json_object constraint and parse it ourselves.
-            response_format=None if _decoupled else {"type": "json_object"},
-            agent_name="blog_article_composer"
-        )
+        if _streaming:
+            # Tier 2.1: stream the prose body token-by-token. The streaming method
+            # dispatches stream_token custom events (prose only, gated at <data>)
+            # and returns the full text (tail included) for parsing below. Falls
+            # back to non-streaming internally on any failure.
+            llm_tasks['blog_article'] = model_service.generate_compose_with_streaming(
+                messages=blog_messages,
+                temperature=0.7,
+                max_tokens=blog_max_tokens,
+                agent_name="blog_article_composer",
+            )
+        else:
+            llm_tasks['blog_article'] = model_service.generate_compose(
+                messages=blog_messages,
+                temperature=0.7,
+                max_tokens=blog_max_tokens,
+                # Tier 2: decoupled mode emits prose + a <data> tail (not one JSON
+                # object), so drop the json_object constraint and parse it ourselves.
+                response_format=None if _decoupled else {"type": "json_object"},
+                agent_name="blog_article_composer"
+            )
 
         # NOTE: the old "Top Pick editorial prose" (UX-03) LLM call + its
         # type:"top_pick" ui_block were removed (QA Round 7 cleanup): the block
