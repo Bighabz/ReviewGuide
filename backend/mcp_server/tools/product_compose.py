@@ -5,6 +5,7 @@ Formats final product response with UI blocks and citations.
 """
 
 import asyncio
+import re
 import sys
 import os
 import json
@@ -85,6 +86,66 @@ def _fuzzy_product_match(query_name: str, candidate_name: str, threshold: float 
     intersection = q_tokens & c_tokens
     union = q_tokens | c_tokens
     return len(intersection) / len(union) >= threshold
+
+
+# ── F4: model-code identity for near-duplicate dedup ────────────────────────
+# Search providers return the same physical product under slightly different
+# names ("Sony WH-1000XM5 Wireless Headphones" vs "Sony WH1000XM5/B Noise
+# Canceling") and each becomes its own card. Names are too fuzzy to dedupe on
+# (the URL/offer-set attempt was reverted — fuzzy offer attachment gives
+# DISTINCT products identical offer sets → false positives). The model code
+# ("WH-1000XM5", "A515-56") IS the identity: dedupe ONLY when codes match.
+
+_MODEL_CODE_RE = re.compile(r"\b[A-Z]{1,4}-?\d{3,}\w*\b")
+
+
+def _extract_model_codes(name: str) -> set:
+    """Model codes found in a product name, normalized (uppercase, dashes removed)
+    so 'WH-1000XM5' and 'WH1000XM5' read as the same code."""
+    if not isinstance(name, str):
+        return set()
+    return {m.replace("-", "").upper() for m in _MODEL_CODE_RE.findall(name)}
+
+
+def _dedupe_by_model_code(products: list) -> list:
+    """Collapse products whose names share a model code (the same physical product).
+
+    The FIRST occurrence is kept (earlier = better-ranked upstream); the
+    duplicate's offers are merged in (by URL) so no buy link is lost. Products
+    without any model code in their name are never deduped — no identity signal,
+    no merge (that's what keeps "Cheap Laptop A"/"B" style distinct products safe).
+    """
+    from app.core.centralized_logger import get_logger
+
+    _log = get_logger(__name__)
+    code_owner: dict = {}  # normalized code -> index into deduped
+    deduped: list = []
+    for product in products:
+        codes = _extract_model_codes(product.get("name", ""))
+        dup_idx = next((code_owner[c] for c in codes if c in code_owner), None)
+        if dup_idx is not None:
+            kept = deduped[dup_idx]
+            # Merge offers the kept product doesn't already have (by URL)
+            kept_offers = kept.get("all_offers") or []
+            seen_urls = {o.get("url") for o in kept_offers}
+            for offer in product.get("all_offers") or []:
+                if offer.get("url") not in seen_urls:
+                    kept_offers.append(offer)
+                    seen_urls.add(offer.get("url"))
+            if kept_offers:
+                kept["all_offers"] = kept_offers
+                if not kept.get("best_offer"):
+                    priced = [o for o in kept_offers if (o.get("price") or 0) > 0]
+                    kept["best_offer"] = priced[0] if priced else kept_offers[0]
+            _log.info(
+                f"[product_compose] F4 dedup: '{product.get('name')}' is the same product as "
+                f"'{kept.get('name')}' (shared model code) — merged {len(product.get('all_offers') or [])} offer(s)"
+            )
+            continue
+        for c in codes:
+            code_owner[c] = len(deduped)
+        deduped.append(product)
+    return deduped
 
 
 # Domain -> merchant name mapping for label-domain parity correction
@@ -856,6 +917,18 @@ async def product_compose(state: Dict[str, Any]) -> Dict[str, Any]:
                 product_copy["all_offers"] = all_offers_for_product
 
             products_with_offers.append(product_copy)
+
+        # ── F4: near-duplicate dedup via model-code identity ──
+        # Runs BEFORE budget pruning / verification / value ordering so every
+        # downstream step (and ultimately the cards) sees one entry per physical
+        # product, with the duplicates' offers merged in.
+        before_dedup = len(products_with_offers)
+        products_with_offers = _dedupe_by_model_code(products_with_offers)
+        if len(products_with_offers) < before_dedup:
+            logger.info(
+                f"[product_compose] F4 dedup removed {before_dedup - len(products_with_offers)} "
+                f"near-duplicate product(s) ({before_dedup} → {len(products_with_offers)})"
+            )
 
         # Product-level budget honesty: a product whose offers are ALL out of budget
         # survived the offer filter via its keep-all fallback — but it must not
@@ -1968,11 +2041,24 @@ TRANSITIONAL RULES (transitional_reasoning field):
         # ── Fallback cards for blog-mentioned products without product_review blocks ──
         # Every product mentioned in the blog article must have a clickable card
         fallback_card_count = 0
+        # F4: fallback cards must not reintroduce a near-duplicate of a card that
+        # already exists under a slightly different name — model codes are the
+        # identity check here too (exact-name matching alone misses variants).
+        seen_card_codes: set = set()
+        for existing_name in seen_card_names:
+            seen_card_codes |= _extract_model_codes(existing_name)
         for pname in blog_product_names:
             if review_card_count + fallback_card_count >= 5:
                 break   # cap reached — stop entirely
             if pname in seen_card_names:
                 continue   # skip duplicate but keep iterating
+            pname_codes = _extract_model_codes(pname)
+            if pname_codes & seen_card_codes:
+                logger.info(
+                    f"[product_compose] F4 dedup: fallback card '{pname}' shares a model code "
+                    "with an existing card — skipped"
+                )
+                continue
 
             # Build Amazon search URL as fallback affiliate link
             amazon_search_url = f"https://www.amazon.com/s?k={quote_plus(pname)}&tag=revguide-20"
@@ -2022,6 +2108,7 @@ TRANSITIONAL RULES (transitional_reasoning field):
                 "data": card_data,
             })
             seen_card_names.add(pname)
+            seen_card_codes |= pname_codes
             fallback_card_count += 1
 
         if fallback_card_count > 0:
