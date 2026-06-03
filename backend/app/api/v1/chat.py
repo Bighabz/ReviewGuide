@@ -442,6 +442,7 @@ async def generate_chat_stream(
         result_state = None
         last_node_name = None
         data_already_streamed = False  # Track if we already streamed any data (from stream_chunk_data)
+        prose_streamed = False  # Tier 2.1: true token streaming sent the prose body live
 
         # RFC §1.1 — enforce 60-second hard limit on the entire SSE connection.
         # asyncio.wait_for cannot wrap an async generator, so the deadline is
@@ -450,7 +451,7 @@ async def generate_chat_stream(
 
         async def _drain_event_loop():
             """Drain the event queue until the workflow sentinel arrives or the 60-second hard cap fires."""
-            nonlocal result_state, last_node_name, data_already_streamed, sse_total_timeout_hit
+            nonlocal result_state, last_node_name, data_already_streamed, prose_streamed, sse_total_timeout_hit
             # RFC §1.1 — enforce hard cap by checking elapsed time on every iteration.
             # asyncio.wait_for cannot wrap an async generator directly, so the deadline
             # is enforced inline: the check fires within one CHAT_EVENT_QUEUE_TIMEOUT
@@ -532,6 +533,22 @@ async def generate_chat_stream(
                         if isinstance(output_data, dict) and output_data.get("next_agent") == "travel_planner":
                             logger.info(f"Travel planner status (suppressed): from {event_name}")
                             last_node_name = "planner"
+
+                # Tier 2.1: true token streaming. The compose tool dispatches
+                # `stream_token` custom events (prose body only — gated at <data>)
+                # as the LLM produces them. Forward each as a `content` token so
+                # the prose types out live instead of being chunked post-hoc. The
+                # placeholder is cleared on the first token; the final block then
+                # skips its own clear + post-hoc chunk loop (prose_streamed). If
+                # these events never arrive (propagation off), prose_streamed stays
+                # False and the finished text streams post-hoc as before.
+                elif event_type == "on_custom_event" and event_name == "stream_token":
+                    token = (event.get("data") or {}).get("token", "")
+                    if token:
+                        if not prose_streamed:
+                            yield _sse_event("artifact", {"clear": True})
+                            prose_streamed = True
+                        yield _sse_event("content", {"token": token})
 
         try:
             # RFC §1.1 — drain; the 60-second hard cap fires inside _drain_event_loop
@@ -732,7 +749,14 @@ async def generate_chat_stream(
 
         # For product intent, send ui_blocks in the SAME chunk as clear to avoid race condition
         ui_blocks_sent_early = False
-        if ui_blocks and result_state.get("intent") == "product" and not data_already_streamed:
+        if prose_streamed:
+            # Tier 2.1: the prose body already streamed live and cleared the
+            # placeholder at its first token. Don't clear again (would wipe the
+            # streamed body) and don't send ui_blocks early — they ride the `done`
+            # payload below, rendered under the finished prose (same as the
+            # data_already_streamed path).
+            logger.info("🔍 Skipping clear chunk - prose streamed live (Tier 2.1)")
+        elif ui_blocks and result_state.get("intent") == "product" and not data_already_streamed:
             logger.info(f"🔍 DEBUG: Sending UI blocks WITH clear for product intent ({len(ui_blocks)} blocks)")
             # Send ui_blocks AND clear in the same artifact event
             yield _sse_event("artifact", {
@@ -749,8 +773,9 @@ async def generate_chat_stream(
         else:
             logger.info("🔍 Skipping clear chunk - data already streamed, will append followups")
 
-        # Stream response text if available and NOT halted and NOT already streamed data
-        should_stream_text = not is_halted and response_text and not data_already_streamed
+        # Stream response text if available and NOT halted and NOT already streamed
+        # data and NOT already streamed live token-by-token (Tier 2.1).
+        should_stream_text = not is_halted and response_text and not data_already_streamed and not prose_streamed
 
         if should_stream_text:
             logger.info(f"🔍 DEBUG: Streaming response text ({len(response_text)} chars)")

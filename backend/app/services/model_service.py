@@ -328,25 +328,45 @@ class ModelService:
                 llm = self._get_llm(model=settings.COMPOSER_MODEL, temperature=temperature)
             lc_messages = self._convert_messages(messages)
             full_text_parts: list[str] = []
+            # Tier 2.1: in the decoupled format the prose body comes first, then a
+            # `<data>` tail with the structured JSON. Only the prose should reach
+            # the user as streamed tokens — stop dispatching once the tail marker
+            # appears (the full text, tail included, is still returned for parsing).
+            _DATA_MARKER = "<data>"
+            _emitted_len = 0  # chars of (prose) already dispatched
+            _tail_started = False
+
+            async def _emit(content: str) -> None:
+                nonlocal _emitted_len, _tail_started
+                full_text_parts.append(content)
+                if _tail_started:
+                    return
+                joined = "".join(full_text_parts)
+                marker = joined.find(_DATA_MARKER)
+                # Dispatch only up to the marker (or all of it so far if no marker yet).
+                visible_end = marker if marker != -1 else len(joined)
+                if visible_end > _emitted_len:
+                    delta = joined[_emitted_len:visible_end]
+                    if delta:
+                        try:
+                            await adispatch_custom_event("stream_token", {"token": delta})
+                        except Exception:
+                            pass
+                    _emitted_len = visible_end
+                if marker != -1:
+                    _tail_started = True  # stop emitting; tail is structured data
+
             # Semaphore name varies across versions — guard if attribute missing.
             _sema = getattr(self, "_streaming_semaphore", None) or getattr(self, "_sync_semaphore", None)
             if _sema is not None:
                 async with _sema:
                     async for chunk in llm.astream(lc_messages):
                         if chunk.content:
-                            full_text_parts.append(chunk.content)
-                            try:
-                                await adispatch_custom_event("stream_token", {"token": chunk.content})
-                            except Exception:
-                                pass
+                            await _emit(chunk.content)
             else:
                 async for chunk in llm.astream(lc_messages):
                     if chunk.content:
-                        full_text_parts.append(chunk.content)
-                        try:
-                            await adispatch_custom_event("stream_token", {"token": chunk.content})
-                        except Exception:
-                            pass
+                        await _emit(chunk.content)
             result = "".join(full_text_parts)
             if agent_name:
                 logger.info(f"[{agent_name}] Streamed {len(result)} chars ({len(full_text_parts)} chunks)")

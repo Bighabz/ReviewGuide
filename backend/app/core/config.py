@@ -282,6 +282,16 @@ class Settings(BaseSettings):
     # USE_CONSOLIDATED_COMPOSE also on. Default off.
     USE_DECOUPLED_COMPOSE: bool = Field(default=False, description="Emit prose + a <data> JSON tail instead of one json_object (Tier 2; requires USE_CONSOLIDATED_COMPOSE)")
 
+    # Tier 2.1 true token streaming: stream the decoupled prose body token-by-token
+    # through the SSE channel as the LLM produces it (instead of chunking the
+    # finished text post-hoc). The blog call uses generate_compose_with_streaming,
+    # which dispatches stream_token custom events; chat.py forwards them as content
+    # tokens and skips the post-hoc chunk loop. Only takes effect with
+    # USE_DECOUPLED_COMPOSE (the prose must be plain text, not inside json_object).
+    # Degrades gracefully: if custom events don't reach the SSE layer, the finished
+    # text still streams post-hoc as before. Default off.
+    USE_COMPOSE_STREAMING: bool = Field(default=False, description="Stream the decoupled prose body token-by-token (Tier 2.1; requires USE_DECOUPLED_COMPOSE)")
+
     # Outcome 6 PROTOTYPE (conversational engine): answer-aware follow-ups.
     # The clarifier asks use_case ALONE first; once answered, the features
     # question is generated with knowledge of that answer, so it can adapt

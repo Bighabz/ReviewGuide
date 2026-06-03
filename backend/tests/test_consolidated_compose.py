@@ -438,6 +438,59 @@ async def test_decoupled_requires_consolidated(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Tier 2.1 — true token streaming routing
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_streaming_routes_blog_through_streaming_method(monkeypatch):
+    """With consolidated + decoupled + streaming all on, the blog call uses
+    generate_compose_with_streaming (token streaming); the response still parses
+    identically (it returns the same prose + <data> text)."""
+    monkeypatch.setattr(settings, "USE_CONSOLIDATED_COMPOSE", True)
+    monkeypatch.setattr(settings, "USE_DECOUPLED_COMPOSE", True)
+    monkeypatch.setattr(settings, "USE_COMPOSE_STREAMING", True)
+    monkeypatch.setattr(settings, "USE_VOICE_PASS", False)
+
+    fake = MagicMock()
+    fake.generate_compose = AsyncMock(side_effect=AssertionError("must not use non-streaming compose for the blog"))
+    fake.generate_compose_with_streaming = AsyncMock(return_value=_DECOUPLED_BLOG)
+    state = _base_state(review_data=_REVIEW_DATA)
+
+    with patch("app.services.model_service.model_service", fake):
+        result = await product_compose(state)
+
+    assert fake.generate_compose_with_streaming.await_count == 1
+    stream_call = fake.generate_compose_with_streaming.call_args
+    assert stream_call.kwargs.get("agent_name") == "blog_article_composer"
+    # Output still assembled correctly from the streamed text.
+    assert "Under $300" in result.get("assistant_text", "")
+    assert "<data>" not in result.get("assistant_text", "")
+    consensus_blocks = [b for b in result.get("ui_blocks", []) if b.get("type") == "review_consensus"]
+    assert consensus_blocks
+
+
+@pytest.mark.asyncio
+async def test_streaming_inert_without_decoupled(monkeypatch):
+    """USE_COMPOSE_STREAMING without USE_DECOUPLED_COMPOSE stays on the
+    non-streaming json_object path (streaming needs plain-text prose)."""
+    monkeypatch.setattr(settings, "USE_CONSOLIDATED_COMPOSE", True)
+    monkeypatch.setattr(settings, "USE_DECOUPLED_COMPOSE", False)
+    monkeypatch.setattr(settings, "USE_COMPOSE_STREAMING", True)
+
+    fake = MagicMock()
+    fake.generate_compose = AsyncMock(side_effect=lambda *a, **k: _CONSOLIDATED_BLOG if k.get("agent_name") == "blog_article_composer" else "x")
+    fake.generate_compose_with_streaming = AsyncMock(side_effect=AssertionError("streaming must be inert without decouple"))
+    state = _base_state(review_data=_REVIEW_DATA)
+
+    with patch("app.services.model_service.model_service", fake):
+        await product_compose(state)
+
+    assert fake.generate_compose_with_streaming.await_count == 0
+    blog_call = next(c for c in fake.generate_compose.call_args_list if c.kwargs.get("agent_name") == "blog_article_composer")
+    assert blog_call.kwargs.get("response_format") == {"type": "json_object"}
+
+
+# ---------------------------------------------------------------------------
 # Consolidated OFF (baseline parity)
 # ---------------------------------------------------------------------------
 
