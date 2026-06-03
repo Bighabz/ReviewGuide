@@ -78,6 +78,41 @@ def _shown_prices(last_search_context: dict) -> List[float]:
     ]
 
 
+def _find_budget_phrase(text: str) -> str:
+    """Pull the literal budget phrase out of a free-text answer, preserving its
+    range/qualifier shape: "$80–$130", "100-200", "100 to 200", "under $500",
+    "$1,200+", "over $300", "around $150".
+
+    Used as a deterministic guard after LLM slot extraction (F2, QA Round 6):
+    the extractor sometimes collapses a range to one number, and a bare number
+    reads as a CEILING downstream (product_compose._parse_budget) — which erases
+    the floor the user explicitly gave.
+    """
+    if not text or not isinstance(text, str):
+        return ""
+    patterns = [
+        # "$80–$130", "80-130", "$100 — $200", "100 to 200"
+        r'\$?[\d,]+(?:\.\d+)?\s*(?:[–\-—]|to)\s*\$?[\d,]+(?:\.\d+)?',
+        # "$1,200+", "500+"
+        r'\$?[\d,]+(?:\.\d+)?\s*\+',
+        # "under $500", "over $300", "at least $1,000", "around $150"
+        r'(?:under|below|less\s+than|over|above|more\s+than|at\s+least|around|about|roughly)\s*\$?[\d,]+(?:\.\d+)?',
+    ]
+    # A combined card answer ("4–8 hours; Lumbar support; $150–$350") can contain
+    # number ranges that are NOT the budget. Collect every match, prefer the
+    # dollar-denominated ones, then take the right-most — budget is always the
+    # last question on the card (pack ordering: "budget LAST").
+    candidates = []
+    for pat in patterns:
+        for m in re.finditer(pat, text, re.I):
+            candidates.append((m.start(), m.group(0).strip()))
+    if not candidates:
+        return ""
+    dollar_candidates = [c for c in candidates if "$" in c[1]]
+    pool = dollar_candidates if dollar_candidates else candidates
+    return max(pool, key=lambda c: c[0])[1]
+
+
 def _apply_refinement_action(action: str, slots: dict, last_search_context: dict) -> dict:
     """Adjust slots for a refinement action ("cheaper" / "premium" / "brand:<name>")."""
     adjusted = dict(slots)
@@ -1162,7 +1197,10 @@ Rules:
   "Gaming, high-end specs, budget $1,200+"). Map each part back to its question
   using the offered choices and extract every slot you can.
 - ALSO extract optional slots if user mentions them (e.g., "1 child" → children: 1)
-- For numbers (duration_days, adults, children, budget): return as number
+- For numbers (duration_days, adults, children): return as number
+- For budget: return the user's EXACT budget wording as a STRING, preserving ranges and
+  qualifiers — "$80–$130" stays "$80–$130", "under $100" stays "under $100", "$500+"
+  stays "$500+". NEVER collapse a range to a single number (that throws away the floor).
 - For text (destination, origin, month, budget_level, travel_style, likes): return as string
 - For dates (departure_date, return_date, check_in, check_out):
   * Return in YYYY-MM-DD format
@@ -1206,6 +1244,26 @@ Return ONLY valid JSON with ALL requested slots:
 
             # Filter to only return the requested slots
             extracted_slots = {slot: result.get(slot) for slot in slot_names}
+
+            # F2 deterministic guard (QA Round 6): the budget must keep its
+            # range/qualifier shape. Even with the prompt rule above, the LLM can
+            # collapse "$80–$130" to a bare number — and a bare number reads as a
+            # CEILING downstream, erasing the floor the user explicitly chose.
+            # When the user's literal answer carries a budget phrase, prefer it
+            # over any LLM rewrite that lost the range/qualifier markers.
+            if "budget" in extracted_slots and extracted_slots.get("budget") is not None:
+                raw_budget = _find_budget_phrase(user_message)
+                llm_budget = extracted_slots["budget"]
+                llm_budget_str = llm_budget if isinstance(llm_budget, str) else ""
+                lost_shape = not any(c in llm_budget_str for c in "–-—+") and not re.search(
+                    r"under|below|over|above|at least|around|about|to\s+\$?\d", llm_budget_str, re.I
+                )
+                if raw_budget and lost_shape:
+                    logger.info(
+                        f"[Clarifier Agent] Budget guard: extractor returned {llm_budget!r}, "
+                        f"using literal answer phrase {raw_budget!r} instead"
+                    )
+                    extracted_slots["budget"] = raw_budget
 
             logger.info(f"[Clarifier Agent] Extracted {len([v for v in extracted_slots.values() if v is not None])}/{len(slot_names)} slots from answer")
 
@@ -1296,7 +1354,10 @@ Rules:
   * "show me hotels and flights for the trip" → extract origin/destination from earlier messages
   * "that fit to the trip" → extract travel details from earlier messages
   * "for this plan" → extract details from the plan discussed earlier
-- For numbers (duration_days, adults, children, budget): return as number
+- For numbers (duration_days, adults, children): return as number
+- For budget: return the user's EXACT budget wording as a STRING, preserving ranges and
+  qualifiers — "$80–$130" stays "$80–$130", "under $100" stays "under $100", "$500+"
+  stays "$500+". NEVER collapse a range to a single number (that throws away the floor).
 - For text (destination, origin, month): return as string
 - For dates (departure_date, return_date, check_in, check_out):
   * Return in YYYY-MM-DD format
