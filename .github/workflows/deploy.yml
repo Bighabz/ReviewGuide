@@ -56,6 +56,25 @@ jobs:
       - name: Install Railway CLI
         run: npm install -g @railway/cli@latest
 
+      - name: Pin commit SHA for /health
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        # `railway up` is a SOURCE-UPLOAD deploy, so Railway does NOT inject
+        # RAILWAY_GIT_COMMIT_SHA the way a GitHub-connected (native) deploy
+        # would — which is why /health's `.version` read "unknown" once this
+        # workflow became the de-facto deployer. Set the GIT_SHA service
+        # variable (which health._running_version() reads at runtime) to this
+        # commit so the SHA-vs-HEAD "is it actually deployed?" check works again.
+        # --skip-deploys so this doesn't kick off its own deploy; the `railway
+        # up` step below ships with the value applied, and each run self-corrects
+        # it to the new commit. GIT_SHA (not the reserved RAILWAY_* namespace) to
+        # avoid Railway rejecting a reserved-prefix variable.
+        run: |
+          railway variables \
+            --service backend \
+            --set "GIT_SHA=${{ github.sha }}" \
+            --skip-deploys
+
       - name: Deploy
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
