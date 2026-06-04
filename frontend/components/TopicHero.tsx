@@ -1,6 +1,7 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { hasGeneratedHero } from '@/lib/generatedHeroes'
 
 /**
  * Dreambeans-inspired topic hero.
@@ -30,7 +31,17 @@ export default function TopicHero({
   fallbackImage: string
 }) {
   const generated = `/images/topics/hero/${slug}.webp`
-  const [src, setSrc] = useState(generated)
+  // Only point at the generated asset when we actually have one (manifest in
+  // lib/generatedHeroes). Otherwise start at the stock image so we don't fire a
+  // guaranteed 404 + broken-image flash on every topic view. onError still
+  // degrades generated → stock → gradient if a listed asset is missing.
+  const initialSrc = hasGeneratedHero(slug) ? generated : fallbackImage
+  const [src, setSrc] = useState(initialSrc)
+
+  // Next reuses this component instance when navigating between /topic/[slug]
+  // pages (e.g. via "More to explore"), so without this the hero keeps the
+  // previous topic's image while the title/hook update. Reset on slug change.
+  useEffect(() => { setSrc(initialSrc) }, [initialSrc])
 
   return (
     <div
