@@ -90,3 +90,6 @@ frontend/tsconfig.tsbuildinfo
 
 # Large design scratch artifact — kept locally, not tracked (2.2MB)
 frontend/design/ReviewGuide standalone.html
+# Codex review scratch (transient — the ask-codex.sh wrapper IS tracked)
+.codex-review-prompt.txt
+.codex-review-output.txt
