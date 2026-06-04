@@ -4,6 +4,7 @@ import { useRouter, notFound } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft, ArrowRight } from 'lucide-react'
 import { DISCOVER_TOPICS, getTopicBySlug } from '@/lib/discoverTopics'
+import TopicHero from '@/components/TopicHero'
 
 /**
  * Topic blog page. The Discover grid links here instead of preloading chat:
@@ -37,32 +38,14 @@ export default function TopicPage({ params }: { params: { slug: string } }) {
         </Link>
       </div>
 
-      {/* Hero */}
-      <div className="relative h-60 sm:h-80 mx-4 sm:mx-6 md:mx-8 mt-4 rounded-2xl overflow-hidden" style={{ boxShadow: 'var(--shadow-float)' }}>
-        <img
-          src={topic.image}
-          alt={topic.title}
-          className="w-full h-full object-cover"
-          style={{ background: 'var(--paper-alt)' }}
-          onError={(e) => {
-            e.currentTarget.style.display = 'none'
-          }}
-        />
-        <div
-          className="absolute inset-0"
-          aria-hidden="true"
-          style={{ background: 'linear-gradient(180deg, rgba(26,24,22,0) 28%, rgba(26,24,22,0.55) 62%, rgba(26,24,22,0.88) 100%)' }}
-        />
-        <div className="absolute bottom-0 left-0 right-0 p-6 sm:p-8">
-          <div className="uppercase mb-2" style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.1em', color: 'var(--terra-soft)' }}>
-            {topic.category}
-          </div>
-          <h1 className="rg-display tracking-tight text-white" style={{ fontSize: 34, lineHeight: '38px' }}>
-            {topic.title}
-          </h1>
-          <p className="text-sm sm:text-base text-white/80 mt-2 max-w-md">{topic.hook}</p>
-        </div>
-      </div>
+      {/* Hero — prefers an AI-generated, palette-matched illustration when present */}
+      <TopicHero
+        slug={topic.slug}
+        title={topic.title}
+        category={topic.category}
+        hook={topic.hook}
+        fallbackImage={topic.image}
+      />
 
       {/* Editorial blog body + research CTA. The body is the standalone article;
           the blurb is the card/hero hook, so we don't repeat it here. */}

@@ -52,6 +52,65 @@ function getFallbackImage(productName: string): string {
   return '/images/products/fallback-default.webp'
 }
 
+// Dreambeans-inspired inline refinement: a "this doesn't match — here's why"
+// affordance on every card. Each chip re-frames the search relative to THIS
+// product and dispatches the same `sendSuggestion` event the next_suggestions
+// chips use (Message.tsx), so the existing re-rank path
+// (ChatContainer.handleSuggestionClick → POST /v1/chat/stream) handles it with
+// no backend or API change.
+function RefineRow({ productName }: { productName: string }) {
+  const [custom, setCustom] = useState('')
+  const send = (question: string) => {
+    const q = question.trim()
+    if (!q) return
+    window.dispatchEvent(new CustomEvent('sendSuggestion', { detail: { question: q } }))
+  }
+  const chips = [
+    { label: 'Cheaper', q: `Show me cheaper alternatives to the ${productName}` },
+    { label: 'Higher-end', q: `Show me higher-end alternatives to the ${productName}` },
+    { label: 'Different brand', q: `Show me options from a different brand than the ${productName}` },
+  ]
+  return (
+    <div className="mt-4 pt-4 border-t border-[var(--border)]" data-testid="refine-row">
+      <h4 className="rg-eyebrow mb-2">Not quite right?</h4>
+      <div className="flex flex-row flex-wrap gap-2">
+        {chips.map((c) => (
+          <button
+            key={c.label}
+            data-testid={`refine-chip-${c.label.toLowerCase().replace(/\s+/g, '-')}`}
+            onClick={() => send(c.q)}
+            className="inline-flex items-center gap-2 rounded-[12px] border border-[var(--line-2)] bg-[var(--paper-hi)] text-[var(--ink)] px-3.5 py-2.5 text-[14px] leading-[20px] font-medium text-left transition-all hover:border-[var(--terra)] hover:bg-[var(--terra-soft)]"
+          >
+            {/* quiz-path 4px terracotta leading dot — matches next_suggestions */}
+            <span className="w-1 h-1 rounded-full flex-shrink-0" style={{ background: 'var(--terra)' }} />
+            {c.label}
+          </button>
+        ))}
+      </div>
+      <form
+        className="flex items-center gap-2 mt-2"
+        onSubmit={(e) => { e.preventDefault(); send(`Like the ${productName}, but I also care about: ${custom}`); setCustom('') }}
+      >
+        <input
+          value={custom}
+          onChange={(e) => setCustom(e.target.value)}
+          aria-label="Tell us what to change about this recommendation"
+          placeholder="…or tell me what to change"
+          className="flex-1 min-w-0 rounded-[12px] border border-[var(--line-2)] bg-[var(--paper)] px-3.5 py-2.5 text-[14px] leading-[20px] text-[var(--ink)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--terra)]"
+        />
+        <button
+          type="submit"
+          disabled={!custom.trim()}
+          className="rounded-[12px] px-3.5 py-2.5 text-[14px] font-medium transition-all disabled:opacity-40 flex-shrink-0"
+          style={{ background: 'var(--terra)', color: 'white' }}
+        >
+          Refine
+        </button>
+      </form>
+    </div>
+  )
+}
+
 interface AffiliateLink {
   product_id: string
   title: string
@@ -301,6 +360,9 @@ export default function ProductReview({ product }: ProductReviewProps) {
           </div>
         </div>
       )}
+
+      {/* Dreambeans: inline "doesn't match" refine affordance on every card */}
+      <RefineRow productName={product_name} />
     </div>
   )
 }
