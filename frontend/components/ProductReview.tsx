@@ -53,30 +53,34 @@ function getFallbackImage(productName: string): string {
   return '/images/products/fallback-default.webp'
 }
 
-// Dreambeans-inspired inline refinement: a "this doesn't match — here's why"
-// affordance on every card. Each chip re-frames the search relative to THIS
-// product and dispatches the same `sendSuggestion` event the next_suggestions
-// chips use (Message.tsx), so the existing re-rank path
-// (ChatContainer.handleSuggestionClick → POST /v1/chat/stream) handles it with
-// no backend or API change.
+// Dreambeans-inspired inline refinement: a "not quite right?" affordance below
+// a single review card. Each chip sends the EXACT phrase the clarifier's
+// refinement detector recognizes (`_detect_refinement_action` in
+// backend/app/agents/clarifier_agent.py — verified against the canonical chips
+// in mcp_server/tools/next_step_suggestion.py). The backend re-ranks the prior
+// shortlist with adjusted slots WITHOUT re-asking — no backend or API change.
+//
+// IMPORTANT: these strings are a contract. The detector is an exact-match
+// allowlist ("Show cheaper options", "More premium picks", "Different use
+// case", "Only <Brand>"), so any reword here silently drops back to a fresh
+// query (the "Cheaper" chip would stop making results cheaper). Keep them in
+// sync with that allowlist; the backend operates on the whole shortlist, so
+// these deliberately carry no product name.
 function RefineRow({ productName }: { productName: string }) {
-  const [custom, setCustom] = useState('')
   // Read live streaming state so chips don't become silent dead-clicks while a
   // previous request is in flight (ChatContainer.handleSuggestionClick no-ops
   // when isStreaming — without this the user gets zero feedback).
   const { isStreaming } = useChatStatus()
   const send = (question: string) => {
     if (isStreaming) return
-    const q = question.trim()
-    if (!q) return
-    window.dispatchEvent(new CustomEvent('sendSuggestion', { detail: { question: q } }))
+    window.dispatchEvent(new CustomEvent('sendSuggestion', { detail: { question } }))
   }
   // Slug keeps test ids unique even if multiple RefineRows ever co-exist.
   const slug = slugifyProduct(productName) || 'product'
   const chips = [
-    { label: 'Cheaper', q: `Show me cheaper alternatives to the ${productName}` },
-    { label: 'Higher-end', q: `Show me higher-end alternatives to the ${productName}` },
-    { label: 'Different brand', q: `Show me options from a different brand than the ${productName}` },
+    { label: 'Cheaper', q: 'Show cheaper options' },
+    { label: 'More premium', q: 'More premium picks' },
+    { label: 'Different use case', q: 'Different use case' },
   ]
   return (
     <div className="mt-4 pt-4 border-t border-[var(--border)]" data-testid={`refine-row-${slug}`}>
@@ -96,27 +100,6 @@ function RefineRow({ productName }: { productName: string }) {
           </button>
         ))}
       </div>
-      <form
-        className="flex items-center gap-2 mt-2"
-        onSubmit={(e) => { e.preventDefault(); send(`Like the ${productName}, but I also care about: ${custom}`); setCustom('') }}
-      >
-        <input
-          value={custom}
-          onChange={(e) => setCustom(e.target.value)}
-          disabled={isStreaming}
-          aria-label="Tell us what to change about this recommendation"
-          placeholder="…or tell me what to change"
-          className="flex-1 min-w-0 rounded-[12px] border border-[var(--line-2)] bg-[var(--paper)] px-3.5 py-2.5 text-[14px] leading-[20px] text-[var(--ink)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--terra)] disabled:opacity-40"
-        />
-        <button
-          type="submit"
-          disabled={!custom.trim() || isStreaming}
-          className="rounded-[12px] px-3.5 py-2.5 text-[14px] font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"
-          style={{ background: 'var(--terra)', color: 'white' }}
-        >
-          Refine
-        </button>
-      </form>
     </div>
   )
 }
