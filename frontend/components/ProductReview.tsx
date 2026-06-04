@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { ExternalLink, Star, Bookmark } from 'lucide-react'
 import { toggleSaved, isSaved, slugifyProduct, type SavedItem } from '@/lib/savedItems'
 import { stashProductDetail } from '@/lib/productDetail'
+import { useChatStatus } from '@/lib/chatStatusContext'
 
 // Bookmark toggle — terra fill when saved, pop + ring on tap, no toast.
 function SaveToggle({ item }: { item: Omit<SavedItem, 'savedAt'> }) {
@@ -50,6 +51,74 @@ function getFallbackImage(productName: string): string {
     if (lower.includes(keyword)) return src
   }
   return '/images/products/fallback-default.webp'
+}
+
+// Dreambeans-inspired inline refinement: a "this doesn't match — here's why"
+// affordance on every card. Each chip re-frames the search relative to THIS
+// product and dispatches the same `sendSuggestion` event the next_suggestions
+// chips use (Message.tsx), so the existing re-rank path
+// (ChatContainer.handleSuggestionClick → POST /v1/chat/stream) handles it with
+// no backend or API change.
+function RefineRow({ productName }: { productName: string }) {
+  const [custom, setCustom] = useState('')
+  // Read live streaming state so chips don't become silent dead-clicks while a
+  // previous request is in flight (ChatContainer.handleSuggestionClick no-ops
+  // when isStreaming — without this the user gets zero feedback).
+  const { isStreaming } = useChatStatus()
+  const send = (question: string) => {
+    if (isStreaming) return
+    const q = question.trim()
+    if (!q) return
+    window.dispatchEvent(new CustomEvent('sendSuggestion', { detail: { question: q } }))
+  }
+  // Slug keeps test ids unique even if multiple RefineRows ever co-exist.
+  const slug = slugifyProduct(productName) || 'product'
+  const chips = [
+    { label: 'Cheaper', q: `Show me cheaper alternatives to the ${productName}` },
+    { label: 'Higher-end', q: `Show me higher-end alternatives to the ${productName}` },
+    { label: 'Different brand', q: `Show me options from a different brand than the ${productName}` },
+  ]
+  return (
+    <div className="mt-4 pt-4 border-t border-[var(--border)]" data-testid={`refine-row-${slug}`}>
+      <h4 className="rg-eyebrow mb-2">Not quite right?</h4>
+      <div className="flex flex-row flex-wrap gap-2">
+        {chips.map((c) => (
+          <button
+            key={c.label}
+            data-testid={`refine-chip-${slug}-${c.label.toLowerCase().replace(/\s+/g, '-')}`}
+            onClick={() => send(c.q)}
+            disabled={isStreaming}
+            className="inline-flex items-center gap-2 rounded-[12px] border border-[var(--line-2)] bg-[var(--paper-hi)] text-[var(--ink)] px-3.5 py-2.5 text-[14px] leading-[20px] font-medium text-left transition-all hover:border-[var(--terra)] hover:bg-[var(--terra-soft)] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-[var(--line-2)] disabled:hover:bg-[var(--paper-hi)]"
+          >
+            {/* quiz-path 4px terracotta leading dot — matches next_suggestions */}
+            <span className="w-1 h-1 rounded-full flex-shrink-0" style={{ background: 'var(--terra)' }} />
+            {c.label}
+          </button>
+        ))}
+      </div>
+      <form
+        className="flex items-center gap-2 mt-2"
+        onSubmit={(e) => { e.preventDefault(); send(`Like the ${productName}, but I also care about: ${custom}`); setCustom('') }}
+      >
+        <input
+          value={custom}
+          onChange={(e) => setCustom(e.target.value)}
+          disabled={isStreaming}
+          aria-label="Tell us what to change about this recommendation"
+          placeholder="…or tell me what to change"
+          className="flex-1 min-w-0 rounded-[12px] border border-[var(--line-2)] bg-[var(--paper)] px-3.5 py-2.5 text-[14px] leading-[20px] text-[var(--ink)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--terra)] disabled:opacity-40"
+        />
+        <button
+          type="submit"
+          disabled={!custom.trim() || isStreaming}
+          className="rounded-[12px] px-3.5 py-2.5 text-[14px] font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"
+          style={{ background: 'var(--terra)', color: 'white' }}
+        >
+          Refine
+        </button>
+      </form>
+    </div>
+  )
 }
 
 interface AffiliateLink {
@@ -98,9 +167,13 @@ interface ProductReviewProps {
     affiliate_links: AffiliateLink[]
     rank: number
   }
+  // The inline "Not quite right?" refine affordance only makes sense for a
+  // single, coherent recommendation. It's suppressed in the multi-card review
+  // carousel (BlockRegistry) so we don't stack one refine block per card.
+  showRefine?: boolean
 }
 
-export default function ProductReview({ product }: ProductReviewProps) {
+export default function ProductReview({ product, showRefine = true }: ProductReviewProps) {
   const {
     product_name,
     rating,
@@ -301,6 +374,10 @@ export default function ProductReview({ product }: ProductReviewProps) {
           </div>
         </div>
       )}
+
+      {/* Dreambeans: inline "doesn't match" refine affordance — single review
+          cards only (suppressed in the carousel to avoid one block per card) */}
+      {showRefine && <RefineRow productName={product_name} />}
     </div>
   )
 }

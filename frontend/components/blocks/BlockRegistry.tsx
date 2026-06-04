@@ -183,7 +183,7 @@ export function UIBlocks({ blocks, itinerary }: UIBlocksProps) {
                     <div key={`product-carousel-${idx}`}>
                         <ProductReviewCarousel>
                             {productReviewBlocks.map((b, i) => (
-                                <ProductReview key={`review-${i}`} product={(b.data as any) ?? {}} />
+                                <ProductReview key={`review-${i}`} product={(b.data as any) ?? {}} showRefine={false} />
                             ))}
                         </ProductReviewCarousel>
                     </div>
