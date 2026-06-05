@@ -30,6 +30,7 @@ import ReviewConsensus from '@/components/ReviewConsensus'
 import PriceComparison from '@/components/PriceComparison'
 import InlineProductCard from '@/components/InlineProductCard'
 import ProductReviewCarousel from '@/components/ProductReviewCarousel'
+import RefineRow from '@/components/RefineRow'
 import DOMPurify from 'dompurify'
 
 /** Each renderer receives the normalized block and returns JSX or null */
@@ -186,6 +187,9 @@ export function UIBlocks({ blocks, itinerary }: UIBlocksProps) {
                                 <ProductReview key={`review-${i}`} product={(b.data as any) ?? {}} showRefine={false} />
                             ))}
                         </ProductReviewCarousel>
+                        {/* One refine row below the whole carousel (chips re-rank
+                            the shortlist, so a single shared row — not per-card) */}
+                        <RefineRow />
                     </div>
                 )
             }
