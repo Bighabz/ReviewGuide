@@ -101,14 +101,15 @@ describe('DiscoverPage — trending cards (DISC-03)', () => {
     expect(calledUrl).toMatch(/^\/topic\//)
   })
 
-  it('lays the trending cards out in a 2-up grid (no horizontal carousel)', () => {
+  it('renders trending cards including a 2-up "Explore more" grid', () => {
     render(<DiscoverPage />)
     const cards = document.querySelectorAll('[data-testid="trending-card"]')
     expect(cards.length).toBeGreaterThanOrEqual(4)
-    // The cards live inside a 2-column grid container.
-    const grid = cards[0].closest('.grid')
+    // "Explore more" is a 2-up (mobile) poster grid below the featured section.
+    const grid = document.querySelector('.grid')
     expect(grid).toBeTruthy()
     expect((grid as HTMLElement).className).toContain('grid-cols-2')
+    expect(grid!.querySelectorAll('[data-testid="trending-card"]').length).toBeGreaterThanOrEqual(3)
   })
 })
 
