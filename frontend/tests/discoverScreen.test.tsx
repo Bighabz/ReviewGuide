@@ -105,10 +105,12 @@ describe('DiscoverPage — trending cards (DISC-03)', () => {
     render(<DiscoverPage />)
     const cards = document.querySelectorAll('[data-testid="trending-card"]')
     expect(cards.length).toBeGreaterThanOrEqual(4)
-    // The cards live inside a 2-column grid container.
-    const grid = cards[0].closest('.grid')
+    // Mobile stays a dense 2-up grid (a desktop-only featured banner sits above
+    // it via `hidden md:block`). The poster grid is the 2-column container.
+    const grid = document.querySelector('.grid')
     expect(grid).toBeTruthy()
     expect((grid as HTMLElement).className).toContain('grid-cols-2')
+    expect(grid!.querySelectorAll('[data-testid="trending-card"]').length).toBeGreaterThanOrEqual(3)
   })
 })
 
