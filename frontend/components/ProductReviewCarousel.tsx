@@ -1,136 +1,131 @@
 'use client'
 
-import { useRef, useState, useCallback, useEffect } from 'react'
+import { useState } from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { cn } from '@/lib/utils'
 
 interface ProductReviewCarouselProps {
   children: React.ReactNode[]
 }
 
+/**
+ * "Deck of cards" product rail (design from v0). The top pick sits on top; the
+ * next picks fan out behind it with depth, and decorative card edges below
+ * reinforce the stack. Wraps the real <ProductReview> children, so all product
+ * data, save, and affiliate wiring is unchanged — only the carousel chrome is
+ * new. Header pill + nav arrows + dots advance; non-active cards are `inert`
+ * (not focusable/clickable) so the deck behind can't be mis-tapped.
+ */
 export default function ProductReviewCarousel({ children }: ProductReviewCarouselProps) {
-  const scrollRef = useRef<HTMLDivElement>(null)
   const [current, setCurrent] = useState(0)
-  const [touchStart, setTouchStart] = useState<number | null>(null)
   const total = children.length
+  const go = (i: number) => setCurrent(Math.max(0, Math.min(i, total - 1)))
 
-  const scrollToIndex = useCallback((idx: number) => {
-    const container = scrollRef.current
-    if (!container) return
-    const card = container.children[idx] as HTMLElement
-    if (!card) return
-    card.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'start' })
-    setCurrent(idx)
-  }, [])
-
-  const next = useCallback(() => {
-    scrollToIndex(Math.min(current + 1, total - 1))
-  }, [current, total, scrollToIndex])
-
-  const prev = useCallback(() => {
-    scrollToIndex(Math.max(current - 1, 0))
-  }, [current, scrollToIndex])
-
-  // Touch swipe handling
-  const handleTouchStart = (e: React.TouchEvent) => {
-    setTouchStart(e.touches[0].clientX)
-  }
-
-  const handleTouchEnd = (e: React.TouchEvent) => {
-    if (touchStart === null) return
-    const diff = touchStart - e.changedTouches[0].clientX
-    if (Math.abs(diff) > 50) {
-      diff > 0 ? next() : prev()
-    }
-    setTouchStart(null)
-  }
-
-  // Update current index on scroll (for snap alignment)
-  useEffect(() => {
-    const container = scrollRef.current
-    if (!container) return
-    const handleScroll = () => {
-      const scrollLeft = container.scrollLeft
-      const cardWidth = container.children[0]?.clientWidth || 1
-      const idx = Math.round(scrollLeft / cardWidth)
-      setCurrent(Math.min(idx, total - 1))
-    }
-    container.addEventListener('scrollend', handleScroll)
-    return () => container.removeEventListener('scrollend', handleScroll)
-  }, [total])
-
-  if (total <= 1) {
-    return <div>{children}</div>
-  }
+  if (total <= 1) return <div>{children}</div>
 
   return (
-    <div className="relative">
-      {/* Counter badge */}
-      <div className="flex items-center justify-between mb-2 px-1">
-        <span className="text-xs font-medium text-[var(--text-muted)]">
-          {current + 1} of {total} products
-        </span>
-        {/* Desktop arrows */}
-        <div className="hidden sm:flex gap-1">
+    <div
+      role="group"
+      aria-roledescription="carousel"
+      aria-label="Recommended products"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'ArrowRight') { e.preventDefault(); go(current + 1) }
+        if (e.key === 'ArrowLeft') { e.preventDefault(); go(current - 1) }
+      }}
+      className="font-sans"
+    >
+      {/* Header */}
+      <div className="flex items-center justify-between mb-4 px-1">
+        {current === 0 ? (
+          <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-[var(--terra-soft)] text-[var(--terra)] text-xs font-semibold">
+            <span className="w-1.5 h-1.5 rounded-full bg-[var(--terra)] animate-pulse" />
+            Top pick for you
+          </span>
+        ) : (
+          <span className="text-sm font-medium text-[var(--ink-3)]">Pick {current + 1} of {total}</span>
+        )}
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold text-[var(--ink-3)] tabular-nums mr-1">{current + 1}/{total}</span>
           <button
-            onClick={prev}
+            onClick={() => go(current - 1)}
             disabled={current === 0}
-            className="w-7 h-7 rounded-full flex items-center justify-center transition-colors disabled:opacity-30"
-            style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
             aria-label="Previous product"
+            className="w-8 h-8 rounded-full bg-[var(--paper-hi)] ring-1 ring-[var(--line)] flex items-center justify-center transition-all hover:ring-[var(--terra)]/50 hover:bg-[var(--terra-soft)]/30 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:ring-[var(--line)] disabled:hover:bg-[var(--paper-hi)]"
           >
-            <ChevronLeft size={14} />
+            <ChevronLeft size={16} className="text-[var(--ink)]" />
           </button>
           <button
-            onClick={next}
+            onClick={() => go(current + 1)}
             disabled={current === total - 1}
-            className="w-7 h-7 rounded-full flex items-center justify-center transition-colors disabled:opacity-30"
-            style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
             aria-label="Next product"
+            className="w-8 h-8 rounded-full bg-[var(--paper-hi)] ring-1 ring-[var(--line)] flex items-center justify-center transition-all hover:ring-[var(--terra)]/50 hover:bg-[var(--terra-soft)]/30 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:ring-[var(--line)] disabled:hover:bg-[var(--paper-hi)]"
           >
-            <ChevronRight size={14} />
+            <ChevronRight size={16} className="text-[var(--ink)]" />
           </button>
         </div>
       </div>
 
-      {/* Swipeable card container */}
-      <div
-        ref={scrollRef}
-        className="flex gap-4 overflow-x-auto snap-x snap-mandatory scrollbar-hide"
-        style={{ scrollBehavior: 'smooth' }}
-        onTouchStart={handleTouchStart}
-        onTouchEnd={handleTouchEnd}
-      >
-        {children.map((child, idx) => (
-          <div
-            key={idx}
-            className="snap-start flex-shrink-0 w-full"
-          >
-            {child}
-          </div>
-        ))}
+      {/* Stacked deck */}
+      <div className="relative">
+        <div className="relative">
+          {children.map((child, index) => {
+            const offset = index - current
+            const isActive = offset === 0
+            const isBehind = offset > 0
+            const isHidden = offset < 0 || offset > 2
+            return (
+              <div
+                key={index}
+                ref={(el) => { if (el) (el as any).inert = !isActive }}
+                className={cn(
+                  'transition-all duration-500 ease-out',
+                  isActive ? 'relative z-30' : 'absolute inset-x-0 top-0',
+                  isBehind && offset === 1 && 'z-20',
+                  isBehind && offset === 2 && 'z-10',
+                  isHidden && 'opacity-0 pointer-events-none',
+                )}
+                style={{
+                  transform: isBehind
+                    ? `translateY(${offset * 12}px) scale(${1 - offset * 0.04})`
+                    : offset < 0
+                      ? 'translateX(-110%)'
+                      : undefined,
+                  opacity: isBehind ? 1 - offset * 0.25 : offset < 0 ? 0 : 1,
+                }}
+              >
+                {child}
+              </div>
+            )
+          })}
+        </div>
+
+        {/* Decorative stacked-edge shadows for depth */}
+        {current < total - 1 && (
+          <>
+            <div className="absolute -bottom-2 left-3 right-3 h-4 bg-[var(--paper-hi)] rounded-b-2xl ring-1 ring-[var(--line)] -z-10 opacity-60" style={{ transform: 'translateY(8px)' }} />
+            {current < total - 2 && (
+              <div className="absolute -bottom-2 left-6 right-6 h-4 bg-[var(--paper-hi)] rounded-b-2xl ring-1 ring-[var(--line)] -z-20 opacity-30" style={{ transform: 'translateY(16px)' }} />
+            )}
+          </>
+        )}
       </div>
 
-      {/* Dot indicators */}
-      <div className="flex justify-center gap-1.5 mt-3">
+      {/* Dots */}
+      <div className="flex justify-center items-center gap-1.5 mt-8">
         {children.map((_, i) => (
           <button
             key={i}
-            onClick={() => scrollToIndex(i)}
-            className="transition-all duration-300 rounded-full"
-            style={{
-              width: i === current ? '20px' : '6px',
-              height: '6px',
-              background: i === current ? 'var(--primary)' : 'var(--border-strong, #D4D1CC)',
-            }}
-            aria-label={`Go to product ${i + 1}`}
+            onClick={() => go(i)}
+            aria-label={`Go to pick ${i + 1}`}
+            aria-current={i === current}
+            className={cn(
+              'h-1.5 rounded-full transition-all duration-300',
+              i === current ? 'w-6 bg-[var(--terra)]' : 'w-1.5 bg-[var(--line-2)] hover:bg-[var(--terra)]/40',
+            )}
           />
         ))}
       </div>
-
-      {/* Swipe hint on mobile (first visit only) */}
-      <p className="text-center text-[10px] text-[var(--text-muted)] mt-1 sm:hidden">
-        Swipe to browse products
-      </p>
     </div>
   )
 }
