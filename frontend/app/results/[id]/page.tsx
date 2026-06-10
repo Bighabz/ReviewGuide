@@ -64,8 +64,8 @@ export default function ResultsPage({ params }: ResultsPageProps) {
     return null
   }
 
-  const { sessionTitle, summaryText, products, sources } = resultsData
-  const contextLine = `${sessionTitle}${sources.length ? ` · ${sources.length} source${sources.length === 1 ? '' : 's'}` : ''}`
+  const { sessionTitle, summaryText, products } = resultsData
+  const contextLine = sessionTitle
 
   return (
     <div className="min-h-screen" style={{ background: 'var(--paper)' }}>
@@ -114,32 +114,9 @@ export default function ResultsPage({ params }: ResultsPageProps) {
           </div>
         )}
 
-        {/* Sources — terra dots, editorial */}
-        {sources.length > 0 && (
-          <div className="mt-10">
-            <div className="rg-eyebrow mb-3">Sources analyzed</div>
-            <div className="flex flex-col gap-2">
-              {sources.map((source) => (
-                <a
-                  key={source.url}
-                  href={source.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-2 text-sm"
-                  style={{ color: 'var(--ink)' }}
-                >
-                  <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: 'var(--terra)' }} />
-                  <span className="font-medium">{source.site_name}</span>
-                  {source.title && (
-                    <span className="text-xs truncate" style={{ color: 'var(--ink-2)' }}>
-                      — {source.title}
-                    </span>
-                  )}
-                </a>
-              ))}
-            </div>
-          </div>
-        )}
+        {/* NOTE: the "Sources analyzed" section was removed — tone.md mandates
+            "No source citations. Synthesize." (no client-facing citation
+            surface; competitor review-site names never render). */}
       </div>
 
       {/* Toast */}

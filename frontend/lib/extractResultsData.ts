@@ -5,7 +5,10 @@
  *   - sessionTitle: first user message content
  *   - summaryText: first assistant message content
  *   - products: merged product list from inline_product_card / products blocks
- *   - sources: deduplicated source list from review_sources blocks
+ *   - sources: always empty — review_sources blocks are deliberately IGNORED.
+ *     tone.md: "No source citations. Synthesize." The backend stopped emitting
+ *     them (PR #9), but old persisted sessions can still carry them; they must
+ *     not resurface as a user-visible citation list.
  */
 
 import type { Message } from '@/components/ChatContainer'
@@ -54,54 +57,14 @@ function resolveProducts(block: any): ExtractedProduct[] {
 }
 
 /**
- * Extract sources from a review_sources ui_block, handling both:
- *   - block.data.products[].sources[] (normalized structure)
- *   - block.products[].sources[] (flat structure)
- */
-function resolveReviewSources(block: any): ExtractedSource[] {
-  const productList: any[] =
-    (block?.data?.products as any[] | undefined) ??
-    (block?.products as any[] | undefined) ??
-    []
-  const sources: ExtractedSource[] = []
-  for (const product of productList) {
-    const productSources: any[] = Array.isArray(product?.sources) ? product.sources : []
-    for (const s of productSources) {
-      if (s?.url && s?.site_name) {
-        sources.push({
-          site_name: s.site_name,
-          url: s.url,
-          title: s.title ?? s.site_name,
-          snippet: s.snippet,
-        })
-      }
-    }
-  }
-  return sources
-}
-
-/**
- * Deduplicate an array of sources by URL (last occurrence wins — keeps order of first seen).
- */
-function deduplicateSources(sources: ExtractedSource[]): ExtractedSource[] {
-  const seen = new Set<string>()
-  const result: ExtractedSource[] = []
-  for (const source of sources) {
-    if (!seen.has(source.url)) {
-      seen.add(source.url)
-      result.push(source)
-    }
-  }
-  return result
-}
-
-/**
- * Extract products, sources, sessionTitle and summaryText from a Message array.
+ * Extract products, sessionTitle and summaryText from a Message array.
  *
  * Block types handled:
  *   'inline_product_card' — compact product card list (chat view)
  *   'products'            — product carousel items
- *   'review_sources'      — source citations with per-product source lists
+ *
+ * 'review_sources' blocks (legacy, pre-PR #9 sessions) are intentionally
+ * skipped — see the module docstring.
  */
 export default function extractResultsData(messages: Message[]): ResultsData {
   if (!Array.isArray(messages) || messages.length === 0) {
@@ -122,7 +85,6 @@ export default function extractResultsData(messages: Message[]): ResultsData {
       : ''
 
   const allProducts: ExtractedProduct[] = []
-  const allSources: ExtractedSource[] = []
 
   for (const msg of assistantMessages) {
     const blocks: any[] = Array.isArray(msg.ui_blocks) ? msg.ui_blocks : []
@@ -130,8 +92,6 @@ export default function extractResultsData(messages: Message[]): ResultsData {
       const type: string = block?.type ?? ''
       if (type === 'inline_product_card' || type === 'products') {
         allProducts.push(...resolveProducts(block))
-      } else if (type === 'review_sources') {
-        allSources.push(...resolveReviewSources(block))
       }
     }
   }
@@ -140,6 +100,6 @@ export default function extractResultsData(messages: Message[]): ResultsData {
     sessionTitle,
     summaryText,
     products: allProducts,
-    sources: deduplicateSources(allSources),
+    sources: [],
   }
 }

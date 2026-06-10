@@ -76,7 +76,7 @@ async def list_tools() -> List[Tool]:
         ),
         Tool(
             name="review_search",
-            description="Search for real product reviews from trusted sources (Wirecutter, Reddit, RTINGS). Reads: product_names, slots. Writes: review_data.",
+            description="Search for real product reviews from trusted editorial and community sources. Reads: product_names, slots. Writes: review_data.",
             inputSchema=state_schema
         ),
         Tool(

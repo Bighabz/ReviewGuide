@@ -22,7 +22,7 @@ if backend_dir not in sys.path:
 TOOL_CONTRACT = {
     "name": "review_search",
     "intent": "product",
-    "purpose": "Search for real product reviews from trusted sources (Wirecutter, Reddit, RTINGS, etc.)",
+    "purpose": "Search for real product reviews from trusted editorial and community sources",
     "tools": {
         "pre": ["product_search"],
         "post": ["product_normalize"]
@@ -122,11 +122,12 @@ async def review_search(state: Dict[str, Any]) -> Dict[str, Any]:
 
         logger.info(f"[review_search] Searching reviews for {len(products_to_search)} products")
 
-        # Emit status update
+        # Emit status update. tone.md: loading copy is curious and AMBIGUOUS —
+        # it never names a source ("the pipes stay hidden").
         tool_citations = [
             {
                 "type": "status",
-                "message": "Searching reviews across Wirecutter, Reddit, RTINGS...",
+                "message": "Asking around…",
             }
         ]
 

@@ -43,8 +43,12 @@ class TestVoicePromptContent:
         assert "Rank" in VOICE_PROMPT
 
     def test_prompt_includes_competitor_no_citation(self):
-        assert "RTINGS" in VOICE_PROMPT
-        assert "Wirecutter" in VOICE_PROMPT
+        """tone.md: no competitor mention anywhere — including the prompt
+        itself. The no-citation rule must exist WITHOUT naming anyone (the old
+        prompt used RTINGS/Wirecutter as in-prompt examples; that's banned)."""
+        assert "Never name any review site" in VOICE_PROMPT
+        for name in ("RTINGS", "Wirecutter", "CNET", "Tom's Guide", "TechRadar"):
+            assert name not in VOICE_PROMPT, f"competitor name {name!r} leaked into VOICE_PROMPT"
 
 
 class TestBuildSystemPrompt:

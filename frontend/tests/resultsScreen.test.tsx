@@ -225,26 +225,13 @@ describe('extractResultsData — product extraction', () => {
   })
 })
 
-describe('extractResultsData — source extraction and deduplication', () => {
-  it('extracts sources from review_sources blocks', () => {
+describe('extractResultsData — review_sources blocks are ignored (tone.md)', () => {
+  // tone.md: "No source citations. Synthesize." The backend stopped emitting
+  // review_sources blocks (PR #9), but OLD persisted sessions in localStorage
+  // can still carry them — they must not resurface as a citation list.
+  it('returns no sources even when old persisted messages carry review_sources blocks', () => {
     const result = extractResultsData(mockMessages as any)
-    // 3 unique sources (Wirecutter duplicate removed)
-    expect(result.sources.length).toBeGreaterThanOrEqual(3)
-  })
-
-  it('deduplicates sources by URL', () => {
-    const result = extractResultsData(mockMessages as any)
-    const urls = result.sources.map(s => s.url)
-    const uniqueUrls = new Set(urls)
-    expect(urls.length).toBe(uniqueUrls.size)
-  })
-
-  it('extracted source has site_name, url, title fields', () => {
-    const result = extractResultsData(mockMessages as any)
-    const wire = result.sources.find(s => s.site_name === 'Wirecutter')
-    expect(wire).toBeDefined()
-    expect(wire!.url).toContain('wirecutter.com')
-    expect(wire!.title).toBeTruthy()
+    expect(result.sources).toHaveLength(0)
   })
 })
 
@@ -462,24 +449,20 @@ describe('RES-05: Quick actions', () => {
 // RES-06: Sources section
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('RES-06: Sources section', () => {
+describe('RES-06: no client-facing citation surface (tone.md)', () => {
   beforeEach(() => {
     setupLocalStorageMock()
   })
 
-  it('renders sources with site names', () => {
-    render(<ResultsPage params={{ id: 'test-session-id' }} />)
-    expect(screen.getByText('Wirecutter')).toBeTruthy()
-    expect(screen.getByText("Tom's Guide")).toBeTruthy()
-    expect(screen.getByText('RTINGS')).toBeTruthy()
+  it('never renders competitor review-site names, even from old persisted sessions', () => {
+    const { container } = render(<ResultsPage params={{ id: 'test-session-id' }} />)
+    expect(container.textContent).not.toMatch(
+      /wirecutter|rtings|cnet|tom['’]?s guide|techradar|the verge|engadget|pcmag|soundguys/i
+    )
   })
 
-  it('renders colored dot indicators next to sources', () => {
-    const { container } = render(<ResultsPage params={{ id: 'test-session-id' }} />)
-    // Colored dots: either a rounded div with background color or a specific class
-    const hasColoredDots =
-      container.querySelector('.rounded-full') !== null ||
-      container.querySelector('[class*="rounded-full"]') !== null
-    expect(hasColoredDots).toBe(true)
+  it('does not render a "Sources analyzed" section', () => {
+    render(<ResultsPage params={{ id: 'test-session-id' }} />)
+    expect(screen.queryByText(/sources analyzed/i)).toBeNull()
   })
 })
