@@ -99,6 +99,7 @@ Categories:
 - product → user wants to find, buy, compare, or get recommendations for a physical product
 - service → user wants a service (not a physical product)
 - travel → anything related to trip planning, destinations, activities at a location, accommodations, transportation, or travel comparisons
+- strain → cannabis strains or products: strain names or comparisons ("sour d vs blue dream"), indica/sativa/hybrid questions, terpenes, weed/THC recommendations, "what should I smoke for X"
 - general → information only
 - unclear → gibberish, random characters, nonsense text
 {context_hint}
@@ -111,7 +112,7 @@ Think about: "What is the user trying to accomplish in THIS conversation?" not j
 
 Return ONLY valid JSON:
 {{
-  "intent": "intro|product|service|travel|general|unclear"
+  "intent": "intro|product|service|travel|strain|general|unclear"
 }}"""
 
         # Build messages with conversation history for context
@@ -209,7 +210,7 @@ async def intent_agent_node(state: GraphState, agent: IntentAgent) -> GraphState
     state.current_agent = "intent"
 
     # All intents now route to planner (clarifier handles slot checking)
-    if result["intent"] in ["product", "service", "travel", "general", "intro", "unclear"]:
+    if result["intent"] in ["product", "service", "travel", "strain", "general", "intro", "unclear"]:
         state.next_agent = "planner"
     else:
         # Unknown intent - end workflow

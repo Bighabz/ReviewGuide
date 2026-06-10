@@ -1,22 +1,16 @@
-"""Cannabis strain vertical — SmartVape engine integration.
+"""Cannabis strain vertical — SmartVape engine + AI-driven routing.
 
 QA 2026-06-10: "sour d vs blue dream" got plain strain education with no
-product flow — no pick, no shortlist, no cards. ReviewGuide can't SELL
-cannabis through its affiliate stack, but it can own the verdict: the vendored
-SmartVape engine (1054 strains, terpene + effect profiles, multi-factor
-recommendation) powers a strain_search → strain_compose plan whose cards link
-OUT to Leafly (their age gate, our recommendation).
+product flow. The vendored SmartVape engine (1054 strains) powers a
+strain_search → strain_compose plan whose cards link OUT to Leafly.
 
-Pins:
-1. is_strain_query detection — keywords, strain-name pairs, vs-comparisons;
-   no false positive on ordinary product queries ("wedding cake stand").
-2. strain_search — comparison / similar / mood modes, Leafly link on every
-   result.
-3. strain_compose — verdict prose + product_review cards (LLM mocked),
-   deterministic fallback when the LLM fails, tone: no competitor citation
-   needed since SmartVape data is ours.
-4. Planner routes detected strain queries to the strain plan regardless of
-   classified intent.
+Routing and query understanding are AI-driven (per Habib, 2026-06-10 — no
+deterministic keyword detector):
+- the intent classifier owns strain detection via a "strain" category
+- strain_search asks an LLM to extract named strains / feelings / conditions
+  / strain type from the message, then the SmartVape engine ranks
+- live Leafly page URLs + snippets come from Serper (no Leafly API key
+  needed); the search-URL fallback covers Serper-off environments
 """
 import json
 import os
@@ -29,11 +23,12 @@ os.environ.setdefault("OPENAI_API_KEY", "test-api-key")
 os.environ.setdefault("RATE_LIMIT_ENABLED", "false")
 os.environ.setdefault("LOG_ENABLED", "false")
 
-from unittest.mock import AsyncMock, patch  # noqa: E402
+from unittest.mock import AsyncMock, MagicMock, patch  # noqa: E402
 
 import pytest  # noqa: E402
 
-from app.services.smartvape import get_engine, is_strain_query, leafly_url  # noqa: E402
+from app.core.config import settings  # noqa: E402
+from app.services.smartvape import get_engine, leafly_url  # noqa: E402
 from mcp_server.tools.strain_search import strain_search  # noqa: E402
 from mcp_server.tools.strain_compose import strain_compose  # noqa: E402
 
@@ -45,8 +40,7 @@ from mcp_server.tools.strain_compose import strain_compose  # noqa: E402
 def test_engine_loads_strain_database():
     engine = get_engine()
     assert engine.get_stats()["total_strains"] > 1000
-    # Singleton: second call returns the same instance (no re-parse)
-    assert get_engine() is engine
+    assert get_engine() is engine  # singleton
 
 
 def test_leafly_url_is_always_a_working_search_link():
@@ -56,74 +50,185 @@ def test_leafly_url_is_always_a_working_search_link():
 
 
 # ---------------------------------------------------------------------------
-# Detection
-# ---------------------------------------------------------------------------
-
-@pytest.mark.parametrize("query", [
-    "sour d vs blue dream",
-    "indica vs sativa",
-    "best strains for sleep",
-    "what weed should i smoke for focus",
-    "blue dream vs sour diesel for anxiety",
-    "something with myrcene terpenes to relax",
-])
-def test_strain_queries_detected(query):
-    assert is_strain_query(query) is True
-
-
-@pytest.mark.parametrize("query", [
-    "best laptop under $1000",
-    "nike vs adidas sneakers",
-    "wedding cake stand for a 3-tier cake",   # strain name in a baking query
-    "gelato maker for home use",              # strain name in an appliance query
-    "what is the capital of France",
-    "ford vs chevy truck",
-])
-def test_non_strain_queries_not_detected(query):
-    assert is_strain_query(query) is False
-
-
-# ---------------------------------------------------------------------------
-# strain_search tool
+# AI routing: the intent classifier owns strain detection
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_strain_search_comparison_mode():
-    """'sour d vs blue dream' resolves both sides (partial names included)
-    and returns them as the head of the results."""
-    result = await strain_search({"user_message": "sour d vs blue dream", "slots": {}})
+async def test_intent_prompt_offers_strain_category():
+    from app.agents.intent_agent import IntentAgent
 
-    assert result["success"] is True
-    names = [s["name"].lower() for s in result["strain_results"]]
-    assert any("sour diesel" in n for n in names), f"Sour Diesel missing from {names[:5]}"
-    assert any("blue dream" in n for n in names), f"Blue Dream missing from {names[:5]}"
+    agent = IntentAgent()
+    captured = {}
+
+    async def fake_generate(messages, **kwargs):
+        captured["messages"] = messages
+        return json.dumps({"intent": "strain"})
+
+    agent.generate = fake_generate
+    result = await agent._quick_intent_classification("sour d vs blue dream")
+
+    system_prompt = captured["messages"][0]["content"]
+    assert "strain" in system_prompt, "classifier must be offered the strain category"
+    assert result["intent"] == "strain"
+
+
+@pytest.mark.asyncio
+async def test_intent_node_routes_strain_to_planner():
+    from app.agents.intent_agent import intent_agent_node
+
+    agent = MagicMock()
+    agent.execute = AsyncMock(return_value={"intent": "strain"})
+    state = MagicMock()
+
+    result = await intent_agent_node(state, agent)
+    assert result.next_agent == "planner"
+
+
+@pytest.mark.asyncio
+async def test_planner_routes_strain_intent_to_strain_plan():
+    from app.agents.planner_agent import PlannerAgent
+
+    agent = PlannerAgent()
+    state = {
+        "user_message": "sour d vs blue dream",
+        "intent": "strain",
+        "slots": {},
+        "conversation_history": [],
+    }
+    result = await agent.execute(state)
+
+    tools = [t for step in result["plan"]["steps"] for t in step.get("tools", [])]
+    assert "strain_search" in tools
+    assert "strain_compose" in tools
+
+
+# ---------------------------------------------------------------------------
+# strain_search: LLM extraction → engine ranking
+# ---------------------------------------------------------------------------
+
+def _extraction(named=None, feelings=None, conditions=None, strain_type=None):
+    return json.dumps({
+        "named_strains": named or [],
+        "feelings": feelings or [],
+        "conditions": conditions or [],
+        "strain_type": strain_type,
+    })
+
+
+def _no_serper(monkeypatch):
+    monkeypatch.setattr(settings, "ENABLE_SERPAPI", False)
+
+
+@pytest.mark.asyncio
+async def test_strain_search_asks_llm_to_parse_the_query(monkeypatch):
+    """The query is parsed by the LLM, not keyword matching — the raw message
+    goes to the model and its JSON answer drives the engine."""
+    _no_serper(monkeypatch)
+    captured = {}
+
+    async def fake_generate(messages, **kwargs):
+        captured["messages"] = messages
+        return _extraction(named=["Sour Diesel", "Blue Dream"])
+
+    with patch("app.services.model_service.model_service.generate", new=fake_generate):
+        result = await strain_search({"user_message": "sour d vs blue dream", "slots": {}})
+
+    assert "sour d vs blue dream" in json.dumps(captured["messages"])
     assert result["strain_mode"] == "comparison"
+    names = [s["name"].lower() for s in result["strain_results"]]
+    assert any("sour diesel" in n for n in names)
+    assert any("blue dream" in n for n in names)
 
 
 @pytest.mark.asyncio
-async def test_strain_search_mood_mode():
-    result = await strain_search({"user_message": "best strains to help me sleep", "slots": {}})
+async def test_strain_search_mood_mode_from_llm_extraction(monkeypatch):
+    _no_serper(monkeypatch)
+    with patch(
+        "app.services.model_service.model_service.generate",
+        new=AsyncMock(return_value=_extraction(feelings=["Sleepy"], conditions=["Insomnia"])),
+    ):
+        result = await strain_search({"user_message": "best strains to help me sleep", "slots": {}})
 
-    assert result["success"] is True
-    assert len(result["strain_results"]) >= 3
     assert result["strain_mode"] == "recommend"
-    # Sleep intent must actually shape the results
+    assert len(result["strain_results"]) >= 3
     top = result["strain_results"][0]
     effects = " ".join(top.get("feelings", []) + top.get("helps_with", [])).lower()
     assert "sleep" in effects or "insomnia" in effects
 
 
 @pytest.mark.asyncio
-async def test_strain_search_results_carry_leafly_links():
-    result = await strain_search({"user_message": "indica vs sativa", "slots": {}})
+async def test_strain_search_survives_llm_failure(monkeypatch):
+    """Extraction LLM down → still returns a sensible recommendation set."""
+    _no_serper(monkeypatch)
+    with patch(
+        "app.services.model_service.model_service.generate",
+        new=AsyncMock(side_effect=Exception("LLM down")),
+    ):
+        result = await strain_search({"user_message": "indica vs sativa", "slots": {}})
+
+    assert result["success"] is True
+    assert len(result["strain_results"]) >= 3
+
+
+@pytest.mark.asyncio
+async def test_strain_search_results_carry_leafly_links(monkeypatch):
+    _no_serper(monkeypatch)
+    with patch(
+        "app.services.model_service.model_service.generate",
+        new=AsyncMock(return_value=_extraction(feelings=["Relaxed"])),
+    ):
+        result = await strain_search({"user_message": "something relaxing", "slots": {}})
+
     for s in result["strain_results"]:
-        assert s.get("leafly_url", "").startswith("https://www.leafly.com/"), (
-            f"every strain result needs a Leafly link-out: {s.get('name')}"
-        )
+        assert s.get("leafly_url", "").startswith("https://www.leafly.com/")
 
 
 # ---------------------------------------------------------------------------
-# strain_compose tool
+# Serper enrichment: real Leafly page URLs + live snippets, no API key needed
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_serper_enrichment_upgrades_links_and_snippets(monkeypatch):
+    monkeypatch.setattr(settings, "ENABLE_SERPAPI", True)
+    monkeypatch.setattr(settings, "SERPAPI_API_KEY", "test-key")
+
+    fake_client_cls = MagicMock()
+    fake_client_cls.return_value.search_strain_info = AsyncMock(return_value={
+        "url": "https://www.leafly.com/strains/blue-dream",
+        "snippet": "Blue Dream is a sativa-dominant hybrid with 4.4 stars from 13k reviews.",
+        "title": "Blue Dream",
+    })
+
+    with patch(
+        "app.services.model_service.model_service.generate",
+        new=AsyncMock(return_value=_extraction(named=["Blue Dream"])),
+    ), patch("app.services.serpapi.client.SerpAPIClient", fake_client_cls):
+        result = await strain_search({"user_message": "tell me about blue dream", "slots": {}})
+
+    top = result["strain_results"][0]
+    assert top["leafly_url"] == "https://www.leafly.com/strains/blue-dream"
+    assert "4.4 stars" in top.get("leafly_snippet", "")
+
+
+@pytest.mark.asyncio
+async def test_serper_failure_keeps_search_url_fallback(monkeypatch):
+    monkeypatch.setattr(settings, "ENABLE_SERPAPI", True)
+    monkeypatch.setattr(settings, "SERPAPI_API_KEY", "test-key")
+
+    fake_client_cls = MagicMock()
+    fake_client_cls.return_value.search_strain_info = AsyncMock(side_effect=Exception("serper down"))
+
+    with patch(
+        "app.services.model_service.model_service.generate",
+        new=AsyncMock(return_value=_extraction(named=["Blue Dream"])),
+    ), patch("app.services.serpapi.client.SerpAPIClient", fake_client_cls):
+        result = await strain_search({"user_message": "tell me about blue dream", "slots": {}})
+
+    assert result["strain_results"][0]["leafly_url"].startswith("https://www.leafly.com/search?q=")
+
+
+# ---------------------------------------------------------------------------
+# strain_compose (unchanged contract)
 # ---------------------------------------------------------------------------
 
 _STRAIN_RESULTS = [
@@ -133,7 +238,8 @@ _STRAIN_RESULTS = [
         "feelings": ["Happy", "Relaxed", "Euphoric"],
         "helps_with": ["Stress", "Depression"],
         "score": 0.92, "match_reasons": ["Produces: Relaxed"],
-        "leafly_url": "https://www.leafly.com/search?q=Blue%20Dream",
+        "leafly_url": "https://www.leafly.com/strains/blue-dream",
+        "leafly_snippet": "Sativa-dominant hybrid, 4.4 stars.",
     },
     {
         "name": "Sour Diesel", "strain_type": "Sativa",
@@ -173,9 +279,7 @@ async def test_strain_compose_builds_cards_with_leafly_links():
 
     cards = [b for b in result["ui_blocks"] if b["type"] == "product_review"]
     assert len(cards) == 2
-    blocks_json = json.dumps(result["ui_blocks"])
-    assert "leafly.com" in blocks_json
-    # Top pick leads the cards
+    assert "leafly.com" in json.dumps(result["ui_blocks"])
     assert cards[0]["data"]["product_name"] == "Blue Dream"
 
 
@@ -195,7 +299,7 @@ async def test_strain_compose_degrades_without_llm():
         result = await strain_compose(state)
 
     assert result["success"] is True
-    assert result["assistant_text"].strip(), "fallback prose required"
+    assert result["assistant_text"].strip()
     assert [b for b in result["ui_blocks"] if b["type"] == "product_review"]
 
 
@@ -208,27 +312,3 @@ async def test_strain_compose_no_results_is_honest():
     assert result["success"] is True
     assert result["assistant_text"].strip()
     assert result["ui_blocks"] == []
-
-
-# ---------------------------------------------------------------------------
-# Planner routing
-# ---------------------------------------------------------------------------
-
-@pytest.mark.asyncio
-async def test_planner_routes_strain_queries_to_strain_plan():
-    """Strain queries get the strain plan even when intent classified them
-    as 'general' (the QA failure mode)."""
-    from app.agents.planner_agent import PlannerAgent
-
-    agent = PlannerAgent()
-    state = {
-        "user_message": "sour d vs blue dream",
-        "intent": "general",
-        "slots": {},
-        "conversation_history": [],
-    }
-    result = await agent.execute(state)
-
-    tools = [t for step in result["plan"]["steps"] for t in step.get("tools", [])]
-    assert "strain_search" in tools
-    assert "strain_compose" in tools

@@ -158,13 +158,17 @@ async def strain_compose(state: Dict[str, Any]) -> Dict[str, Any]:
     # ── One LLM call for the verdict prose ──
     strain_lines = []
     for s in strains:
-        strain_lines.append(
+        line = (
             f"Strain: {s['name']} | Type: {s.get('strain_type')} | "
             f"Dominant terpene: {s.get('dominant_terpene')} ({s.get('terpene_description', '')}) | "
             f"Effects: {', '.join(s.get('feelings', []))} | "
             f"Helps with: {', '.join(s.get('helps_with', []))} | "
             f"Match score: {s.get('score')}"
         )
+        # Live web context from Serper enrichment (synthesize — never attribute)
+        if s.get("leafly_snippet"):
+            line += f" | Web context: {s['leafly_snippet'][:200]}"
+        strain_lines.append(line)
     blog_data = (
         f'User asked: "{user_message}"\n'
         f"Mode: {mode}\n\nStrain data:\n" + "\n".join(strain_lines)

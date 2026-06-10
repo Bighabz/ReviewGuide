@@ -364,6 +364,29 @@ class SerpAPIClient:
                 return None
         return None
 
+    async def search_strain_info(self, strain_name: str) -> Optional[Dict[str, Any]]:
+        """Resolve a cannabis strain's real Leafly page + live snippet via a
+        site-scoped Google search (strain vertical — no Leafly API key needed).
+
+        Returns {"url", "snippet", "title"} from the first leafly.com organic
+        hit, or None. Tone note: this is sourcing plumbing — the snippet feeds
+        the composer's context, never a user-visible citation.
+        """
+        try:
+            data = await self._serper_search(f"{strain_name} cannabis strain site:leafly.com", num=3)
+        except Exception:
+            return None
+
+        for item in data.get("organic", []) or []:
+            link = item.get("link", "") or ""
+            if "leafly.com" in link:
+                return {
+                    "url": link,
+                    "snippet": item.get("snippet", "") or "",
+                    "title": item.get("title", "") or "",
+                }
+        return None
+
     async def search_shopping_offer(self, product_name: str) -> Optional[Dict[str, Any]]:
         """Fetch a single REAL Google Shopping offer for a product via Serper.
 

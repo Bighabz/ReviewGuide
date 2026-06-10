@@ -1,17 +1,21 @@
 """
-Strain Search Tool — cannabis strain vertical (SmartVape engine).
+Strain Search Tool — cannabis strain vertical (SmartVape engine, AI-parsed).
 
-Runs the vendored SmartVape recommendation engine (1054 strains, terpene +
-effect profiles) against the user's query. No retailer search, no affiliate
-calls — ReviewGuide owns the strain verdict and the compose step links OUT to
-Leafly. Three modes:
+The query is understood by an LLM (named strains, desired feelings,
+conditions, strain type — abbreviations like "sour d" resolved by the model),
+then the vendored SmartVape engine (1054 strains, terpene + effect profiles)
+does the ranking. Live Leafly strain-page URLs and snippets come from Serper
+(the existing SERPAPI pipeline — no Leafly API key needed); when Serper is
+off or finds nothing, cards fall back to Leafly search links.
 
+Three modes:
 - comparison: the query names 2+ strains ("sour d vs blue dream")
 - similar:    one named strain → it plus its closest matches
-- recommend:  effect/condition intent ("strains for sleep") → multi-factor
-              recommendation
+- recommend:  effect/condition intent ("strains for sleep")
 """
 
+import asyncio
+import json
 import os
 import re
 import sys
@@ -43,31 +47,6 @@ TOOL_CONTRACT = {
     "citation_message": "Reading the room…",
 }
 
-_VS_SPLIT = re.compile(r"\s+(?:vs\.?|versus)\s+", re.IGNORECASE)
-
-# Message vocabulary → engine feelings / conditions (SmartVape standard lists)
-_FEELING_HINTS = {
-    "relax": "Relaxed", "relaxed": "Relaxed", "chill": "Relaxed", "calm": "Calm",
-    "sleep": "Sleepy", "sleepy": "Sleepy", "tired": "Sleepy",
-    "focus": "Focused", "focused": "Focused", "productive": "Focused",
-    "creative": "Creative", "creativity": "Creative",
-    "energy": "Energetic", "energetic": "Energetic", "active": "Energetic",
-    "happy": "Happy", "euphoric": "Euphoric", "euphoria": "Euphoric",
-    "uplifted": "Uplifted", "uplifting": "Uplifted",
-    "social": "Talkative", "talkative": "Talkative", "giggly": "Giggly",
-    "hungry": "Hungry", "appetite": "Hungry", "aroused": "Aroused",
-}
-_CONDITION_HINTS = {
-    "sleep": "Insomnia", "insomnia": "Insomnia",
-    "anxiety": "Anxiety", "anxious": "Anxiety",
-    "pain": "Pain", "aches": "Pain",
-    "stress": "Stress", "stressed": "Stress",
-    "depression": "Depression", "depressed": "Depression",
-    "ptsd": "PTSD", "migraine": "Migraines", "migraines": "Migraines",
-    "inflammation": "Inflammation", "fatigue": "Fatigue",
-    "nausea": "Nausea",
-}
-
 
 def _strain_to_result(strain, score: float, reasons: List[str]) -> Dict[str, Any]:
     from app.services.smartvape import leafly_url
@@ -88,10 +67,93 @@ def _strain_to_result(strain, score: float, reasons: List[str]) -> Dict[str, Any
     }
 
 
+async def _extract_query_params(message: str, slots: Dict[str, Any]) -> Dict[str, Any]:
+    """LLM-parse the strain query. The model resolves abbreviations and slang
+    ("sour d" → "Sour Diesel", "gdp" → "Granddaddy Purple") and maps the
+    user's ask onto the engine's standard feelings/conditions vocabulary."""
+    from app.core.config import settings
+    from app.services.model_service import model_service
+    from app.services.smartvape.engine import STANDARD_FEELINGS, STANDARD_CONDITIONS
+
+    system_prompt = f"""You parse cannabis strain queries for a recommendation engine. Extract what the user is asking for.
+
+Return ONLY valid JSON:
+{{
+  "named_strains": ["<full canonical strain names the user referenced — resolve abbreviations and slang, e.g. 'sour d' → 'Sour Diesel', 'gdp' → 'Granddaddy Purple', 'gg4' → 'GG4'>"],
+  "feelings": ["<desired feelings, ONLY from: {', '.join(STANDARD_FEELINGS)}>"],
+  "conditions": ["<conditions to help with, ONLY from: {', '.join(STANDARD_CONDITIONS)}>"],
+  "strain_type": "<'Indica', 'Sativa', 'Hybrid', or null if no preference stated>"
+}}
+
+Rules:
+- named_strains: only strains the user EXPLICITLY referenced; empty list if none
+- Map intent words onto the allowed vocabulary ("can't sleep" → feelings ["Sleepy"], conditions ["Insomnia"]; "for focus at work" → ["Focused"])
+- "indica vs sativa" is a TYPE question, not named strains — leave named_strains empty
+- Empty lists are fine; never invent"""
+
+    extra = str(slots.get("desired_effects", "") or "")
+    user_prompt = f'Query: "{message}"' + (f"\nStated preferences: {extra}" if extra else "")
+
+    raw = await model_service.generate(
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        model=settings.PRODUCT_SEARCH_MODEL,
+        temperature=0.1,
+        max_tokens=300,
+        response_format={"type": "json_object"},
+        agent_name="strain_query_parser",
+    )
+    parsed = json.loads(raw)
+    if not isinstance(parsed, dict):
+        raise ValueError("strain extraction returned non-dict")
+
+    # Clamp the model's answer to the engine's vocabulary (case-insensitive)
+    feelings_ok = {f.lower(): f for f in STANDARD_FEELINGS}
+    conditions_ok = {c.lower(): c for c in STANDARD_CONDITIONS}
+    return {
+        "named_strains": [str(n).strip() for n in parsed.get("named_strains") or [] if str(n).strip()],
+        "feelings": [feelings_ok[f.lower()] for f in parsed.get("feelings") or [] if str(f).lower() in feelings_ok],
+        "conditions": [conditions_ok[c.lower()] for c in parsed.get("conditions") or [] if str(c).lower() in conditions_ok],
+        "strain_type": parsed.get("strain_type") if parsed.get("strain_type") in ("Indica", "Sativa", "Hybrid") else None,
+    }
+
+
+async def _enrich_via_serper(results: List[Dict[str, Any]], logger) -> None:
+    """Upgrade Leafly search links to real strain-page URLs + live snippets via
+    Serper (in place, top 3, best-effort — failures keep the fallback link)."""
+    from app.core.config import settings
+
+    if not getattr(settings, "ENABLE_SERPAPI", False) or not getattr(settings, "SERPAPI_API_KEY", ""):
+        logger.info("[strain_search] Serper disabled — keeping Leafly search-link fallbacks")
+        return
+
+    from app.services.serpapi.client import SerpAPIClient
+
+    client = SerpAPIClient()
+    targets = results[:3]
+    infos = await asyncio.gather(
+        *(client.search_strain_info(r["name"]) for r in targets),
+        return_exceptions=True,
+    )
+    upgraded = 0
+    for r, info in zip(targets, infos):
+        if isinstance(info, dict) and info.get("url"):
+            r["leafly_url"] = info["url"]
+            if info.get("snippet"):
+                r["leafly_snippet"] = info["snippet"]
+            upgraded += 1
+        elif isinstance(info, Exception):
+            logger.warning(f"[strain_search] Serper enrichment failed for '{r['name']}': {info}")
+    logger.info(f"[strain_search] Serper enrichment: {upgraded}/{len(targets)} strain pages resolved")
+
+
 @tool_error_handler(tool_name="strain_search", error_message="Failed to search strains")
 async def strain_search(state: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Resolve the user's strain query against the SmartVape engine.
+    Resolve the user's strain query: LLM extraction → SmartVape engine ranking
+    → Serper Leafly enrichment.
 
     Reads from state:
         - user_message: the query
@@ -108,47 +170,30 @@ async def strain_search(state: Dict[str, Any]) -> Dict[str, Any]:
 
     message = state.get("user_message", "") or ""
     slots = state.get("slots", {}) or {}
-    msg_lower = message.lower()
 
-    # Strain type preference (from slots or the message itself)
-    strain_type = None
-    type_hint = str(slots.get("strain_type", "")).lower() + " " + msg_lower
-    for t in ("indica", "sativa", "hybrid"):
-        if t in type_hint:
-            strain_type = t.capitalize()
-            break
+    # ── AI query understanding (graceful default when the LLM is down) ──
+    try:
+        params = await _extract_query_params(message, slots)
+    except Exception as e:
+        logger.warning(f"[strain_search] extraction LLM failed ({e}) — defaulting to broad recommend")
+        params = {"named_strains": [], "feelings": ["Happy", "Relaxed"], "conditions": [], "strain_type": None}
 
-    # ── Named strains: vs-sides first (partial names), then anywhere in text ──
+    strain_type = params["strain_type"]
+    slot_type = str(slots.get("strain_type", "")).capitalize()
+    if not strain_type and slot_type in ("Indica", "Sativa", "Hybrid"):
+        strain_type = slot_type
+
+    # Resolve the LLM's canonical names against the database (partial match)
     named = []
     seen = set()
+    for name in params["named_strains"]:
+        matches = engine.search_strains(name, limit=1)
+        if matches and matches[0].name not in seen:
+            seen.add(matches[0].name)
+            named.append(matches[0])
 
-    def _add(strain):
-        if strain and strain.name not in seen:
-            seen.add(strain.name)
-            named.append(strain)
-
-    parts = _VS_SPLIT.split(message)
-    if len(parts) >= 2:
-        for part in parts:
-            # Strip lead-in words so "should i get sour d" still resolves
-            cleaned = re.sub(
-                r"^(?:should i (?:get|go|pick|buy)|best|which is better[,:]?)\s+", "",
-                part.strip(), flags=re.IGNORECASE,
-            ).strip(" ?!.")
-            if cleaned:
-                matches = engine.search_strains(cleaned, limit=1)
-                if matches:
-                    _add(matches[0])
-    for token in re.findall(r"[a-z0-9' ]{4,}", msg_lower):
-        for strain in engine.search_strains(token.strip(), limit=1):
-            if strain.name.lower() in msg_lower:
-                _add(strain)
-
-    # ── Effect / condition intent from slots + message vocabulary ──
-    words = set(re.findall(r"[a-z']+", msg_lower + " " + str(slots.get("desired_effects", "")).lower()))
-    feelings = sorted({v for k, v in _FEELING_HINTS.items() if k in words})
-    conditions = sorted({v for k, v in _CONDITION_HINTS.items() if k in words})
-
+    feelings = params["feelings"]
+    conditions = params["conditions"]
     results: List[Dict[str, Any]] = []
 
     if len(named) >= 2:
@@ -180,6 +225,9 @@ async def strain_search(state: Dict[str, Any]) -> Dict[str, Any]:
         for rec in recs:
             results.append(_strain_to_result(rec.strain, rec.score, rec.match_reasons))
 
+    results = results[:6]
+    await _enrich_via_serper(results, logger)
+
     logger.info(
         f"[strain_search] mode={mode}, named={[s.name for s in named]}, "
         f"feelings={feelings}, conditions={conditions}, type={strain_type}, "
@@ -187,7 +235,7 @@ async def strain_search(state: Dict[str, Any]) -> Dict[str, Any]:
     )
 
     return {
-        "strain_results": results[:6],
+        "strain_results": results,
         "strain_mode": mode,
         "success": True,
     }

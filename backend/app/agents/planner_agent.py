@@ -111,18 +111,13 @@ class PlannerAgent(BaseAgent):
 
             intent = state.get("intent", "general")
 
-            # Cannabis strain queries take a dedicated plan regardless of
-            # classified intent — the intent LLM files them under "general"
-            # (QA 2026-06-10: "sour d vs blue dream" got plain strain
-            # education, no pick/cards), and the product pipeline can't source
-            # cannabis through the affiliate stack anyway. The SmartVape
-            # engine owns the verdict; cards link out to Leafly.
-            from app.services.smartvape import is_strain_query
-
             # Handle simple intents with manual plans (no LLM needed)
-            if intent not in ("travel", "intro", "unclear") and is_strain_query(state.get("user_message", "")):
+            if intent == "strain":
+                # Cannabis strain queries (classified by the intent LLM) get a
+                # dedicated SmartVape plan — the product pipeline can't source
+                # cannabis through the affiliate stack; cards link out to Leafly.
                 plan = self._create_strain_plan()
-                self.colored_logger.info("🌿 FAST PATH: strain query → SmartVape strain plan")
+                self.colored_logger.info("🌿 FAST PATH: strain intent → SmartVape strain plan")
             elif intent == "unclear":
                 plan = self._create_manual_plan_for_unclear()
                 self.colored_logger.info("📋 Using manual plan for unclear intent")
