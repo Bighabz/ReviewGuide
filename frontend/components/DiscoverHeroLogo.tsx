@@ -61,9 +61,15 @@ export default function DiscoverHeroLogo({ width = 340 }: { width?: number }) {
 
   // Default (incl. SSR): a fixed-aspect box (no layout shift) showing the static
   // poster until the animated WebP has decoded, then the animation.
+  //
+  // Aspect is 16/9 to match the WebP's actual rendered height — the earlier
+  // 16/7 crop-window (with width:150% zoom) never functioned in prod: the
+  // global `img { max-width: 100% }` reset capped the image at container
+  // width, so 16/7 just clipped ~21px off the top AND bottom, cutting the
+  // speech bubble's tail (browser-verified fix, 2026-06-10).
   return (
     <div style={{ width: '100%', maxWidth: width, margin: '0 auto' }}>
-      <div style={{ position: 'relative', width: '100%', aspectRatio: '16 / 7', overflow: 'hidden' }}>
+      <div style={{ position: 'relative', width: '100%', aspectRatio: '16 / 9', overflow: 'hidden' }}>
         {animatedReady ? (
           <img
             src={ANIMATED_LOGO}
@@ -72,7 +78,7 @@ export default function DiscoverHeroLogo({ width = 340 }: { width?: number }) {
               position: 'absolute',
               left: '50%',
               top: '50%',
-              width: '150%',
+              width: '100%',
               transform: 'translate(-50%, -50%)',
             }}
           />
