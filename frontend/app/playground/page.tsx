@@ -23,10 +23,11 @@ import DiscoverSearchBar from '@/components/discover/DiscoverSearchBar'
 import CategoryChipRow from '@/components/discover/CategoryChipRow'
 import TrendingCards from '@/components/discover/TrendingCards'
 
-// Proposed redesign
-import VerdictList, { VerdictRail, VerdictLedger, OfferLedger } from '@/components/_playground/proposed/VerdictList'
-import FrontPage from '@/components/_playground/proposed/FrontPage'
-import SectionOpener from '@/components/_playground/proposed/SectionOpener'
+// Proposed redesign — promoted to production components (now live)
+import VerdictList, { VerdictRail, VerdictLedger, OfferLedger } from '@/components/verdict/VerdictBlocks'
+import FrontPage from '@/components/home/FrontPage'
+import SectionOpener from '@/components/browse/SectionOpener'
+import { categories } from '@/lib/categoryConfig'
 
 // Shared fixtures
 import {
@@ -275,24 +276,19 @@ export default function PlaygroundPage() {
         />
 
         <div className="space-y-10">
-          <Specimen kind="current" note="app/browse/[category]/page.tsx — open the live page for comparison (it renders inside the full browse layout)">
-            <a
-              href="/browse/electronics"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 text-sm font-semibold hover:underline underline-offset-4"
-              style={{ color: 'var(--primary)' }}
-            >
-              Open /browse/electronics in a new tab <ExternalLink size={14} />
-            </a>
-            <p className="text-xs mt-2" style={{ color: 'var(--text-muted)' }}>
-              What to notice: img + black gradient hero with white text on the photo, a flat 2×2 question
-              grid with no lead, and 200px “other category” micro-cards.
+          <Specimen kind="current" note="The old overlay-hero design was replaced in production by SectionOpener (see git history for the before)">
+            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+              The previous design: img + black gradient hero with white text on the photo, a flat 2×2
+              question grid with no lead, and 200px “other category” micro-cards. The live page at{' '}
+              <a href="/browse/electronics" target="_blank" rel="noopener noreferrer" className="font-semibold hover:underline underline-offset-4" style={{ color: 'var(--primary)' }}>
+                /browse/electronics <ExternalLink size={11} className="inline" />
+              </a>{' '}
+              now renders the proposed design below.
             </p>
           </Specimen>
 
-          <Specimen kind="proposed" note="SectionOpener — same data from categoryConfig.ts, restructured">
-            <SectionOpener slug="electronics" />
+          <Specimen kind="proposed" note="SectionOpener — same data from categoryConfig.ts, restructured (now live)">
+            <SectionOpener category={categories.find((c) => c.slug === 'electronics') ?? categories[0]} />
           </Specimen>
         </div>
 

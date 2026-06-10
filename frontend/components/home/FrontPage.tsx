@@ -1,17 +1,23 @@
 'use client'
 
 /**
- * FrontPage — the proposed Discover homepage: a magazine front page.
- *   MastheadHero    — identity-first hero with a real search input
- *   CategoryIndex   — all categories ON the homepage as a numbered table of contents
+ * FrontPage — the Discover homepage as a magazine front page.
+ *   MastheadHero    — the brand logo as the masthead + a real search input
+ *   CategoryIndex   — all categories on the homepage as a numbered table of contents
  *   TodaysBriefing  — trending with editorial hierarchy: one lead story + dateline list
+ *
+ * Color rule on this page: blue (--primary, matching the logo) for brand/navigation
+ * accents; terracotta (--accent) only for the money/action moments (Ask button).
  */
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { ArrowRight, Search } from 'lucide-react'
 import { categories } from '@/lib/categoryConfig'
-import { briefingStories } from '../fixtures'
+import { briefingStories } from '@/lib/briefingStories'
+
+const LOGO_LIGHT = '/images/8f4c1971-a5b0-474e-9fb1-698e76324f0b.png'
+const LOGO_DARK = '/images/1815e5dc-c4db-4248-9aeb-0a815fd87a4b.png'
 
 const STARTER_QUERIES = [
   'Best noise-cancelling headphones under $400',
@@ -28,21 +34,28 @@ export function MastheadHero() {
   }
 
   return (
-    <header className="pt-12 sm:pt-20 pb-12 sm:pb-16 text-center px-4">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.24em] mb-5" style={{ color: 'var(--accent)' }}>
+    <header className="pt-10 sm:pt-16 pb-12 sm:pb-16 text-center px-4">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.24em] mb-6" style={{ color: 'var(--primary)' }}>
         Independent buying advice · Researched live
       </p>
-      <h1
-        className="font-serif tracking-tight text-balance mx-auto max-w-3xl"
-        style={{ color: 'var(--text)', fontSize: 'clamp(2.25rem, 6vw, 4rem)', lineHeight: 1.08 }}
-      >
-        Ask before <em style={{ color: 'var(--accent)' }}>you buy.</em>
-      </h1>
-      <p className="text-base sm:text-lg mt-5 max-w-xl mx-auto" style={{ color: 'var(--text-secondary)' }}>
+
+      {/* The brand mark IS the masthead — theme-aware variants */}
+      <img
+        src={LOGO_LIGHT}
+        alt="ReviewGuide.Ai — Ask Before You Buy"
+        className="theme-light-only mx-auto h-20 sm:h-28 w-auto object-contain"
+      />
+      <img
+        src={LOGO_DARK}
+        alt="ReviewGuide.Ai — Ask Before You Buy"
+        className="theme-dark-only mx-auto h-20 sm:h-28 w-auto object-contain"
+      />
+
+      <p className="text-base sm:text-lg mt-6 max-w-xl mx-auto" style={{ color: 'var(--text-secondary)' }}>
         We read the reviews — Wirecutter, RTINGS, Reddit, the lot — so you get a straight answer with receipts.
       </p>
 
-      {/* Real input, terracotta submit */}
+      {/* Real input, terracotta submit (the one action on the page) */}
       <form
         onSubmit={(e) => {
           e.preventDefault()
@@ -87,13 +100,13 @@ export function MastheadHero() {
   )
 }
 
-/** The structural fix: categories on the homepage, as a table of contents */
+/** All categories on the homepage, as a numbered table of contents */
 export function CategoryIndex() {
   const router = useRouter()
   return (
-    <section className="px-4">
+    <section id="the-index" className="px-4 scroll-mt-20">
       <div className="flex items-baseline gap-4 mb-6">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.2em]" style={{ color: 'var(--accent)' }}>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.2em]" style={{ color: 'var(--primary)' }}>
           The Index
         </p>
         <div className="editorial-rule flex-1 self-center" />
@@ -112,14 +125,14 @@ export function CategoryIndex() {
             <span className="font-serif italic text-xl w-8 shrink-0 text-right" style={{ color: 'var(--border-strong)' }}>
               {String(i + 1).padStart(2, '0')}
             </span>
-            <span
-              className="w-12 h-12 rounded-md overflow-hidden shrink-0"
-              style={{ background: 'var(--surface)' }}
-            >
+            <span className="w-12 h-12 rounded-md overflow-hidden shrink-0" style={{ background: 'var(--surface)' }}>
               <img src={cat.image} alt="" loading="lazy" className="w-full h-full object-cover" />
             </span>
             <span className="flex-1 min-w-0">
-              <span className="block font-serif text-lg leading-tight group-hover:underline underline-offset-4 decoration-1" style={{ color: 'var(--text)' }}>
+              <span
+                className="block font-serif text-lg leading-tight group-hover:underline underline-offset-4 decoration-1"
+                style={{ color: 'var(--text)' }}
+              >
                 {cat.name}
               </span>
               <span className="block text-xs truncate mt-0.5" style={{ color: 'var(--text-muted)' }}>
@@ -129,7 +142,7 @@ export function CategoryIndex() {
             <ArrowRight
               size={15}
               className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
-              style={{ color: 'var(--accent)' }}
+              style={{ color: 'var(--primary)' }}
               aria-hidden="true"
             />
           </button>
@@ -139,14 +152,14 @@ export function CategoryIndex() {
   )
 }
 
-/** Trending, rebuilt with hierarchy: one lead story + a numbered dateline list */
+/** Trending with hierarchy: one lead story + a numbered dateline list */
 export function TodaysBriefing() {
   const router = useRouter()
   const [lead, ...rest] = briefingStories
   return (
     <section className="px-4">
       <div className="flex items-baseline gap-4 mb-6">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.2em]" style={{ color: 'var(--accent)' }}>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.2em]" style={{ color: 'var(--primary)' }}>
           Today’s Briefing
         </p>
         <div className="editorial-rule flex-1 self-center" />
@@ -168,10 +181,13 @@ export function TodaysBriefing() {
             />
           </span>
           <span className="block p-5 sm:p-6">
-            <span className="text-[11px] font-semibold uppercase tracking-[0.18em]" style={{ color: 'var(--accent)' }}>
+            <span className="text-[11px] font-semibold uppercase tracking-[0.18em]" style={{ color: 'var(--primary)' }}>
               {lead.kicker}
             </span>
-            <span className="block font-serif text-2xl sm:text-[1.7rem] leading-tight tracking-tight mt-2 group-hover:underline underline-offset-4 decoration-1" style={{ color: 'var(--text)' }}>
+            <span
+              className="block font-serif text-2xl sm:text-[1.7rem] leading-tight tracking-tight mt-2 group-hover:underline underline-offset-4 decoration-1"
+              style={{ color: 'var(--text)' }}
+            >
               {lead.title}
             </span>
             <span className="block text-sm mt-2 leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
@@ -193,10 +209,13 @@ export function TodaysBriefing() {
                 {i + 2}
               </span>
               <span className="flex-1 min-w-0">
-                <span className="text-[10px] font-semibold uppercase tracking-[0.18em]" style={{ color: 'var(--accent)' }}>
+                <span className="text-[10px] font-semibold uppercase tracking-[0.18em]" style={{ color: 'var(--primary)' }}>
                   {story.kicker}
                 </span>
-                <span className="block font-serif text-[17px] leading-snug mt-0.5 group-hover:underline underline-offset-4 decoration-1" style={{ color: 'var(--text)' }}>
+                <span
+                  className="block font-serif text-[17px] leading-snug mt-0.5 group-hover:underline underline-offset-4 decoration-1"
+                  style={{ color: 'var(--text)' }}
+                >
                   {story.title}
                 </span>
                 <span className="block text-xs mt-1 leading-relaxed" style={{ color: 'var(--text-muted)' }}>
@@ -213,7 +232,7 @@ export function TodaysBriefing() {
 
 export default function FrontPage() {
   return (
-    <div className="space-y-14 sm:space-y-20 pb-8">
+    <div className="max-w-5xl mx-auto space-y-14 sm:space-y-20 pb-16">
       <MastheadHero />
       <CategoryIndex />
       <TodaysBriefing />

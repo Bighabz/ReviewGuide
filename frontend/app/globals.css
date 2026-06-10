@@ -251,6 +251,14 @@ a, button, input, textarea, select {
   text-wrap: balance;
 }
 
+/* Theme-conditional visibility — for assets with light/dark variants (e.g. the logo) */
+[data-theme="dark"] .theme-light-only {
+  display: none;
+}
+:root:not([data-theme="dark"]) .theme-dark-only {
+  display: none;
+}
+
 /* Editorial horizontal rule */
 .editorial-rule {
   height: 1px;

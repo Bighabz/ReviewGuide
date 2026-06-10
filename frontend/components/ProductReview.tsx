@@ -88,7 +88,7 @@ export default function ProductReview({ product }: ProductReviewProps) {
             <img
               src={image_url || getFallbackImage(product_name)}
               alt={product_name}
-              className="w-24 h-24 object-contain rounded-lg bg-white"
+              className="w-24 h-24 object-contain rounded-lg bg-[var(--surface)]"
               loading="lazy"
             />
           </div>

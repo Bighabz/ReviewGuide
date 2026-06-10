@@ -1,6 +1,10 @@
 import type { Config } from 'tailwindcss'
 
 const config: Config = {
+  // Dark mode follows the app's [data-theme] toggle, not the OS preference —
+  // without this, every `dark:` variant compiles to prefers-color-scheme and
+  // ignores the in-app theme switch.
+  darkMode: ['class', '[data-theme="dark"]'],
   content: [
     './pages/**/*.{js,ts,jsx,tsx,mdx}',
     './components/**/*.{js,ts,jsx,tsx,mdx}',

@@ -1,15 +1,15 @@
 'use client'
 
 /**
- * VerdictCard — the proposed unified product card system.
+ * VerdictCard — the unified product card system (production).
  *
  * One base component, four variants:
- *   feature  — rank #1 / Top Pick; the magazine-spread treatment
+ *   feature  — Top Pick; the magazine-spread treatment
  *   standard — ranks 2–N in a ranked shortlist
  *   compact  — ledger row for inline use in flowing prose
- *   rail     — vertical card for a horizontal "also considered" rail
+ *   rail     — vertical card for a horizontal merchant/overflow rail
  *
- * Design rules encoded here (see FABLE_UX_CRITIQUE.md):
+ * Design rules (see FABLE_UX_CRITIQUE.md):
  *   - Terracotta (--accent) is reserved for money actions; blue for navigation.
  *   - Rank is typography (serif numeral), never a badge chip.
  *   - Badges come from data (badges[]), never from array position.
@@ -19,9 +19,39 @@
 
 import { useState } from 'react'
 import { ArrowUpRight } from 'lucide-react'
-import type { FixtureProduct } from '../fixtures'
+import { lookupCuratedProduct } from '@/lib/curatedProductLookup'
+import { trackAffiliateClick } from '@/lib/trackAffiliate'
 
-/* ── Normalizer: merges legacy + MCP fields into one render model ── */
+/** Accepts every product shape the backend emits (legacy, MCP, carousel items, inline rows). */
+export interface ProductInput {
+  // legacy / ranked-list fields
+  rank?: number
+  title?: string
+  price?: number
+  currency?: string
+  image_url?: string
+  affiliate_link?: string
+  merchant?: string
+  specs?: string[]
+  pros?: string[]
+  cons?: string[]
+  rating?: number
+  review_count?: number
+  // MCP fields
+  id?: string
+  name?: string
+  url?: string
+  snippet?: string
+  score?: number
+  best_offer?: { merchant?: string; price?: number; currency?: string; url?: string; image_url?: string }
+  badges?: string[]
+  // carousel-item fields (ProductCarousel legacy shape)
+  product_id?: string
+  description?: string
+  best_price?: boolean
+  savings?: number
+  compared_retailer?: string
+}
 
 export interface NormalizedProduct {
   id: string
@@ -41,23 +71,44 @@ export interface NormalizedProduct {
   badges: string[]
 }
 
-export function normalizeProduct(p: FixtureProduct, index = 0): NormalizedProduct {
+export function normalizeProduct(p: ProductInput, index = 0): NormalizedProduct {
+  const title = p.title || p.name || 'Product'
+
+  // Image/link fallback chain matches production InlineProductCard behavior:
+  // explicit data first, curated catalog second, tagged Amazon search last —
+  // every product must end with a working buy link.
+  let imageUrl = p.image_url || p.best_offer?.image_url
+  let link = p.affiliate_link || p.best_offer?.url || p.url
+  if (!imageUrl || !link) {
+    const curated = lookupCuratedProduct(title)
+    imageUrl = imageUrl || curated.imageUrl || undefined
+    link = link || curated.affiliateUrl || undefined
+  }
+  if (!link) {
+    link = `https://www.amazon.com/s?k=${encodeURIComponent(title)}&tag=revguide-20`
+  }
+
+  const badges = p.badges ? [...p.badges] : []
+  if (p.best_price && !badges.some((b) => /best price/i.test(b))) {
+    badges.push('Best price')
+  }
+
   return {
-    id: p.id || `product-${index}`,
+    id: p.id || p.product_id || `product-${index}`,
     rank: p.rank ?? index + 1,
-    title: p.title || p.name || 'Product',
-    snippet: p.snippet,
+    title,
+    snippet: p.snippet || p.description,
     price: p.price ?? p.best_offer?.price,
     currency: p.currency || p.best_offer?.currency || 'USD',
     merchant: p.merchant || p.best_offer?.merchant,
-    link: p.affiliate_link || p.best_offer?.url || p.url || '#',
-    imageUrl: p.image_url,
+    link,
+    imageUrl,
     pros: p.pros || [],
     cons: p.cons || [],
     specs: p.specs || [],
     rating: p.rating,
     reviewCount: p.review_count,
-    badges: p.badges || [],
+    badges,
   }
 }
 
@@ -139,13 +190,27 @@ function ProductImage({ product, className = '' }: { product: NormalizedProduct;
   )
 }
 
+/** Tracked outbound click: telemetry + open in new tab (href kept for middle-click). */
+function useAffiliateClick(product: NormalizedProduct) {
+  return (e: React.MouseEvent<HTMLAnchorElement>) => {
+    e.preventDefault()
+    trackAffiliateClick({
+      provider: product.merchant || 'unknown',
+      product_name: product.title,
+      url: product.link,
+    })
+  }
+}
+
 /** Money CTA — the only filled-terracotta element in the system. ≥44px tall. */
 function BuyButton({ product, full = false }: { product: NormalizedProduct; full?: boolean }) {
+  const onClick = useAffiliateClick(product)
   return (
     <a
       href={product.link}
       target="_blank"
       rel="noopener noreferrer"
+      onClick={onClick}
       className={`inline-flex items-center justify-center gap-1.5 h-11 px-5 rounded-md text-sm font-semibold transition-colors ${full ? 'w-full sm:w-auto' : ''}`}
       style={{ background: 'var(--accent)', color: '#FFF8F4' }}
       onMouseEnter={(e) => ((e.currentTarget as HTMLAnchorElement).style.background = 'var(--accent-hover)')}
@@ -167,12 +232,25 @@ function Badges({ badges, merchant }: { badges: string[]; merchant?: string }) {
           {b}
         </span>
       ))}
+      {merchant && badges.length === 0 && (
+        <span style={{ color: 'var(--text-muted)' }}>via {merchant}</span>
+      )}
     </p>
   )
 }
 
 /** FOR / AGAINST ledger — scannable in two seconds, neutral ink, colored glyphs only */
-function ForAgainst({ pros, cons }: { pros: string[]; cons: string[] }) {
+export function ForAgainst({
+  pros,
+  cons,
+  forLabel = 'For',
+  againstLabel = 'Against',
+}: {
+  pros: string[]
+  cons: string[]
+  forLabel?: string
+  againstLabel?: string
+}) {
   if (pros.length === 0 && cons.length === 0) return null
   const Col = ({ label, items, glyph, glyphColor }: { label: string; items: string[]; glyph: string; glyphColor: string }) =>
     items.length === 0 ? null : (
@@ -194,8 +272,8 @@ function ForAgainst({ pros, cons }: { pros: string[]; cons: string[] }) {
     )
   return (
     <div className="flex flex-col sm:flex-row gap-4 sm:gap-8">
-      <Col label="For" items={pros} glyph="+" glyphColor="var(--success)" />
-      <Col label="Against" items={cons} glyph="–" glyphColor="var(--error)" />
+      <Col label={forLabel} items={pros} glyph="+" glyphColor="var(--success)" />
+      <Col label={againstLabel} items={cons} glyph="–" glyphColor="var(--error)" />
     </div>
   )
 }
@@ -217,15 +295,37 @@ function RankNumeral({ rank, accent = false, className = '' }: { rank?: number; 
 
 export type VerdictVariant = 'feature' | 'standard' | 'compact' | 'rail'
 
-export default function VerdictCard({ product, variant = 'standard' }: { product: NormalizedProduct; variant?: VerdictVariant }) {
-  if (variant === 'feature') return <FeatureCard product={product} />
+export default function VerdictCard({
+  product,
+  variant = 'standard',
+  forLabel,
+  againstLabel,
+  showRank = true,
+}: {
+  product: NormalizedProduct
+  variant?: VerdictVariant
+  forLabel?: string
+  againstLabel?: string
+  showRank?: boolean
+}) {
+  if (variant === 'feature') return <FeatureCard product={product} forLabel={forLabel} againstLabel={againstLabel} showRank={showRank} />
   if (variant === 'compact') return <CompactRow product={product} />
   if (variant === 'rail') return <RailCard product={product} />
   return <StandardCard product={product} />
 }
 
 /** The Top Pick spread — earns its size; the one loud moment in the list */
-function FeatureCard({ product }: { product: NormalizedProduct }) {
+function FeatureCard({
+  product,
+  forLabel,
+  againstLabel,
+  showRank,
+}: {
+  product: NormalizedProduct
+  forLabel?: string
+  againstLabel?: string
+  showRank?: boolean
+}) {
   return (
     <article
       className="rounded-md overflow-hidden shadow-editorial"
@@ -236,14 +336,13 @@ function FeatureCard({ product }: { product: NormalizedProduct }) {
       }}
     >
       <div className="flex flex-col md:flex-row">
-        {/* Image — meaningful size, calm well */}
         <ProductImage product={product} className="md:w-[42%] aspect-[4/3] md:aspect-auto md:min-h-[320px] shrink-0" />
 
         <div className="flex-1 min-w-0 p-5 sm:p-7 flex flex-col gap-4">
           <Badges badges={product.badges} />
 
           <div className="flex items-start gap-3">
-            <RankNumeral rank={product.rank} accent className="text-5xl sm:text-6xl -mt-1" />
+            {showRank && <RankNumeral rank={product.rank} accent className="text-5xl sm:text-6xl -mt-1" />}
             <div className="min-w-0">
               <h3 className="font-serif text-2xl sm:text-[1.75rem] leading-tight tracking-tight" style={{ color: 'var(--text)' }}>
                 <a href={product.link} target="_blank" rel="noopener noreferrer" className="hover:underline decoration-1 underline-offset-4">
@@ -266,9 +365,8 @@ function FeatureCard({ product }: { product: NormalizedProduct }) {
             </p>
           )}
 
-          <ForAgainst pros={product.pros} cons={product.cons} />
+          <ForAgainst pros={product.pros} cons={product.cons} forLabel={forLabel} againstLabel={againstLabel} />
 
-          {/* Hairline spec row */}
           {product.specs.length > 0 && (
             <p
               className="text-xs pt-3 flex flex-wrap gap-x-4 gap-y-1"
@@ -282,16 +380,18 @@ function FeatureCard({ product }: { product: NormalizedProduct }) {
 
           {/* Money row */}
           <div className="mt-auto pt-4 flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-5" style={{ borderTop: '1px solid var(--border)' }}>
-            <p className="flex items-baseline gap-2">
-              <span className="font-serif text-3xl" style={{ color: 'var(--text)' }}>
-                {formatPrice(product.price, product.currency)}
-              </span>
-              {product.merchant && (
-                <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                  via {product.merchant}
+            {product.price != null && (
+              <p className="flex items-baseline gap-2">
+                <span className="font-serif text-3xl" style={{ color: 'var(--text)' }}>
+                  {formatPrice(product.price, product.currency)}
                 </span>
-              )}
-            </p>
+                {product.merchant && (
+                  <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                    via {product.merchant}
+                  </span>
+                )}
+              </p>
+            )}
             <div className="sm:ml-auto">
               <BuyButton product={product} full />
             </div>
@@ -325,9 +425,11 @@ function StandardCard({ product }: { product: NormalizedProduct }) {
                 <Rating value={product.rating} count={product.reviewCount} size={12} />
               </div>
             </div>
-            <p className="font-serif text-xl sm:text-2xl shrink-0" style={{ color: 'var(--text)' }}>
-              {formatPrice(product.price, product.currency)}
-            </p>
+            {product.price != null && (
+              <p className="font-serif text-xl sm:text-2xl shrink-0" style={{ color: 'var(--text)' }}>
+                {formatPrice(product.price, product.currency)}
+              </p>
+            )}
           </div>
 
           {product.snippet && (
@@ -349,6 +451,7 @@ function StandardCard({ product }: { product: NormalizedProduct }) {
 
 /** Ledger row for inline prose — replaces InlineProductCard */
 function CompactRow({ product }: { product: NormalizedProduct }) {
+  const onClick = useAffiliateClick(product)
   return (
     <div className="flex items-center gap-3 sm:gap-4 py-3" style={{ borderBottom: '1px solid var(--border)' }}>
       <RankNumeral rank={product.rank} accent={product.rank === 1} className="text-2xl w-6 text-center shrink-0" />
@@ -369,13 +472,16 @@ function CompactRow({ product }: { product: NormalizedProduct }) {
         )}
       </div>
       <div className="flex flex-col items-end gap-1 shrink-0">
-        <span className="font-serif text-base" style={{ color: 'var(--text)' }}>
-          {formatPrice(product.price, product.currency)}
-        </span>
+        {product.price != null && (
+          <span className="font-serif text-base" style={{ color: 'var(--text)' }}>
+            {formatPrice(product.price, product.currency)}
+          </span>
+        )}
         <a
           href={product.link}
           target="_blank"
           rel="noopener noreferrer"
+          onClick={onClick}
           className="inline-flex items-center justify-center h-9 min-w-[44px] px-3 rounded-md text-xs font-semibold"
           style={{ background: 'var(--accent-light)', color: 'var(--accent)' }}
         >
@@ -388,6 +494,7 @@ function CompactRow({ product }: { product: NormalizedProduct }) {
 
 /** Rail card — native CSS scroll-snap rail, no carousel state machine */
 function RailCard({ product }: { product: NormalizedProduct }) {
+  const onClick = useAffiliateClick(product)
   return (
     <article
       className="w-[230px] sm:w-[250px] shrink-0 snap-start rounded-md overflow-hidden flex flex-col"
@@ -395,19 +502,20 @@ function RailCard({ product }: { product: NormalizedProduct }) {
     >
       <ProductImage product={product} className="aspect-[4/3]" />
       <div className="p-4 flex flex-col gap-2 flex-1">
-        <Badges badges={product.badges} />
+        <Badges badges={product.badges} merchant={product.merchant} />
         <h4 className="font-serif text-[15px] leading-snug line-clamp-2" style={{ color: 'var(--text)' }}>
           {product.title}
         </h4>
         <Rating value={product.rating} size={11} />
         <div className="mt-auto pt-3 flex items-center justify-between gap-2" style={{ borderTop: '1px solid var(--border)' }}>
           <span className="font-serif text-lg" style={{ color: 'var(--text)' }}>
-            {formatPrice(product.price, product.currency)}
+            {formatPrice(product.price, product.currency) ?? ''}
           </span>
           <a
             href={product.link}
             target="_blank"
             rel="noopener noreferrer"
+            onClick={onClick}
             className="inline-flex items-center justify-center h-9 px-3 rounded-md text-xs font-semibold"
             style={{ background: 'var(--accent)', color: '#FFF8F4' }}
           >

@@ -1,7 +1,7 @@
 'use client'
 
 /**
- * SectionOpener — the proposed category browse page: a magazine section opener.
+ * SectionOpener — the category browse page as a magazine section opener.
  *   Split hero (text panel + framed photo — never text-on-photo),
  *   "Start here" featured question + numbered question index,
  *   colophon strip for other categories.
@@ -12,9 +12,8 @@ import { useRouter } from 'next/navigation'
 import { ArrowRight, Search } from 'lucide-react'
 import { categories, type BrowseCategory } from '@/lib/categoryConfig'
 
-export default function SectionOpener({ slug = 'electronics' }: { slug?: string }) {
+export default function SectionOpener({ category }: { category: BrowseCategory }) {
   const router = useRouter()
-  const category = categories.find((c) => c.slug === slug) ?? categories[0]
   const number = categories.indexOf(category) + 1
   const [query, setQuery] = useState('')
   const [lead, ...restQueries] = category.queries
@@ -22,7 +21,7 @@ export default function SectionOpener({ slug = 'electronics' }: { slug?: string 
   const ask = (q: string) => router.push(`/chat?q=${encodeURIComponent(q)}&new=1`)
 
   return (
-    <div className="space-y-12 sm:space-y-16 pb-8">
+    <div className="max-w-5xl mx-auto space-y-12 sm:space-y-16 pb-16 pt-4">
       {/* ── Split hero: ivory panel + framed photo ── */}
       <header className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-10 items-stretch px-4 pt-2">
         <div className="flex flex-col justify-center py-6 md:py-10 order-2 md:order-1">
@@ -102,10 +101,16 @@ export default function SectionOpener({ slug = 'electronics' }: { slug?: string 
               borderLeft: '3px solid var(--accent)',
             }}
           >
-            <span className="block font-serif italic tracking-tight text-balance" style={{ color: 'var(--text)', fontSize: 'clamp(1.4rem, 3vw, 1.9rem)', lineHeight: 1.25 }}>
+            <span
+              className="block font-serif italic tracking-tight text-balance"
+              style={{ color: 'var(--text)', fontSize: 'clamp(1.4rem, 3vw, 1.9rem)', lineHeight: 1.25 }}
+            >
               “{lead}”
             </span>
-            <span className="mt-5 inline-flex items-center gap-1.5 text-sm font-semibold group-hover:gap-2.5 transition-all" style={{ color: 'var(--accent)' }}>
+            <span
+              className="mt-5 inline-flex items-center gap-1.5 text-sm font-semibold group-hover:gap-2.5 transition-all"
+              style={{ color: 'var(--accent)' }}
+            >
               Ask this <ArrowRight size={15} aria-hidden="true" />
             </span>
           </button>
@@ -122,10 +127,18 @@ export default function SectionOpener({ slug = 'electronics' }: { slug?: string 
                 <span className="font-serif italic text-xl w-7 shrink-0 text-right leading-none" style={{ color: 'var(--border-strong)' }}>
                   {i + 2}
                 </span>
-                <span className="flex-1 font-serif text-[16px] leading-snug group-hover:underline underline-offset-4 decoration-1" style={{ color: 'var(--text)' }}>
+                <span
+                  className="flex-1 font-serif text-[16px] leading-snug group-hover:underline underline-offset-4 decoration-1"
+                  style={{ color: 'var(--text)' }}
+                >
                   {q}
                 </span>
-                <ArrowRight size={14} className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" style={{ color: 'var(--accent)' }} aria-hidden="true" />
+                <ArrowRight
+                  size={14}
+                  className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                  style={{ color: 'var(--accent)' }}
+                  aria-hidden="true"
+                />
               </button>
             ))}
           </div>

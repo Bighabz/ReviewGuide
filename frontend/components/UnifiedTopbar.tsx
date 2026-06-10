@@ -40,10 +40,10 @@ export default function UnifiedTopbar({
   const pathname = usePathname()
   const router = useRouter()
 
-  const getActiveTab = (): 'discover' | 'ask' | 'saved' | 'compare' | 'profile' => {
+  const getActiveTab = (): 'discover' | 'browse' | 'ask' | 'saved' | 'compare' | 'profile' => {
     if (pathname?.startsWith('/chat')) return 'ask'
     if (pathname === '/') return 'discover'
-    if (pathname?.startsWith('/browse')) return 'discover'
+    if (pathname?.startsWith('/browse')) return 'browse'
     if (pathname?.startsWith('/saved')) return 'saved'
     if (pathname?.startsWith('/compare')) return 'compare'
     if (pathname?.startsWith('/profile')) return 'profile'
@@ -146,6 +146,15 @@ export default function UnifiedTopbar({
                 }`}
             >
               Discover
+            </Link>
+            <Link
+              href="/#the-index"
+              className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all ${activeTab === 'browse'
+                ? 'text-[var(--text)] bg-[var(--surface)]'
+                : 'text-[var(--text-muted)] hover:text-[var(--text)]'
+                }`}
+            >
+              Browse
             </Link>
             <Link
               href="/saved"
