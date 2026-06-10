@@ -10,6 +10,7 @@ arbitrary-image generator; subject length is capped for the same reason.
 import asyncio
 import base64
 import hashlib
+import re
 from typing import Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
@@ -18,7 +19,14 @@ from app.core.centralized_logger import get_logger
 from app.core.config import settings
 from app.core.dependencies import check_rate_limit
 from app.core.redis_client import redis_get_with_retry, redis_set_with_retry
-from app.services.image_gen import IMAGE_KINDS, MAX_SUBJECT_LEN, generate_image_bytes
+from app.services.image_gen import (
+    IMAGE_KINDS,
+    MAX_SUBJECT_LEN,
+    STYLE_SUFFIX,
+    generate_image_bytes,
+)
+
+_TOKEN_RE = re.compile(r"^[a-f0-9]{16}$")
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -49,27 +57,51 @@ async def _generate_coalesced(cache_key: str, prompt: str) -> Optional[bytes]:
         return None
 
 
-async def generate_image(kind: str, subject: str) -> Response:
-    """Core handler (route wrapper below adds the rate-limit dependency)."""
-    if kind not in IMAGE_KINDS:
-        raise HTTPException(status_code=400, detail="Unknown image kind")
-    subject = (subject or "").strip()
-    if not subject or len(subject) > MAX_SUBJECT_LEN:
-        raise HTTPException(status_code=400, detail="Invalid subject")
+async def generate_image(kind: str = "", subject: str = "", token: str = "") -> Response:
+    """Core handler (route wrapper below adds the rate-limit dependency).
 
-    cache_key = _cache_key(kind, subject)
-    cached = await redis_get_with_retry(cache_key)
-    if cached:
-        return Response(
-            content=base64.b64decode(cached),
-            media_type="image/png",
-            headers={"Cache-Control": "public, max-age=86400"},
-        )
+    Two paths: a TOKEN referencing a server-stored LLM-written prompt
+    (Layer 2 — full-context prompts, style suffix appended server-side), or
+    the whitelisted kind+subject template (Layer 1 / fallback).
+    """
+    if token:
+        if not _TOKEN_RE.fullmatch(token):
+            raise HTTPException(status_code=400, detail="Invalid token")
+        cache_key = f"gen_image:tok:{token}"
+        # Image cache first: a generated image keeps serving even after the
+        # stored prompt's TTL lapses (old conversations keep their images).
+        cached = await redis_get_with_retry(cache_key)
+        if cached:
+            return Response(
+                content=base64.b64decode(cached),
+                media_type="image/png",
+                headers={"Cache-Control": "public, max-age=86400"},
+            )
+        if not getattr(settings, "ENABLE_GENERATED_IMAGES", False):
+            raise HTTPException(status_code=404, detail="Image generation disabled")
+        stored = await redis_get_with_retry(f"gen_prompt:{token}")
+        if not stored:
+            raise HTTPException(status_code=404, detail="Unknown image token")
+        prompt = stored + STYLE_SUFFIX
+    else:
+        if kind not in IMAGE_KINDS:
+            raise HTTPException(status_code=400, detail="Unknown image kind")
+        subject = (subject or "").strip()
+        if not subject or len(subject) > MAX_SUBJECT_LEN:
+            raise HTTPException(status_code=400, detail="Invalid subject")
 
-    if not getattr(settings, "ENABLE_GENERATED_IMAGES", False):
-        raise HTTPException(status_code=404, detail="Image generation disabled")
+        cache_key = _cache_key(kind, subject)
+        cached = await redis_get_with_retry(cache_key)
+        if cached:
+            return Response(
+                content=base64.b64decode(cached),
+                media_type="image/png",
+                headers={"Cache-Control": "public, max-age=86400"},
+            )
+        if not getattr(settings, "ENABLE_GENERATED_IMAGES", False):
+            raise HTTPException(status_code=404, detail="Image generation disabled")
+        prompt = IMAGE_KINDS[kind].format(subject=subject)
 
-    prompt = IMAGE_KINDS[kind].format(subject=subject)
     image = await _generate_coalesced(cache_key, prompt)
     if not image:
         raise HTTPException(status_code=404, detail="No image available")
@@ -79,7 +111,10 @@ async def generate_image(kind: str, subject: str) -> Response:
         base64.b64encode(image).decode(),
         ex=settings.GEN_IMAGE_CACHE_TTL,
     )
-    logger.info(f"[images] generated + cached {kind} image for {subject!r} ({len(image)} bytes)")
+    logger.info(
+        f"[images] generated + cached image ({len(image)} bytes) "
+        f"for {('token ' + token) if token else f'{kind} {subject!r}'}"
+    )
     return Response(
         content=image,
         media_type="image/png",
@@ -89,8 +124,9 @@ async def generate_image(kind: str, subject: str) -> Response:
 
 @router.get("/generate")
 async def generate_image_route(
-    kind: str = Query(...),
-    subject: str = Query(...),
+    kind: str = Query(""),
+    subject: str = Query(""),
+    token: str = Query(""),
     _rate_limit: None = Depends(check_rate_limit),
 ) -> Response:
-    return await generate_image(kind=kind, subject=subject)
+    return await generate_image(kind=kind, subject=subject, token=token)

@@ -19,6 +19,7 @@ cards simply stay imageless.
 from __future__ import annotations
 
 import base64
+import hashlib
 from typing import Any, Dict, Optional
 from urllib.parse import urlencode
 
@@ -49,6 +50,40 @@ IMAGE_KINDS = {
 }
 
 MAX_SUBJECT_LEN = 120
+
+# Layer 2 (AI-written prompts): the compose LLM describes the subject with
+# full context; the brand look is appended SERVER-SIDE no matter what the
+# model wrote, so style consistency never depends on the LLM behaving and
+# prompt injection via product names can't strip it.
+STYLE_SUFFIX = (
+    ". Professional studio product photograph resting on a warm cream "
+    "background, macro detail, soft natural light, editorial magazine style. "
+    "No text, no labels, no people, no watermarks."
+)
+MAX_LLM_PROMPT_LEN = 400
+
+
+async def store_image_prompt(prompt: str) -> str:
+    """Persist an LLM-written image prompt server-side and return its token.
+
+    The endpoint generates ONLY prompts stored through here (URL carries the
+    token, never the prompt), preserving the no-free-image-generator property
+    of the kind whitelist.
+    """
+    from app.core.redis_client import redis_set_with_retry
+
+    clean = " ".join(str(prompt).split())[:MAX_LLM_PROMPT_LEN]
+    token = hashlib.sha256(clean.encode()).hexdigest()[:16]
+    await redis_set_with_retry(f"gen_prompt:{token}", clean, ex=settings.GEN_IMAGE_CACHE_TTL)
+    return token
+
+
+def build_token_image_url(token: str) -> str:
+    """Absolute URL for a stored-prompt image; empty when unconfigured."""
+    base = _public_base()
+    if not base or not token:
+        return ""
+    return f"{base}/v1/images/generate?{urlencode({'token': token})}"
 
 
 def _public_base() -> str:

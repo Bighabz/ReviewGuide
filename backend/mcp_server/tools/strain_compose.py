@@ -41,7 +41,8 @@ OUTPUT FORMAT — return a JSON object with these string fields:
 {
   "body": "<2-4 short paragraphs of markdown>",
   "follow_up_question": "<exactly one contextual curious question>",
-  "top_pick": "<the EXACT strain name of your #1, copied verbatim from the strain list>"
+  "top_pick": "<the EXACT strain name of your #1, copied verbatim from the strain list>",
+  "image_prompt": "<one vivid photographic sentence describing how the #1 pick's dried flower bud LOOKS — colors, density, trichome frost, pistil hues — grounded in its strain data and web context; max 40 words. Describe ONLY the bud itself: no background, style, lighting, or camera directions.>"
 }
 
 RANK AND COMMIT: you are an editor with a take. Name a #1 strain and say WHY
@@ -177,6 +178,7 @@ async def strain_compose(state: Dict[str, Any]) -> Dict[str, Any]:
     body = ""
     follow_up = ""
     top_pick = ""
+    llm_image_prompt = ""
     try:
         raw = await model_service.generate_compose(
             messages=[
@@ -193,6 +195,7 @@ async def strain_compose(state: Dict[str, Any]) -> Dict[str, Any]:
             body = (parsed.get("body") or "").strip()
             follow_up = (parsed.get("follow_up_question") or "").strip()
             top_pick = (parsed.get("top_pick") or "").strip()
+            llm_image_prompt = (parsed.get("image_prompt") or "").strip()
     except Exception as e:
         logger.warning(f"[strain_compose] verdict LLM failed, using deterministic fallback: {e}")
 
@@ -217,9 +220,29 @@ async def strain_compose(state: Dict[str, Any]) -> Dict[str, Any]:
     pick_image = ""
     default_image = ""
     if getattr(settings, "ENABLE_GENERATED_IMAGES", False):
-        from app.services.image_gen import build_image_url
+        from app.services.image_gen import build_image_url, build_token_image_url, store_image_prompt
 
-        pick_image = build_image_url("strain-pick", ordered[0]["name"])
+        top = ordered[0]
+        # Layer 2: the verdict LLM wrote a full-context appearance description
+        # — store it server-side and reference by token (the endpoint refuses
+        # prompts it didn't store; the brand style suffix is appended there).
+        if llm_image_prompt:
+            try:
+                token = await store_image_prompt(
+                    f"Cannabis flower nug of the strain \"{top['name']}\": {llm_image_prompt}"
+                )
+                pick_image = build_token_image_url(token)
+            except Exception as e:
+                logger.warning(f"[strain_compose] image-prompt store failed, using template: {e}")
+        # Layer 1 fallback: the subject template, enriched with the structured
+        # context compose already holds (type + dominant terpene).
+        if not pick_image:
+            subject_bits = [top["name"]]
+            if top.get("strain_type") and top["strain_type"] != "Unknown":
+                subject_bits.append(f"{top['strain_type']} nug")
+            if top.get("dominant_terpene"):
+                subject_bits.append(f"{top['dominant_terpene']} terpenes")
+            pick_image = build_image_url("strain-pick", ", ".join(subject_bits))
         if len(ordered) > 1:
             default_image = build_image_url("strain-default", user_message or "cannabis strains")
 

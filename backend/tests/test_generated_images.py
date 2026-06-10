@@ -240,6 +240,90 @@ async def test_endpoint_404_when_generation_fails():
 
 
 # ---------------------------------------------------------------------------
+# Layer 2: AI-written prompts via server-side token handoff
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_store_image_prompt_returns_token_and_persists():
+    stored = {}
+
+    async def fake_set(key, value, ex=None, **kw):
+        stored[key] = value
+        return True
+
+    with patch("app.core.redis_client.redis_set_with_retry", new=fake_set):
+        token = await image_gen.store_image_prompt("A dense violet-green nug with amber pistils")
+
+    assert token and len(token) == 16
+    assert stored[f"gen_prompt:{token}"] == "A dense violet-green nug with amber pistils"
+
+
+def test_build_token_image_url(monkeypatch):
+    monkeypatch.setattr(settings, "PUBLIC_API_URL", "https://api.example.com", raising=False)
+    url = image_gen.build_token_image_url("abc123def456abcd")
+    assert url == "https://api.example.com/v1/images/generate?token=abc123def456abcd"
+
+
+@pytest.mark.asyncio
+async def test_endpoint_token_path_uses_stored_prompt_plus_style_suffix():
+    """The endpoint generates ONLY server-stored prompts, and the brand style
+    suffix is appended server-side no matter what the LLM wrote."""
+    from app.api.v1.images import generate_image
+
+    token = "abc123def456abcd"
+    store = {f"gen_prompt:{token}": "A dense violet-green nug with amber pistils"}
+
+    async def fake_get(key, **kw):
+        return store.get(key)
+
+    gen = AsyncMock(return_value=_PNG)
+    with patch("app.api.v1.images.redis_get_with_retry", new=fake_get), \
+         patch("app.api.v1.images.redis_set_with_retry", new=AsyncMock(return_value=True)), \
+         patch("app.api.v1.images.generate_image_bytes", new=gen):
+        resp = await generate_image(token=token)
+
+    assert resp.media_type == "image/png"
+    prompt_used = gen.call_args.args[0]
+    assert "violet-green nug" in prompt_used
+    assert "warm cream background" in prompt_used, "style suffix must be appended server-side"
+
+
+@pytest.mark.asyncio
+async def test_endpoint_unknown_token_is_404_never_generates():
+    from fastapi import HTTPException
+    from app.api.v1.images import generate_image
+
+    gen = AsyncMock()
+    with patch("app.api.v1.images.redis_get_with_retry", new=AsyncMock(return_value=None)), \
+         patch("app.api.v1.images.generate_image_bytes", new=gen):
+        with pytest.raises(HTTPException) as exc:
+            await generate_image(token="abc123def456abcd")
+    assert exc.value.status_code == 404
+    gen.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_endpoint_token_cache_survives_prompt_expiry():
+    """A generated image keeps serving from its own cache even after the
+    stored prompt's TTL lapses (old conversations keep their images)."""
+    from app.api.v1.images import generate_image
+
+    token = "abc123def456abcd"
+    store = {f"gen_image:tok:{token}": base64.b64encode(_PNG).decode()}  # image cached, prompt gone
+
+    async def fake_get(key, **kw):
+        return store.get(key)
+
+    gen = AsyncMock()
+    with patch("app.api.v1.images.redis_get_with_retry", new=fake_get), \
+         patch("app.api.v1.images.generate_image_bytes", new=gen):
+        resp = await generate_image(token=token)
+
+    assert resp.body == _PNG
+    gen.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
 # strain_compose wiring: pick image + one shared default per query
 # ---------------------------------------------------------------------------
 
@@ -285,6 +369,67 @@ async def test_strain_cards_get_pick_image_and_shared_default(monkeypatch):
     other_urls = {c["image_url"] for c in cards[1:]}
     assert len(other_urls) == 1
     assert "kind=strain-default" in other_urls.pop()
+
+
+@pytest.mark.asyncio
+async def test_pick_uses_llm_image_prompt_token_when_present(monkeypatch):
+    """Verdict LLM emitted image_prompt → the pick card's URL is a token URL
+    (full-context AI prompt, stored server-side), not a subject template."""
+    monkeypatch.setattr(settings, "ENABLE_GENERATED_IMAGES", True, raising=False)
+    monkeypatch.setattr(settings, "PUBLIC_API_URL", "https://api.example.com", raising=False)
+
+    blog = json.dumps({
+        "body": "Blue Dream is the pick.", "follow_up_question": "Evenings?",
+        "top_pick": "Blue Dream",
+        "image_prompt": "A dense sage-green nug with icy trichomes and amber pistils",
+    })
+    store_mock = AsyncMock(return_value="abc123def456abcd")
+    state = {
+        "user_message": "best strains for stress",
+        "strain_results": [dict(s) for s in _STRAIN_RESULTS],
+        "strain_mode": "recommend", "slots": {}, "conversation_history": [],
+    }
+    with patch("app.services.model_service.model_service.generate_compose", new=AsyncMock(return_value=blog)), \
+         patch("app.services.image_gen.store_image_prompt", new=store_mock):
+        result = await strain_compose(state)
+
+    cards = [b["data"] for b in result["ui_blocks"] if b["type"] == "product_review"]
+    assert "token=abc123def456abcd" in cards[0]["image_url"]
+    stored_prompt = store_mock.call_args.args[0]
+    assert "sage-green nug" in stored_prompt
+    assert "Blue Dream" in stored_prompt, "strain name must anchor the stored prompt"
+    # other cards still share the per-query default
+    assert "kind=strain-default" in cards[1]["image_url"]
+
+
+@pytest.mark.asyncio
+async def test_pick_falls_back_to_enriched_subject_without_llm_prompt(monkeypatch):
+    """No image_prompt from the LLM → Layer 1: the subject template URL,
+    enriched with the structured data compose holds (type + terpene)."""
+    monkeypatch.setattr(settings, "ENABLE_GENERATED_IMAGES", True, raising=False)
+    monkeypatch.setattr(settings, "PUBLIC_API_URL", "https://api.example.com", raising=False)
+
+    state = {
+        "user_message": "best strains for stress",
+        "strain_results": [dict(s) for s in _STRAIN_RESULTS],
+        "strain_mode": "recommend", "slots": {}, "conversation_history": [],
+    }
+    with patch(
+        "app.services.model_service.model_service.generate_compose",
+        new=AsyncMock(return_value=_BLOG),  # no image_prompt field
+    ):
+        result = await strain_compose(state)
+
+    pick_url = [b["data"] for b in result["ui_blocks"]][0]["image_url"]
+    assert "kind=strain-pick" in pick_url
+    assert "Hybrid" in pick_url and "Myrcene" in pick_url, (
+        f"fallback subject must carry type+terpene context: {pick_url}"
+    )
+
+
+def test_strain_blog_role_requests_image_prompt():
+    from mcp_server.tools.strain_compose import _STRAIN_BLOG_ROLE
+    assert "image_prompt" in _STRAIN_BLOG_ROLE
 
 
 @pytest.mark.asyncio
