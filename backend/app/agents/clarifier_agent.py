@@ -714,33 +714,18 @@ class ClarifierAgent(BaseAgent):
             has_product_name = bool(current_slots.get("product_name"))
 
             if has_brand and not has_category and not has_product_name:
-                # Brands mentioned without category — check if brands span multiple categories
-                user_msg_lower = (state.get("sanitized_text") or state.get("user_message", "")).lower()
-                # Multi-category brands that commonly cause confusion
-                ambiguous_brands = {
-                    "dyson": ["vacuums", "air purifiers", "hair dryers", "fans"],
-                    "shark": ["vacuums", "steam mops", "hair dryers", "blenders"],
-                    "ninja": ["blenders", "air fryers", "coffee makers", "grills"],
-                    "bissell": ["vacuums", "carpet cleaners", "steam mops"],
-                    "kitchenaid": ["stand mixers", "blenders", "food processors", "cookware"],
-                    "samsung": ["phones", "TVs", "laptops", "tablets", "appliances"],
-                    "apple": ["phones", "laptops", "tablets", "watches", "headphones"],
-                    "sony": ["headphones", "TVs", "cameras", "gaming consoles", "speakers"],
-                    "lg": ["TVs", "monitors", "appliances", "phones"],
-                    "philips": ["shavers", "toothbrushes", "TVs", "kitchen appliances"],
-                    "breville": ["espresso machines", "toaster ovens", "blenders", "juicers"],
-                    "cuisinart": ["food processors", "coffee makers", "cookware", "toasters"],
-                    "dewalt": ["drills", "saws", "impact drivers", "grinders"],
-                    "makita": ["drills", "saws", "impact drivers", "grinders"],
-                    "bosch": ["power tools", "dishwashers", "washing machines", "ovens"],
-                }
-                detected_ambiguous = [
-                    brand for brand in ambiguous_brands
-                    if brand in user_msg_lower
-                ]
-                if detected_ambiguous:
-                    logger.info(f"[Clarifier Agent] Detected ambiguous brand-only query: {detected_ambiguous} — requesting category clarification")
-                    missing_required_slots.append("category")
+                # ANY brand without a product type is ambiguous — running the
+                # search anyway makes product_search treat the brand as a
+                # literal term ("ford or chevy" → Ford v Ferrari Blu-rays,
+                # Tom Ford perfume; QA 2026-06-10). A hardcoded multi-category
+                # brand list used to gate this, so unlisted brands slipped
+                # through; one category question is always cheaper than a
+                # garbage shortlist.
+                logger.info(
+                    f"[Clarifier Agent] Brand-only query (brand={current_slots.get('brand')!r}, "
+                    "no category/product_name) — requesting category clarification"
+                )
+                missing_required_slots.append("category")
 
         # Outcome 5: comparison-mode clarification. An explicit "X vs Y" query gets
         # exactly ONE question — which dimension should decide the verdict — instead

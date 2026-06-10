@@ -238,13 +238,16 @@ async def product_search(state: Dict[str, Any]) -> Dict[str, Any]:
 Generate a list of 5-8 SPECIFIC product model names that match this request.
 
 Requirements:
+- FIRST identify what TYPE of purchasable product the user is shopping for; every name you return must be that type of product
 - Use conversation context to understand what the user is referring to
 - If user says "the best reviewed ones" or "those headphones", use conversation to identify the product category
 - Include brand name + specific model/version when user specifies (e.g., "iPhone 16 Pro Max")
 - If user asks for a specific product (e.g., "iPhone 16"), include variations of that product
 - Be specific: "Nike Air Zoom Pegasus 40" not just "Nike running shoes"
-- NEVER refuse or say product doesn't exist - always generate product names based on user's request
 - If unsure about exact model numbers, use the product name the user specified
+- NEVER pad the list with items of a different product type that merely contain the user's words (a movie, perfume, or toy that happens to carry a brand name is wrong)
+
+ESCAPE HATCH: if the message names only brands or companies and you cannot tell what type of product they want (e.g. "ford or chevy" with no category), do NOT guess across categories — return {{"products": []}}.
 
 Return ONLY a JSON object with product names:
 {{"products": ["Product Name 1", "Product Name 2", ...]}}"""
@@ -253,7 +256,7 @@ Return ONLY a JSON object with product names:
         # Use PRODUCT_SEARCH_MODEL with configurable max_tokens (important for reasoning models)
         response = await model_service.generate(
             messages=[
-                {"role": "system", "content": f"You are a product name generator. Today's date is {datetime.date.today().isoformat()}. Generate product names based on user's request using the LATEST models and versions available as of today. For example, if asked about iPhones, use the current generation (not older ones). NEVER refuse or say a product doesn't exist. Always return valid JSON with product names. IMPORTANT: Do NOT include accessories, replacement parts, cases, chargers, cables, adapters, filters, or other add-on items. Only return the primary products the user is asking about."},
+                {"role": "system", "content": f"You are a product name generator. Today's date is {datetime.date.today().isoformat()}. Generate product names based on user's request using the LATEST models and versions available as of today. For example, if asked about iPhones, use the current generation (not older ones). Always return valid JSON. When the product type is clear, return product names; when it is NOT identifiable (bare brand names, no category), return an empty products list rather than guessing across categories. IMPORTANT: Do NOT include accessories, replacement parts, cases, chargers, cables, adapters, filters, or other add-on items. Only return the primary products the user is asking about."},
                 {"role": "user", "content": prompt}
             ],
             model=settings.PRODUCT_SEARCH_MODEL,
