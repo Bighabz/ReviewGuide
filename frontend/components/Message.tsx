@@ -504,7 +504,10 @@ export default function Message({ message, isLast = false }: MessageProps) {
                     vocabulary while the tool keeps running. Never
                     "Thinking..." — that fallback was the most visible
                     voice violation on the chat screen pre-B.1. */}
-                {!message.content && message.isThinking && (
+                {/* QA 2026-06-10 #4: a clarifier/blocks-only message has no
+                    `content`, so without these guards the status line cycles
+                    forever above an already-rendered card. */}
+                {!message.content && message.isThinking && !message.followups && !(message.ui_blocks?.length) && (
                   <div className="flex items-center gap-2.5 py-1.5">
                     {/* Blueprint loading: single 8px terra dot, breathing 1.6s */}
                     <span className="w-2 h-2 rounded-full bg-[var(--terra)] rg-breath flex-shrink-0" />

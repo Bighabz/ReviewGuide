@@ -279,7 +279,7 @@ function BuyButton({ product, full = false }: { product: NormalizedProduct; full
       target="_blank"
       rel="noopener noreferrer"
       onClick={onClick}
-      className={`inline-flex items-center justify-center gap-1.5 h-11 px-5 rounded-md text-sm font-semibold transition-colors ${full ? 'w-full sm:w-auto' : ''}`}
+      className={`inline-flex items-center justify-center gap-1.5 min-h-[44px] px-5 py-2 rounded-md text-sm font-semibold whitespace-nowrap shrink-0 transition-colors ${full ? 'w-full sm:w-auto' : ''}`}
       style={{ background: 'var(--accent)', color: 'var(--surface-elevated)' }}
       onMouseEnter={(e) => ((e.currentTarget as HTMLAnchorElement).style.background = 'var(--accent-hover)')}
       onMouseLeave={(e) => ((e.currentTarget as HTMLAnchorElement).style.background = 'var(--accent)')}
@@ -446,7 +446,7 @@ function FeatureCard({
           )}
 
           {/* Money row */}
-          <div className="mt-auto pt-4 flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-5" style={{ borderTop: '1px solid var(--border)' }}>
+          <div className="mt-auto pt-4 flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3 sm:gap-5" style={{ borderTop: '1px solid var(--border)' }}>
             {product.price != null && (
               <p className="flex items-baseline gap-2">
                 <span className="font-serif text-3xl" style={{ color: 'var(--text)' }}>

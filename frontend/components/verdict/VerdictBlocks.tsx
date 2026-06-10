@@ -164,8 +164,8 @@ export function OfferLedger({
                   Best price
                 </span>
               )}
-              <span className="flex-1" />
-              <span className="font-serif text-lg" style={{ color: 'var(--text)' }}>
+              <span className="flex-1 min-w-[8px]" />
+              <span className="font-serif text-lg whitespace-nowrap shrink-0" style={{ color: 'var(--text)' }}>
                 {offer.price > 0
                   ? `${offer.currency === 'USD' ? '$' : `${offer.currency} `}${offer.price.toFixed(2)}`
                   : 'Check price'}

@@ -71,8 +71,8 @@ export function MastheadHero() {
           onChange={(e) => setQuery(e.target.value)}
           placeholder={`Ask anything — ${examples.join(', ')}…`}
           aria-label="Ask a product research question"
-          className="flex-1 min-w-0 bg-transparent text-[15px] outline-none h-11"
-          style={{ color: 'var(--text)' }}
+          className="flex-1 min-w-0 bg-transparent text-[15px] outline-none h-11 pr-2 truncate"
+          style={{ color: 'var(--text)', textOverflow: 'ellipsis' }}
         />
         <button
           type="submit"

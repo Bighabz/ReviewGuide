@@ -26,7 +26,6 @@ import CarRentalCard from '@/components/CarRentalCard'
 // successor: synthesized comparison prose + aggregate ratings, no sources.
 import ReviewConsensus from '@/components/ReviewConsensus'
 import PriceComparison from '@/components/PriceComparison'
-import { RefineRow } from '@/components/ProductReview'
 import DOMPurify from 'dompurify'
 
 /** Each renderer receives the normalized block and returns JSX or null */
@@ -169,7 +168,6 @@ export function UIBlocks({ blocks, itinerary }: UIBlocksProps) {
                 const sorted = [...productReviewBlocks].sort(
                     (a, b) => ((a.data as any)?.rank ?? 99) - ((b.data as any)?.rank ?? 99)
                 )
-                const firstName = (sorted[0]?.data as any)?.product_name ?? 'product'
                 return (
                     <section key={`product-shortlist-${idx}`} className="w-full">
                         <header className="mb-4">
@@ -183,7 +181,9 @@ export function UIBlocks({ blocks, itinerary }: UIBlocksProps) {
                                 <ProductReview key={`review-${i}`} product={(b.data as any) ?? {}} showRefine={false} />
                             ))}
                         </div>
-                        <RefineRow productName={firstName} />
+                        {/* QA #3: refinement chips live ONLY in the
+                            next_suggestions row below the message — the
+                            in-card RefineRow duplicated them. */}
                     </section>
                 )
             }

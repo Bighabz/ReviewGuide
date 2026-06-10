@@ -199,7 +199,10 @@ function OfferBadges({ offer }: { offer: AffiliateLink }) {
   )
 }
 
-export default function ProductReview({ product, showRefine = true }: ProductReviewProps) {
+// QA 2026-06-10 #3: showRefine defaults OFF — the in-card RefineRow duplicated
+// the next_suggestions chip row below the message. RefineRow stays exported
+// for surfaces with no suggestion row.
+export default function ProductReview({ product, showRefine = false }: ProductReviewProps) {
   const { product_name, rating, summary, image_url, features, pros, cons, affiliate_links, rank } = product
 
   const router = useRouter()
@@ -340,7 +343,7 @@ export default function ProductReview({ product, showRefine = true }: ProductRev
           {/* Money row — best offer price + terracotta CTA */}
           {bestOffer && (
             <div
-              className="mt-auto pt-4 flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-5"
+              className="mt-auto pt-4 flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3 sm:gap-5"
               style={{ borderTop: '1px solid var(--line)' }}
             >
               <p className="flex items-baseline gap-2 flex-wrap">
@@ -361,11 +364,11 @@ export default function ProductReview({ product, showRefine = true }: ProductRev
                   target="_blank"
                   rel="noopener noreferrer"
                   onClick={buyClick(bestOffer)}
-                  className={`inline-flex items-center justify-center gap-1.5 h-11 px-5 rounded-md text-sm font-semibold transition-colors ${isFeature ? 'w-full sm:w-auto' : ''}`}
+                  className={`inline-flex items-center justify-center gap-1.5 min-h-[44px] px-5 py-2 rounded-md text-sm font-semibold whitespace-nowrap shrink-0 transition-colors ${isFeature ? 'w-full sm:w-auto' : ''}`}
                   style={{ background: 'var(--terra)', color: 'var(--paper-hi)' }}
                 >
                   {bestOffer.price > 0 ? 'See price' : 'Check price'} at {bestOffer.merchant}
-                  <ArrowUpRight size={15} strokeWidth={2.25} />
+                  <ArrowUpRight size={15} strokeWidth={2.25} className="shrink-0" />
                 </a>
               </div>
             </div>
@@ -388,8 +391,10 @@ export default function ProductReview({ product, showRefine = true }: ProductRev
                     {offer.merchant}
                   </span>
                   <OfferBadges offer={offer} />
-                  <span className="flex-1" />
-                  <span className="font-serif text-base" style={{ color: 'var(--ink)' }}>
+                  <span className="flex-1 min-w-[8px]" />
+                  {/* QA #2: prices were wrapping one character per line in the
+                      squeezed mobile column — never let a price break. */}
+                  <span className="font-serif text-base whitespace-nowrap shrink-0" style={{ color: 'var(--ink)' }}>
                     {offer.price > 0
                       ? `${offer.currency === 'USD' ? '$' : `${offer.currency} `}${offer.price.toFixed(2)}`
                       : 'Check price'}
