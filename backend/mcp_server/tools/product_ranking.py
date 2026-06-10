@@ -12,9 +12,11 @@ scoring is unchanged.
 
 from app.core.centralized_logger import get_logger
 from app.core.error_manager import tool_error_handler
+import re
 import statistics
 import sys
 import os
+from itertools import zip_longest
 from typing import Dict, Any, List, Optional
 
 # Add backend to path (portable path)
@@ -39,6 +41,54 @@ def _fuzzy_name_match(name_a: str, name_b: str, threshold: float = 0.35) -> bool
     intersection = a_tokens & b_tokens
     union = a_tokens | b_tokens
     return len(intersection) / len(union) >= threshold
+
+
+def _comparison_side_matcher(side: str):
+    """Build a matcher for one side of an 'X vs Y' pair.
+
+    The side's first token is the brand/product family ("iPhone 15" → iphone,
+    "adidas sneakers" → adidas); a word-boundary match against the product
+    name decides membership.
+    """
+    tokens = str(side).strip().lower().split()
+    if not tokens:
+        return lambda name: False
+    pattern = re.compile(rf"\b{re.escape(tokens[0])}\b")
+    return lambda name: bool(pattern.search(name.lower()))
+
+
+def _interleave_comparison_sides(ranked_items: List[Dict[str, Any]], pair: List) -> List[Dict[str, Any]]:
+    """Alternate the two compared sides through the shortlist.
+
+    QA 2026-06-10: 'iPhone 15 vs Pixel 8' shortlists came back all-iPhone —
+    pure score sorting packs the higher-authority brand into every visible
+    slot. Within each side the score order is preserved; the side owning the
+    global top item leads; items matching neither side trail in score order.
+    No-op when either side is absent from the results (nothing to balance).
+    """
+    match_a = _comparison_side_matcher(pair[0])
+    match_b = _comparison_side_matcher(pair[1])
+    side_a: List[Dict[str, Any]] = []
+    side_b: List[Dict[str, Any]] = []
+    rest: List[Dict[str, Any]] = []
+    for item in ranked_items:
+        name = item.get("product_name", "")
+        if match_a(name):
+            side_a.append(item)
+        elif match_b(name):
+            side_b.append(item)
+        else:
+            rest.append(item)
+    if not side_a or not side_b:
+        return ranked_items
+    first, second = (side_a, side_b) if ranked_items[0] in side_a else (side_b, side_a)
+    interleaved: List[Dict[str, Any]] = []
+    for x, y in zip_longest(first, second):
+        if x is not None:
+            interleaved.append(x)
+        if y is not None:
+            interleaved.append(y)
+    return interleaved + rest
 
 
 def _median_offer_price(product_name: str, affiliate_products: Dict[str, List]) -> Optional[float]:
@@ -278,6 +328,19 @@ async def product_ranking(state: Dict[str, Any]) -> Dict[str, Any]:
 
         # Sort by score descending
         ranked_items.sort(key=lambda x: x["score"], reverse=True)
+
+        # Comparison queries: alternate the two sides through the shortlist so
+        # one brand can't sweep every visible card (QA 2026-06-10).
+        comparison_pair = slots.get("comparison_products") or []
+        if isinstance(comparison_pair, list) and len(comparison_pair) == 2:
+            before = [it["product_name"] for it in ranked_items[:4]]
+            ranked_items = _interleave_comparison_sides(ranked_items, comparison_pair)
+            after = [it["product_name"] for it in ranked_items[:4]]
+            if before != after:
+                logger.info(
+                    f"[product_ranking] Comparison interleave ({comparison_pair[0]!r} vs "
+                    f"{comparison_pair[1]!r}): top 4 now {after}"
+                )
 
         logger.info(f"[product_ranking] Top product: {ranked_items[0]['product_name'] if ranked_items else 'None'}")
 

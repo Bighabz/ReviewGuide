@@ -186,6 +186,20 @@ async def product_search(state: Dict[str, Any]) -> Dict[str, Any]:
         if slot_criteria:
             combined_query = f"{query}\n\nAdditional criteria:\n{slot_criteria}"
 
+        # "X vs Y" shortlists must represent BOTH sides (QA 2026-06-10: "nike vs
+        # adidas sneakers" generated all-Nike). The clarifier's comparison
+        # detection (Outcome 5) stores the pair in slots; demand balanced
+        # coverage from the generator.
+        comparison_products = slots.get("comparison_products") or []
+        comparison_block = ""
+        if isinstance(comparison_products, list) and len(comparison_products) == 2:
+            side_a, side_b = comparison_products
+            comparison_block = f"""
+COMPARISON REQUEST — the user is deciding between "{side_a}" and "{side_b}":
+- Include 2-4 specific products for EACH side ("{side_a}" AND "{side_b}")
+- A list where either side has fewer than 2 products is WRONG — never let one side dominate
+"""
+
         logger.info(f"[product_search] Query: {query}")
         if slot_criteria:
             logger.info(f"[product_search] Slot criteria:\n{slot_criteria}")
@@ -246,7 +260,7 @@ Requirements:
 - Be specific: "Nike Air Zoom Pegasus 40" not just "Nike running shoes"
 - If unsure about exact model numbers, use the product name the user specified
 - NEVER pad the list with items of a different product type that merely contain the user's words (a movie, perfume, or toy that happens to carry a brand name is wrong)
-
+{comparison_block}
 ESCAPE HATCH: if the message names only brands or companies and you cannot tell what type of product they want (e.g. "ford or chevy" with no category), do NOT guess across categories — return {{"products": []}}.
 
 Return ONLY a JSON object with product names:
