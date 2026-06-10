@@ -42,17 +42,21 @@ export function MastheadHero() {
   }
 
   return (
-    <header className="pt-[56px] md:pt-10 pb-10 sm:pb-14 text-center px-4">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.24em] mb-4" style={{ color: 'var(--accent)' }}>
+    // Compact masthead (2026-06-10): every vertical step trimmed so Today's
+    // Briefing peeks above the fold on a ~740px laptop viewport — previously
+    // the hero alone pushed it ~560px+ down and users had to scroll to learn
+    // the page had content at all.
+    <header className="pt-[56px] md:pt-6 pb-6 sm:pb-8 text-center px-4">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.24em] mb-3" style={{ color: 'var(--accent)' }}>
         Independent buying advice · Researched live
       </p>
 
       {/* The brand mark IS the masthead — the existing animated hero logo */}
-      <div className="w-full max-w-[280px] md:max-w-[340px] mx-auto">
-        <DiscoverHeroLogo width={340} />
+      <div className="w-full max-w-[240px] md:max-w-[280px] mx-auto">
+        <DiscoverHeroLogo width={280} />
       </div>
 
-      <p className="text-base sm:text-lg mt-4 max-w-xl mx-auto" style={{ color: 'var(--text-secondary)' }}>
+      <p className="text-base sm:text-lg mt-3 max-w-xl mx-auto" style={{ color: 'var(--text-secondary)' }}>
         We read thousands of expert and owner reviews, so you get a straight answer with receipts.
       </p>
 
@@ -62,7 +66,7 @@ export function MastheadHero() {
           e.preventDefault()
           submit()
         }}
-        className="mt-7 mx-auto max-w-xl flex items-center gap-2 rounded-md p-1.5 pl-4 shadow-editorial"
+        className="mt-5 mx-auto max-w-xl flex items-center gap-2 rounded-md p-1.5 pl-4 shadow-editorial"
         style={{ background: 'var(--surface-elevated)', border: '1px solid var(--border)' }}
       >
         <Search size={18} style={{ color: 'var(--text-muted)' }} className="shrink-0" aria-hidden="true" />
@@ -226,9 +230,13 @@ export function TodaysBriefing() {
 
 export default function FrontPage() {
   return (
+    // The hero→briefing gap is deliberately tighter (mt-2) than the section
+    // rhythm (space-y-12/16): the briefing must peek above the fold.
     <div className="max-w-5xl mx-auto space-y-12 sm:space-y-16 pb-24 md:pb-16">
       <MastheadHero />
-      <TodaysBriefing />
+      <div className="!mt-2 sm:!mt-4">
+        <TodaysBriefing />
+      </div>
       <CategoryIndex />
     </div>
   )
