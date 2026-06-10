@@ -96,7 +96,7 @@ export default function ComparisonTable({ data, title }: ComparisonTableProps) {
                   >
                     {/* Product Image */}
                     <div className="flex justify-center mb-3">
-                      <div className="w-20 h-20 rounded-lg overflow-hidden border border-[var(--border)] bg-white p-1">
+                      <div className="w-20 h-20 rounded-lg overflow-hidden border border-[var(--border)] bg-[var(--surface)] p-1">
                         {product.image_url ? (
                           <img
                             src={product.image_url}

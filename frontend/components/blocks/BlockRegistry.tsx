@@ -9,11 +9,9 @@
  */
 
 import type { NormalizedBlock } from '@/lib/normalizeBlocks'
-import ProductCarousel from '@/components/ProductCarousel'
-import ProductCards from '@/components/ProductCards'
+import VerdictList, { VerdictRail, VerdictLedger, OfferLedger, TopPickCard } from '@/components/verdict/VerdictBlocks'
 import ProductReview from '@/components/ProductReview'
 import ProductRecommendations from '@/components/ProductRecommendations'
-import AffiliateLinks from '@/components/AffiliateLinks'
 import HotelCards from '@/components/HotelCards'
 import FlightCards from '@/components/FlightCards'
 import ItineraryView from '@/components/ItineraryView'
@@ -28,7 +26,6 @@ import CarRentalCard from '@/components/CarRentalCard'
 // successor: synthesized comparison prose + aggregate ratings, no sources.
 import ReviewConsensus from '@/components/ReviewConsensus'
 import PriceComparison from '@/components/PriceComparison'
-import InlineProductCard from '@/components/InlineProductCard'
 import ProductReviewCarousel from '@/components/ProductReviewCarousel'
 import DOMPurify from 'dompurify'
 
@@ -37,31 +34,18 @@ type BlockRenderer = (block: NormalizedBlock) => JSX.Element | null
 
 const BLOCK_RENDERERS: Record<string, BlockRenderer> = {
     carousel: (b) => (
-        <ProductCarousel items={(b.data as any)?.items ?? b.data ?? []} title={b.title} />
+        <VerdictRail products={(b.data as any)?.items ?? b.data ?? []} title={b.title} />
     ),
     products: (b) => {
-        // Handle both array format and {products: [...]} object format
+        // Handle both array format and {products: [...]} object format;
+        // normalizeProduct inside VerdictRail merges best_offer/legacy fields.
         const rawItems = Array.isArray(b.data) ? b.data : (b.data as any)?.products ?? []
-        return (
-            <ProductCarousel
-                items={(rawItems as any[]).map((p: any) => ({
-                    product_id: p.id ?? p.product_id,
-                    title: p.name ?? p.title,
-                    price: p.best_offer?.price ?? p.price,
-                    currency: p.best_offer?.currency ?? p.currency ?? 'USD',
-                    affiliate_link: p.best_offer?.url ?? p.url,
-                    merchant: p.best_offer?.merchant ?? p.merchant,
-                    image_url: p.best_offer?.image_url ?? p.image_url,
-                    rating: p.best_offer?.rating ?? p.rating,
-                    review_count: p.best_offer?.review_count ?? p.review_count,
-                }))}
-                title={b.title}
-            />
-        )
+        return <VerdictRail products={rawItems as any[]} title={b.title} />
     },
     product_cards: (b) => (
-        <ProductCards products={(b.data as any)?.products ?? []} />
+        <VerdictList products={(b.data as any)?.products ?? []} title={b.title ?? 'The Shortlist'} />
     ),
+    top_pick: (b) => <TopPickCard data={(b.data as any) ?? {}} />,
     product_review: (b) => (
         <ProductReview product={(b.data as any) ?? {}} />
     ),
@@ -69,9 +53,9 @@ const BLOCK_RENDERERS: Record<string, BlockRenderer> = {
         <ProductRecommendations content={(b.data as any)?.content ?? ''} />
     ),
     affiliate_links: (b) => (
-        <AffiliateLinks
+        <OfferLedger
             productName={(b.data as any)?.product_name ?? ''}
-            affiliateLinks={(b.data as any)?.affiliate_links ?? []}
+            offers={(b.data as any)?.affiliate_links ?? []}
             rank={(b.data as any)?.rank}
         />
     ),
@@ -109,7 +93,7 @@ const BLOCK_RENDERERS: Record<string, BlockRenderer> = {
     ),
     destination_info: (b) => <DestinationInfo data={(b.data as any) ?? {}} />,
     inline_product_card: (b) => (
-        <InlineProductCard products={(b.data as any)?.products ?? []} />
+        <VerdictLedger products={(b.data as any)?.products ?? []} />
     ),
     price_comparison: (b) => (
         <div>
