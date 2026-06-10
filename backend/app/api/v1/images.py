@@ -7,8 +7,10 @@ generation on first hit, after which the PNG comes from Redis. kind is
 whitelisted via image_gen.IMAGE_KINDS so this can't be driven as a free
 arbitrary-image generator; subject length is capped for the same reason.
 """
+import asyncio
 import base64
 import hashlib
+from typing import Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
@@ -25,6 +27,26 @@ router = APIRouter()
 def _cache_key(kind: str, subject: str) -> str:
     digest = hashlib.sha256(f"{kind}:{subject.strip().lower()}".encode()).hexdigest()[:24]
     return f"gen_image:{digest}"
+
+
+# Request coalescing: a carousel fires N identical image requests at once; on
+# a cold cache each used to trigger its own OpenRouter generation (4x cost,
+# seen in prod 2026-06-10). Concurrent requests for the same cache key now
+# share ONE in-flight generation task.
+_inflight: Dict[str, "asyncio.Task[Optional[bytes]]"] = {}
+
+
+async def _generate_coalesced(cache_key: str, prompt: str) -> Optional[bytes]:
+    task = _inflight.get(cache_key)
+    if task is None:
+        task = asyncio.create_task(generate_image_bytes(prompt))
+        _inflight[cache_key] = task
+        task.add_done_callback(lambda _t: _inflight.pop(cache_key, None))
+    try:
+        return await asyncio.shield(task)
+    except Exception as e:
+        logger.warning(f"[images] coalesced generation failed for {cache_key}: {e}")
+        return None
 
 
 async def generate_image(kind: str, subject: str) -> Response:
@@ -48,7 +70,7 @@ async def generate_image(kind: str, subject: str) -> Response:
         raise HTTPException(status_code=404, detail="Image generation disabled")
 
     prompt = IMAGE_KINDS[kind].format(subject=subject)
-    image = await generate_image_bytes(prompt)
+    image = await _generate_coalesced(cache_key, prompt)
     if not image:
         raise HTTPException(status_code=404, detail="No image available")
 

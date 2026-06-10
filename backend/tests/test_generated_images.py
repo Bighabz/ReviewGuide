@@ -126,6 +126,41 @@ async def test_endpoint_generates_caches_and_serves_png():
 
 
 @pytest.mark.asyncio
+async def test_concurrent_identical_requests_coalesce_into_one_generation():
+    """Cold-cache race seen in prod 2026-06-10: a carousel fires N identical
+    image requests at once and each triggered its own OpenRouter generation
+    (4x cost). Concurrent requests for the same kind+subject must share ONE
+    generation."""
+    import asyncio
+    from app.api.v1.images import generate_image
+
+    cache = {}
+
+    async def fake_get(key, **kw):
+        return cache.get(key)
+
+    async def fake_set(key, value, ex=None, **kw):
+        cache[key] = value
+        return True
+
+    async def slow_generate(prompt):
+        await asyncio.sleep(0.05)
+        return _PNG
+
+    gen = AsyncMock(side_effect=slow_generate)
+    with patch("app.api.v1.images.redis_get_with_retry", new=fake_get), \
+         patch("app.api.v1.images.redis_set_with_retry", new=fake_set), \
+         patch("app.api.v1.images.generate_image_bytes", new=gen):
+        responses = await asyncio.gather(*(
+            generate_image(kind="strain-default", subject="best strains for sleep")
+            for _ in range(4)
+        ))
+
+    assert all(r.body == _PNG for r in responses)
+    assert gen.await_count == 1, f"expected 1 coalesced generation, got {gen.await_count}"
+
+
+@pytest.mark.asyncio
 async def test_endpoint_rejects_unknown_kind_and_long_subjects():
     from fastapi import HTTPException
     from app.api.v1.images import generate_image
