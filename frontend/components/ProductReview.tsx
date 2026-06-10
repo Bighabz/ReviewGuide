@@ -9,7 +9,7 @@
  * badges (Under budget / condition labels), affiliate click tracking.
  */
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { ArrowUpRight, Bookmark } from 'lucide-react'
 import { toggleSaved, isSaved, slugifyProduct, type SavedItem } from '@/lib/savedItems'
@@ -249,6 +249,24 @@ export default function ProductReview({ product, showRefine = false }: ProductRe
     trackAffiliateClick({ provider: offer.merchant || 'unknown', product_name, url: offer.affiliate_link })
   }
 
+  // Image load retry: lazy AI-generated images (/v1/images/generate) can race
+  // their own first generation (~4s) — the initial request fails and browsers
+  // never retry on their own, leaving the first viewer a blank slot until
+  // reload. Retry up to 2 times with backoff via a cache-busting param (the
+  // backend ignores it; same cache key serves the now-generated image).
+  const [imgRetry, setImgRetry] = useState(0)
+  const imgAttemptRef = useRef(0)
+  const baseImageSrc = image_url || getFallbackImage(product_name)
+  const imageSrc = imgRetry > 0
+    ? `${baseImageSrc}${baseImageSrc.includes('?') ? '&' : '?'}retry=${imgRetry}`
+    : baseImageSrc
+  const handleImageError = () => {
+    const attempt = imgAttemptRef.current
+    if (attempt >= 2) return
+    imgAttemptRef.current = attempt + 1
+    setTimeout(() => setImgRetry(attempt + 1), (attempt + 1) * 5000)
+  }
+
   const productImage = (
     <div
       className={`relative overflow-hidden shrink-0 ${
@@ -257,9 +275,10 @@ export default function ProductReview({ product, showRefine = false }: ProductRe
       style={{ background: 'var(--paper-alt)' }}
     >
       <img
-        src={image_url || getFallbackImage(product_name)}
+        src={imageSrc}
         alt={product_name}
         loading="lazy"
+        onError={handleImageError}
         className="absolute inset-0 w-full h-full object-contain p-4"
       />
       <SaveToggle item={{ id: slug, name: product_name, price: bestOffer?.price, imageUrl: image_url, url: bestOffer?.affiliate_link, role: roleLabel }} />

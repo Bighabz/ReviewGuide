@@ -6,8 +6,8 @@
  * unflagged offers don't. Also covers basic card rendering so regressions in
  * the Where-to-buy list surface here.
  */
-import { describe, it, expect } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { describe, it, expect, vi } from 'vitest'
+import { render, screen, fireEvent } from '@testing-library/react'
 import ProductReview from '@/components/ProductReview'
 
 function makeProduct(overrides: Record<string, unknown> = {}) {
@@ -200,5 +200,50 @@ describe('ProductReview - condition badges ($407-class honesty)', () => {
 
     expect(screen.getByTestId('under-budget-badge')).toBeInTheDocument()
     expect(screen.getByTestId('condition-badge')).toHaveTextContent('Renewed')
+  })
+})
+
+describe('ProductReview — image load retry (generated images)', () => {
+  // Lazy AI-generated images (/v1/images/generate) can race their own first
+  // generation (~4s): the browser's initial <img> request fails and never
+  // retries, leaving the first viewer a blank slot until reload. The card
+  // retries the load up to 2 times with backoff via a cache-busting param.
+  it('retries a failed image load with a cache-busting param, capped at 2', async () => {
+    vi.useFakeTimers()
+    try {
+      const url = 'https://api.example.com/v1/images/generate?token=abc123def456abcd'
+      render(<ProductReview product={makeProduct({ image_url: url })} />)
+      const img = screen.getByAltText('New Balance Fresh Foam 1080v13') as HTMLImageElement
+
+      expect(img.src).toBe(url)
+
+      fireEvent.error(img)
+      await vi.advanceTimersByTimeAsync(5000)
+      expect(img.src).toContain('retry=1')
+
+      fireEvent.error(img)
+      await vi.advanceTimersByTimeAsync(10000)
+      expect(img.src).toContain('retry=2')
+
+      // Cap: a third error must not trigger another attempt
+      fireEvent.error(img)
+      await vi.advanceTimersByTimeAsync(30000)
+      expect(img.src).toContain('retry=2')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not mangle URLs without an existing query string', async () => {
+    vi.useFakeTimers()
+    try {
+      render(<ProductReview product={makeProduct({ image_url: 'https://img.example.com/nb1080.jpg' })} />)
+      const img = screen.getByAltText('New Balance Fresh Foam 1080v13') as HTMLImageElement
+      fireEvent.error(img)
+      await vi.advanceTimersByTimeAsync(5000)
+      expect(img.src).toBe('https://img.example.com/nb1080.jpg?retry=1')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
