@@ -10,7 +10,7 @@
  * Terracotta tokens only (the semantic --accent vars resolve to --terra).
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { ArrowRight, Search } from 'lucide-react'
 import DiscoverHeroLogo from '@/components/DiscoverHeroLogo'
@@ -35,7 +35,28 @@ function useRotated<T>(pool: readonly T[], count: number): T[] {
 export function MastheadHero() {
   const router = useRouter()
   const [query, setQuery] = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
   const examples = useRotated(PLACEHOLDER_EXAMPLES, 2)
+
+  // QA 2026-06-10 (placeholder overflow): a 430px viewport leaves ~271px of
+  // text room after the icon + Ask button; the two-example join rendered
+  // ~334px and clipped mid-word. Narrow screens get ONE short example
+  // (≤ 36 chars total ≈ 260px at 15px DM Sans); sm+ keeps the fuller join.
+  // SSR-safe: starts narrow, widens after mount via matchMedia.
+  const [wideScreen, setWideScreen] = useState(false)
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
+    const mq = window.matchMedia('(min-width: 640px)')
+    setWideScreen(mq.matches)
+    const handler = (e: MediaQueryListEvent) => setWideScreen(e.matches)
+    mq.addEventListener('change', handler)
+    return () => mq.removeEventListener('change', handler)
+  }, [])
+  const shortExample = examples.find((e) => e.length <= 18) ?? 'best headphones'
+  const placeholder = wideScreen
+    ? `Ask anything — ${examples.join(', ')}…`
+    : `Ask anything — ${shortExample}…`
+
   const submit = () => {
     const q = query.trim()
     router.push(q ? `/chat?q=${encodeURIComponent(q)}&new=1` : '/chat?new=1')
@@ -66,14 +87,19 @@ export function MastheadHero() {
           e.preventDefault()
           submit()
         }}
-        className="mt-5 mx-auto max-w-xl flex items-center gap-2 rounded-md p-1.5 pl-4 shadow-editorial"
+        // QA 2026-06-10 (focus): clicking the bar's padding / icon didn't
+        // focus the input, so an immediate ctrl+a selected the whole page.
+        // The whole bar is one focus target.
+        onClick={() => inputRef.current?.focus()}
+        className="mt-5 mx-auto max-w-xl flex items-center gap-2 rounded-md p-1.5 pl-4 shadow-editorial cursor-text"
         style={{ background: 'var(--surface-elevated)', border: '1px solid var(--border)' }}
       >
         <Search size={18} style={{ color: 'var(--text-muted)' }} className="shrink-0" aria-hidden="true" />
         <input
+          ref={inputRef}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder={`Ask anything — ${examples.join(', ')}…`}
+          placeholder={placeholder}
           aria-label="Ask a product research question"
           className="flex-1 min-w-0 bg-transparent text-[15px] outline-none h-11 pr-2 truncate"
           style={{ color: 'var(--text)', textOverflow: 'ellipsis' }}

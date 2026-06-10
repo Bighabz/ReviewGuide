@@ -67,6 +67,28 @@ describe('DiscoverPage — masthead', () => {
     const { container } = render(<DiscoverPage />)
     expect(container.textContent).not.toMatch(/wirecutter|rtings|cnet|tom's guide/i)
   })
+
+  // QA 2026-06-10: on a 430px viewport the input has ~271px of text room;
+  // the old two-example placeholder rendered ~334px and clipped mid-word.
+  // Narrow viewports (the default — matchMedia absent/false) get ONE short
+  // example; wide viewports may join two.
+  it('placeholder fits a narrow mobile input (≤ 36 chars on small screens)', () => {
+    render(<DiscoverPage />)
+    const input = screen.getByLabelText('Ask a product research question') as HTMLInputElement
+    expect(input.placeholder).toMatch(/^Ask anything — /)
+    expect(input.placeholder.length).toBeLessThanOrEqual(36)
+  })
+
+  // QA 2026-06-10: clicking the form's padding / search icon did NOT focus
+  // the input, so an immediate ctrl+a selected the whole page instead of the
+  // field. The whole search bar must act as one focus target.
+  it('clicking anywhere on the search bar focuses the input', () => {
+    render(<DiscoverPage />)
+    const input = screen.getByLabelText('Ask a product research question')
+    const form = input.closest('form') as HTMLFormElement
+    fireEvent.click(form)
+    expect(document.activeElement).toBe(input)
+  })
 })
 
 // ────────────────────────────────────────────────────────────────
