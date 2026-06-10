@@ -196,11 +196,11 @@ export function TodaysBriefing() {
           className="lg:col-span-3 group text-left rounded-md overflow-hidden shadow-editorial"
           style={{ background: 'var(--surface-elevated)', border: '1px solid var(--border)' }}
         >
-          {/* Desktop: wide 3:1 cinematic crop (~185px) so the lead HEADLINE
-              also clears a ~773px laptop fold — at 16/9 (~313px) only the
-              image was visible and the page read as image-only. Mobile keeps
-              16/9 (single column; different fold economics). */}
-          <span className="block aspect-[16/9] lg:aspect-[3/1] overflow-hidden" style={{ background: 'var(--surface)' }}>
+          {/* 16/9 lead image by Habib's call (2026-06-10): a 3:1 cinematic
+              crop got the headline above the fold but made the image look
+              bad. The briefing TITLE + image top still clear the fold via
+              the masthead lift; the headline sits just below. */}
+          <span className="block aspect-[16/9] overflow-hidden" style={{ background: 'var(--surface)' }}>
             <img
               src={lead.image}
               alt=""
