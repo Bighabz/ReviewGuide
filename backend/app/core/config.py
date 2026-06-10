@@ -236,10 +236,14 @@ class Settings(BaseSettings):
     # Top pick gets a subject-specific image; other imageless cards in the same
     # query share ONE default image — max 2 generations per query.
     ENABLE_GENERATED_IMAGES: bool = Field(default=True, description="Generate card images via OpenRouter for results without one")
-    # Measured via OpenRouter 2026-06-10: gemini-2.5-flash-image avg 7.7s/image;
-    # gemini-3.1-flash-image-preview avg 16.4s (despite "1-3s" marketing — that's
-    # Google's direct API, not OpenRouter routing). Re-benchmark before swapping.
-    OPENROUTER_IMAGE_MODEL: str = Field(default="google/gemini-2.5-flash-image", description="OpenRouter model slug for image generation")
+    # Primary image provider: fal.ai FLUX Schnell (sub-second, ~$0.003/image)
+    # when FAL_API_KEY is set; OpenRouter is the fallback path otherwise.
+    # OpenRouter latency measured 2026-06-10: gemini-2.5-flash-image avg
+    # 7.7s/image; gemini-3.1-flash-image-preview avg 16.4s (despite "1-3s"
+    # marketing — that's Google's direct API, not OpenRouter routing).
+    FAL_API_KEY: str = Field(default="", description="fal.ai API key (key_id:key_secret) for image generation")
+    FAL_IMAGE_MODEL: str = Field(default="fal-ai/flux/schnell", description="fal.ai model path for image generation")
+    OPENROUTER_IMAGE_MODEL: str = Field(default="google/gemini-2.5-flash-image", description="OpenRouter model slug for image generation (fallback when FAL_API_KEY unset)")
     GEN_IMAGE_CACHE_TTL: int = Field(default=604800, description="Redis TTL for generated images (seconds; default 7 days)")
     PUBLIC_API_URL: str = Field(default="", description="Public base URL of this backend (for absolute image URLs); falls back to RAILWAY_PUBLIC_DOMAIN")
     RAILWAY_PUBLIC_DOMAIN: str = Field(default="", description="Auto-injected by Railway; used as PUBLIC_API_URL fallback")

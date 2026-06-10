@@ -60,6 +60,61 @@ def test_image_urls_empty_without_public_base(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# fal.ai FLUX Schnell (primary provider when FAL_API_KEY is set)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_fal_provider_used_when_key_set(monkeypatch):
+    """FAL_API_KEY present → fal.ai generates; OpenRouter is never called."""
+    monkeypatch.setattr(settings, "FAL_API_KEY", "test-fal-key", raising=False)
+    fal_response = {"images": [{"url": "https://fal.media/files/x/out.jpeg", "content_type": "image/jpeg"}]}
+
+    post_fal = AsyncMock(return_value=fal_response)
+    post_or = AsyncMock()
+    download = AsyncMock(return_value=_PNG)
+    with patch.object(image_gen, "_post_fal", new=post_fal), \
+         patch.object(image_gen, "_post_openrouter", new=post_or), \
+         patch.object(image_gen, "_download", new=download):
+        data = await image_gen.generate_image_bytes("a cannabis bud")
+
+    assert data == _PNG
+    post_fal.assert_awaited_once()
+    post_or.assert_not_awaited()
+    download.assert_awaited_once_with("https://fal.media/files/x/out.jpeg")
+
+
+@pytest.mark.asyncio
+async def test_fal_data_uri_response_decoded_without_download(monkeypatch):
+    monkeypatch.setattr(settings, "FAL_API_KEY", "test-fal-key", raising=False)
+    b64 = base64.b64encode(_PNG).decode()
+    fal_response = {"images": [{"url": f"data:image/png;base64,{b64}"}]}
+
+    download = AsyncMock()
+    with patch.object(image_gen, "_post_fal", new=AsyncMock(return_value=fal_response)), \
+         patch.object(image_gen, "_download", new=download):
+        data = await image_gen.generate_image_bytes("a cannabis bud")
+
+    assert data == _PNG
+    download.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_fal_empty_images_returns_none(monkeypatch):
+    monkeypatch.setattr(settings, "FAL_API_KEY", "test-fal-key", raising=False)
+    with patch.object(image_gen, "_post_fal", new=AsyncMock(return_value={"images": []})):
+        assert await image_gen.generate_image_bytes("x") is None
+
+
+@pytest.mark.asyncio
+async def test_openrouter_fallback_when_no_fal_key(monkeypatch):
+    monkeypatch.setattr(settings, "FAL_API_KEY", "", raising=False)
+    monkeypatch.setattr(settings, "OPENROUTER_API_KEY", "test-or-key")
+    with patch.object(image_gen, "_post_openrouter", new=AsyncMock(return_value=_openrouter_response())):
+        data = await image_gen.generate_image_bytes("a cannabis bud")
+    assert data == _PNG
+
+
+# ---------------------------------------------------------------------------
 # OpenRouter generation
 # ---------------------------------------------------------------------------
 
