@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     # Infra/deploy token sometimes present in the environment (Railway CLI/MCP).
     # Declared but unused so it doesn't trip extra=forbid and crash startup/tests.
     RAILWAY_TOKEN: str = Field(default="", description="Railway deploy token (infra only; unused by the app)")
+    # Stale .env keys present on dev machines/Railway but not (yet) read by code.
+    USE_CURATED_LINKS: str = Field(default="", description="Unused; declared so extra=forbid doesn't crash startup/tests")
+    CJ_PUBLISHER_ID: str = Field(default="", description="Unused; declared so extra=forbid doesn't crash startup/tests")
     TIMEZONE: str = Field(default="Asia/Bangkok", description="Application timezone (UTC+7)")
 
     # CORS - stored as str to avoid pydantic-settings JSON parsing issues with env vars
