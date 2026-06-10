@@ -96,6 +96,17 @@ def _is_ask_more(message: str) -> bool:
     return msg in _ASK_MORE_PHRASES
 
 
+# After this many ask-more rounds the next click runs the search instead of
+# digging deeper — by then the remaining optional slots are bottom-of-barrel.
+_ASK_MORE_MAX_ROUNDS = 2
+
+# Slots that must never be drawn into ask-more extras: contract order would
+# otherwise surface "What is your gender?" on a mattress query once the
+# meaningful slots run out (QA 2026-06-10). Apparel queries get gender from
+# the query itself ("men's running shoes") via slot extraction.
+_ASK_MORE_SLOT_BLOCKLIST = {"gender"}
+
+
 # ── Outcome 5: comparison-mode clarification ────────────────────────────────
 # "iPhone 15 vs Pixel 8" doesn't need use_case/budget questions — it needs ONE
 # question: which dimension should decide the verdict. The answer rides the
@@ -960,19 +971,29 @@ class ClarifierAgent(BaseAgent):
                 optional_slot_names.append(f["slot"])
 
         # "Ask me a few more questions" — the user opts INTO deeper clarification.
-        # Keep the still-unanswered questions and add up to three new ones drawn
-        # from the plan's optional slots; the extras are marked optional so they
-        # never gate execution.
+        # Present ONLY up-to-three NEW questions drawn from the plan's optional
+        # slots — the prior card is still on screen, so re-rendering its
+        # unanswered questions reads as a snowballing loop (QA 2026-06-10:
+        # 2 → 5 → 8 → 9 questions). The full combined list still goes to halt
+        # state so answers to the older card keep extracting. The extras are
+        # marked optional so they never gate execution.
         if _is_ask_more(user_message):
+            ask_more_rounds = int(halt_state.get("ask_more_rounds", 0))
             unanswered = [f for f in followups if not current_slots.get(f["slot"])]
             asked_slots = {f["slot"] for f in followups}
             extra_slots = [
                 s for s in optional_slot_names
-                if s not in current_slots and s not in asked_slots
+                if s not in current_slots
+                and s not in asked_slots
+                and s not in _ASK_MORE_SLOT_BLOCKLIST
             ][:3]
-            if not extra_slots:
-                # Nothing deeper to ask — run the search rather than stall the turn.
-                logger.info("[Clarifier Agent] Ask-more requested but no optional slots remain; proceeding")
+            if not extra_slots or ask_more_rounds >= _ASK_MORE_MAX_ROUNDS:
+                # Nothing deeper to ask (or we've dug twice already) — run the
+                # search rather than stall the turn.
+                logger.info(
+                    f"[Clarifier Agent] Ask-more exhausted "
+                    f"(rounds={ask_more_rounds}, remaining_slots={extra_slots}); proceeding"
+                )
                 await HaltStateManager.delete_halt_state(session_id)
                 return {
                     "slots": current_slots,
@@ -986,21 +1007,24 @@ class ClarifierAgent(BaseAgent):
                 user_message,
                 intent,
                 conversation_history=conversation_history,
-                user_preferences=(state.get("metadata") or {}).get("user_preferences")
+                user_preferences=(state.get("metadata") or {}).get("user_preferences"),
+                already_asked=[f.get("question") or f["slot"] for f in followups],
             )
             extra_questions = [{**q, "optional": True} for q in extra_data.get("questions", [])]
             combined = unanswered + extra_questions
             followups_data = {
                 "intro": "Happy to dig deeper — these sharpen the pick:",
-                "questions": combined,
+                "questions": extra_questions,
                 "closing": extra_data.get("closing", ""),
             }
             halt_state["slots"] = current_slots
             halt_state["followups"] = combined
+            halt_state["ask_more_rounds"] = ask_more_rounds + 1
             await HaltStateManager.update_halt_state(session_id, halt_state)
             logger.info(
-                f"[Clarifier Agent] Ask-more: presenting {len(combined)} questions "
-                f"({len(extra_questions)} new optional: {extra_slots})"
+                f"[Clarifier Agent] Ask-more round {ask_more_rounds + 1}: presenting "
+                f"{len(extra_questions)} new optional questions ({extra_slots}); "
+                f"tracking {len(combined)} total"
             )
             return {
                 "slots": current_slots,
@@ -1136,7 +1160,8 @@ class ClarifierAgent(BaseAgent):
         user_message: str,
         intent: str,
         conversation_history: List[Dict[str, str]] = None,
-        user_preferences: Dict[str, Any] = None
+        user_preferences: Dict[str, Any] = None,
+        already_asked: List[str] = None
     ) -> Dict[str, Any]:
         """
         Generate follow-up questions with intro and closing using LLM.
@@ -1151,6 +1176,10 @@ class ClarifierAgent(BaseAgent):
                 preference_service shape: use_cases/brands/categories counts,
                 budget_ranges newest-first, features list). Used for Outcome 7's
                 "(like last time)" chip biasing.
+            already_asked: Question texts already shown to the user (ask-more
+                rounds). Injected into the prompt so the LLM can't rephrase an
+                earlier question into a near-duplicate ("mattress type" vs
+                "material" with identical options — QA 2026-06-10).
 
         Returns:
             Dict with intro, questions array, and closing for frontend rendering
@@ -1275,6 +1304,18 @@ COMPARISON MODE — the user is deciding between: {pair_str}
 - Do NOT ask about use case or budget; the user already knows what they're buying.
 """
 
+        # Ask-more rounds: forbid repeats AND rephrases of anything already on
+        # screen. Without this the generator happily re-asks round 1's question
+        # with new wording, and the card reads as a loop.
+        already_asked_block = ""
+        if already_asked:
+            asked_lines = "\n".join(f"- {q}" for q in already_asked)
+            already_asked_block = f"""
+ALREADY ASKED — the user has these questions on screen already:
+{asked_lines}
+Do NOT repeat or rephrase ANY of them; no new question may collect the same information under different wording. If a missing slot would duplicate one of these, or makes no sense for this product category, OMIT it entirely — fewer good questions beat padding.
+"""
+
         role_prompt = f"""You collect missing information from the user before downstream tools run.
 
 Context:
@@ -1282,7 +1323,7 @@ Context:
 - Intent: {intent}
 - Missing info: {slots_str}
 - Already provided: {filled_slots_str}
-{conversation_context}{disambiguation_hint}{expert_hint}
+{conversation_context}{disambiguation_hint}{expert_hint}{already_asked_block}
 Generate a JSON response with:
 1. "intro" - one short sentence acknowledging their request and asking for details (based on FULL conversation context, not just current message)
 2. "questions" - one question per missing slot (12-25 words each, no technical terms), each with "options" and "free_text_hint"
