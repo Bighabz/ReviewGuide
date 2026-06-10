@@ -45,7 +45,7 @@ export default function PriceComparison({ items, title = 'Price Comparison' }: P
                 <img
                   src={product.image_url}
                   alt={product.product_name}
-                  className="w-12 h-12 object-contain rounded-lg bg-white flex-shrink-0"
+                  className="w-12 h-12 object-contain rounded-lg bg-[var(--surface)] flex-shrink-0"
                   onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
                 />
               )}
