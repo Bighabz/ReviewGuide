@@ -60,7 +60,7 @@ RULES:
   effect tradeoff, the user's stated need) — never a generic offer"""
 
 
-def _strain_card(strain: Dict[str, Any], rank: int) -> Dict[str, Any]:
+def _strain_card(strain: Dict[str, Any], rank: int, image_url: str = "") -> Dict[str, Any]:
     features = []
     if strain.get("strain_type") and strain["strain_type"] != "Unknown":
         features.append(strain["strain_type"])
@@ -82,7 +82,7 @@ def _strain_card(strain: Dict[str, Any], rank: int) -> Dict[str, Any]:
         "type": "product_review",
         "data": {
             "product_name": strain["name"],
-            "image_url": "",
+            "image_url": image_url,
             "rating": "",
             "summary": ". ".join(summary_bits),
             "features": features,
@@ -209,7 +209,24 @@ async def strain_compose(state: Dict[str, Any]) -> Dict[str, Any]:
         if idx is not None and idx > 0:
             ordered.insert(0, ordered.pop(idx))
 
-    ui_blocks = [_strain_card(s, i) for i, s in enumerate(ordered[:5], 1)]
+    # AI-generated card images (Habib 2026-06-10): the top pick gets its own
+    # subject-specific image; every other card shares ONE default image per
+    # query — max 2 generations, and they're lazy (the URL generates + caches
+    # on first browser request, so chat latency is untouched). Empty URLs when
+    # the flag is off or no public base is configured → cards stay imageless.
+    pick_image = ""
+    default_image = ""
+    if getattr(settings, "ENABLE_GENERATED_IMAGES", False):
+        from app.services.image_gen import build_image_url
+
+        pick_image = build_image_url("strain-pick", ordered[0]["name"])
+        if len(ordered) > 1:
+            default_image = build_image_url("strain-default", user_message or "cannabis strains")
+
+    ui_blocks = [
+        _strain_card(s, i, image_url=(pick_image if i == 1 else default_image))
+        for i, s in enumerate(ordered[:5], 1)
+    ]
 
     logger.info(
         f"[strain_compose] mode={mode}, cards={len(ui_blocks)}, "

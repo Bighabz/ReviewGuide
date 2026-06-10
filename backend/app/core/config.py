@@ -232,6 +232,15 @@ class Settings(BaseSettings):
     OPENROUTER_API_KEY: str = Field(default="", description="OpenRouter API key (OpenAI-compatible endpoint)")
     OPENROUTER_BASE_URL: str = Field(default="https://openrouter.ai/api/v1", description="OpenRouter base URL")
 
+    # AI-generated card images (lazy /v1/images/generate endpoint, Redis-cached).
+    # Top pick gets a subject-specific image; other imageless cards in the same
+    # query share ONE default image — max 2 generations per query.
+    ENABLE_GENERATED_IMAGES: bool = Field(default=True, description="Generate card images via OpenRouter for results without one")
+    OPENROUTER_IMAGE_MODEL: str = Field(default="google/gemini-2.5-flash-image", description="OpenRouter model slug for image generation")
+    GEN_IMAGE_CACHE_TTL: int = Field(default=604800, description="Redis TTL for generated images (seconds; default 7 days)")
+    PUBLIC_API_URL: str = Field(default="", description="Public base URL of this backend (for absolute image URLs); falls back to RAILWAY_PUBLIC_DOMAIN")
+    RAILWAY_PUBLIC_DOMAIN: str = Field(default="", description="Auto-injected by Railway; used as PUBLIC_API_URL fallback")
+
     # Tier 2.2/2.3 grounding: route product facts through build_system_prompt's
     # tool_outputs slot and inject conversation history + a user-preference
     # profile into the blog compose call, instead of cramming everything into the
