@@ -5,14 +5,6 @@ import { usePathname, useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Home, Bookmark, Plus, LayoutGrid, User, Sun, Moon } from 'lucide-react'
 
-const ACCENT_COLORS = [
-  { id: 'indigo', label: 'Terracotta', color: '#B8543A' }, // default theme (no data-accent)
-  { id: 'teal', label: 'Teal', color: '#0D9488' },
-  { id: 'rose', label: 'Rose', color: '#E11D48' },
-  { id: 'amber', label: 'Amber', color: '#D97706' },
-  { id: 'violet', label: 'Violet', color: '#7C3AED' },
-] as const
-
 const TABS = [
   { id: 'discover', label: 'Discover', icon: Home, href: '/' },
   { id: 'saved', label: 'Saved', icon: Bookmark, href: '/saved' },
@@ -27,7 +19,6 @@ export default function MobileTabBar() {
   const [keyboardOpen, setKeyboardOpen] = useState(false)
   const [showProfilePopover, setShowProfilePopover] = useState(false)
   const [theme, setTheme] = useState<'light' | 'dark'>('light')
-  const [accent, setAccent] = useState<string>('indigo')
   const profileRef = useRef<HTMLDivElement>(null)
   const popoverRef = useRef<HTMLDivElement>(null)
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -41,12 +32,10 @@ export default function MobileTabBar() {
     }
   }, [])
 
-  // Read theme/accent from localStorage on mount
+  // Read theme from localStorage on mount
   useEffect(() => {
     const savedTheme = localStorage.getItem('theme') as 'light' | 'dark' | null
-    const savedAccent = localStorage.getItem('accent') || 'indigo'
     setTheme(savedTheme || 'light')
-    setAccent(savedAccent)
   }, [])
 
   // Keyboard detection via visualViewport API
@@ -99,17 +88,6 @@ export default function MobileTabBar() {
     setTheme(newTheme)
     document.documentElement.setAttribute('data-theme', newTheme)
     localStorage.setItem('theme', newTheme)
-  }
-
-  const changeAccent = (newAccent: string) => {
-    setAccent(newAccent)
-    if (newAccent === 'indigo') {
-      document.documentElement.removeAttribute('data-accent')
-    } else {
-      document.documentElement.setAttribute('data-accent', newAccent)
-    }
-    localStorage.setItem('accent', newAccent)
-    setShowProfilePopover(false)
   }
 
   // Active tab detection
@@ -232,7 +210,7 @@ export default function MobileTabBar() {
                       {/* Theme toggle */}
                       <button
                         onClick={toggleTheme}
-                        className="flex items-center gap-2 w-full px-2 py-1.5 rounded-lg hover:bg-[var(--surface-hover)] transition-colors mb-2"
+                        className="flex items-center gap-2 w-full px-2 py-1.5 rounded-lg hover:bg-[var(--surface-hover)] transition-colors"
                         style={{ color: 'var(--text)' }}
                       >
                         {theme === 'light' ? (
@@ -244,28 +222,6 @@ export default function MobileTabBar() {
                           {theme === 'light' ? 'Dark mode' : 'Light mode'}
                         </span>
                       </button>
-
-                      {/* Accent color picker */}
-                      <div
-                        className="text-[10px] font-semibold mb-2 uppercase tracking-widest"
-                        style={{ color: 'var(--text-muted)' }}
-                      >
-                        Accent
-                      </div>
-                      <div className="flex gap-2">
-                        {ACCENT_COLORS.map((c) => (
-                          <button
-                            key={c.id}
-                            onClick={() => changeAccent(c.id)}
-                            className={`w-6 h-6 rounded-full transition-transform hover:scale-110 ${
-                              accent === c.id ? 'ring-2 ring-offset-1 scale-110' : ''
-                            }`}
-                            style={{ backgroundColor: c.color }}
-                            title={c.label}
-                            aria-label={`Set ${c.label} accent`}
-                          />
-                        ))}
-                      </div>
                     </motion.div>
                   )}
                 </AnimatePresence>

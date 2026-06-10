@@ -474,7 +474,9 @@ class EbayAffiliateProvider(BaseAffiliateProvider):
                 price=price,
                 currency="USD",
                 affiliate_link=affiliate_link,
-                merchant=f"eBay ({seller})",
+                # User-facing label: just "eBay" — seller usernames ("lin-866576")
+                # leaked into card merchant labels and titles.
+                merchant="eBay",
                 image_url=f"https://placehold.co/400x400/e8e8e8/333333?text={query.replace(' ', '+')}",
                 rating=None,  # eBay Browse API doesn't return ratings
                 review_count=None,
@@ -583,7 +585,9 @@ class EbayAffiliateProvider(BaseAffiliateProvider):
                 price=price,
                 currency=currency,
                 affiliate_link=affiliate_link,
-                merchant=f"eBay ({seller})",
+                # User-facing label: just "eBay" — seller usernames ("lin-866576")
+                # leaked into card merchant labels and titles.
+                merchant="eBay",
                 image_url=image_url,
                 rating=None,  # eBay doesn't provide ratings in Browse API
                 review_count=None,

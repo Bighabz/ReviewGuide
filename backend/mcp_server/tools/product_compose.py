@@ -665,6 +665,31 @@ PRICE_OUTLIER_LOW_RATIO = 0.25
 PRICE_OUTLIER_HIGH_RATIO = 4.0
 
 
+def _is_trusted_retail(offer: dict) -> bool:
+    """Retail-side offers (Amazon / Google Shopping) reflect NEW market price —
+    they anchor the low-side outlier check so a lone marketplace junk listing
+    can't drag the median down to itself ($55 'WH-1000XM4' case, 2026-06-10)."""
+    src = (offer.get("source") or "").lower()
+    url = (offer.get("url") or "").lower()
+    return src in ("amazon", "serper_shopping") or "amazon" in url or "amzn.to" in url
+
+
+# Accessory listings matched to a product name ("Ear Pads for Sony WH-1000XM4")
+# are the classic source of absurd low prices. Require BOTH an accessory noun
+# and a fits/for/compatible connector so real product names survive.
+_ACCESSORY_NOUN_RE = re.compile(
+    r"\b(?:case|cover|sleeve|pouch|skin|protector|ear\s?pads?|cushions?|"
+    r"replacement|stand|mount|holder|strap|cable|charger|adapter|tips)\b",
+    re.IGNORECASE,
+)
+_ACCESSORY_FOR_RE = re.compile(r"\b(?:for|fits|compatible with)\b", re.IGNORECASE)
+
+
+def _looks_like_accessory(offer: dict) -> bool:
+    title = offer.get("title") or ""
+    return bool(_ACCESSORY_NOUN_RE.search(title)) and bool(_ACCESSORY_FOR_RE.search(title))
+
+
 def _drop_price_outliers(offers: list) -> tuple:
     """
     Marketplace price hygiene: drop offers whose price is wildly inconsistent
@@ -687,13 +712,35 @@ def _drop_price_outliers(offers: list) -> tuple:
     if median_price <= 0:
         return offers, []
 
+    # Low-side anchor: when trusted retail offers exist, their median is the
+    # NEW-price reference. A lone junk marketplace listing can't drag the
+    # overall median down to itself, and condition-labeled offers (Renewed /
+    # Used / Open box) are exempt — those low prices are real and honest.
+    trusted_prices = [p for o, p in priced if p is not None and p > 0 and _is_trusted_retail(o)]
+    reference_price = statistics.median(trusted_prices) if trusted_prices else median_price
+
     kept, dropped = [], []
     for offer, price in priced:
         if price is None:
             kept.append(offer)
             continue
         ratio = price / median_price
-        if ratio < PRICE_OUTLIER_LOW_RATIO or ratio > PRICE_OUTLIER_HIGH_RATIO:
+        is_outlier = ratio < PRICE_OUTLIER_LOW_RATIO or ratio > PRICE_OUTLIER_HIGH_RATIO
+        # Accessory listing matched to the product name ("Ear Pads for …") —
+        # drop when priced under the market reference, whatever the median says.
+        if not is_outlier and price < reference_price * 0.6 and _looks_like_accessory(offer):
+            is_outlier = True
+        # Suspiciously cheap vs. the trusted retail reference, with no honest
+        # condition label and not itself a retail offer → scraped noise.
+        if (
+            not is_outlier
+            and reference_price > 0
+            and price / reference_price < PRICE_OUTLIER_LOW_RATIO
+            and not _is_trusted_retail(offer)
+            and _offer_condition_label(offer) is None
+        ):
+            is_outlier = True
+        if is_outlier:
             dropped.append(offer)
         else:
             kept.append(offer)
@@ -2224,17 +2271,25 @@ TRANSITIONAL RULES (transitional_reasoning field):
                 img = o.get("image_url", "")
                 offer_url = o.get("url", "")
                 offer_merchant = o.get("merchant", "")
-                # Label-domain parity: correct merchant label if it doesn't match the URL domain
-                derived_merchant = _domain_to_merchant(offer_url)
-                if (
-                    derived_merchant
-                    and offer_merchant.lower() != derived_merchant.lower()
-                    and "amazon" in offer_merchant.lower()
-                    and "amazon" not in offer_url.lower()
-                    and "amzn.to" not in offer_url.lower()
-                ):
-                    # Mislabeled as Amazon but URL is a different domain — correct the label
-                    offer_merchant = derived_merchant
+                offer_source = (o.get("source") or "").lower()
+                # Canonical labels for the marketplaces we control: providers have
+                # leaked seller usernames into the label ("eBay (lin-866576)"),
+                # which then leaked into card titles. Users buy from eBay/Amazon,
+                # not from a seller code.
+                if offer_source == "ebay" or "ebay." in offer_url.lower():
+                    offer_merchant = "eBay"
+                elif "amazon" in offer_url.lower() or "amzn.to" in offer_url.lower():
+                    offer_merchant = "Amazon"
+                else:
+                    # Label-domain parity: correct merchant label if it doesn't match the URL domain
+                    derived_merchant = _domain_to_merchant(offer_url)
+                    if (
+                        derived_merchant
+                        and offer_merchant.lower() != derived_merchant.lower()
+                        and "amazon" in offer_merchant.lower()
+                    ):
+                        # Mislabeled as Amazon but URL is a different domain — correct the label
+                        offer_merchant = derived_merchant
                 _link_price = _extract_price(o)
                 affiliate_links.append({
                     "product_id": f"{o.get('source', 'unknown')}-{idx}",

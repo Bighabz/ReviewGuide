@@ -190,38 +190,9 @@
      ═══════════════════════════════════════════ */
 }
 
-/* Theme Color Variants */
-[data-accent="teal"] {
-  --primary: #0D9488;
-  --primary-hover: #0F766E;
-  --primary-light: rgba(13, 148, 136, 0.08);
-  --accent: #2DD4BF;
-  --accent-hover: #5EEAD4;
-}
-
-[data-accent="rose"] {
-  --primary: #E11D48;
-  --primary-hover: #BE123C;
-  --primary-light: rgba(225, 29, 72, 0.08);
-  --accent: #FB7185;
-  --accent-hover: #FDA4AF;
-}
-
-[data-accent="amber"] {
-  --primary: #D97706;
-  --primary-hover: #B45309;
-  --primary-light: rgba(217, 119, 6, 0.08);
-  --accent: #FBBF24;
-  --accent-hover: #FCD34D;
-}
-
-[data-accent="violet"] {
-  --primary: #7C3AED;
-  --primary-hover: #6D28D9;
-  --primary-light: rgba(124, 58, 237, 0.08);
-  --accent: #A78BFA;
-  --accent-hover: #C4B5FD;
-}
+/* Accent variants removed — single-accent terracotta brand. The old
+   [data-accent] picker let one click recolor the whole site off-brand;
+   UnifiedTopbar also scrubs any stale localStorage 'accent' value. */
 
 /* ═══════════════════════════════════════════
    BASE STYLES

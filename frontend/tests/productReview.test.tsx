@@ -44,15 +44,18 @@ function makeProduct(overrides: Record<string, unknown> = {}) {
   }
 }
 
-describe('ProductReview — Where to buy', () => {
-  it('renders one link per offer with merchant and price', () => {
+describe('ProductReview — offers (Verdict layout)', () => {
+  it('renders the best offer as the money row + CTA, the rest as ledger links', () => {
     render(<ProductReview product={makeProduct()} />)
 
-    expect(screen.getByText('Where to buy')).toBeInTheDocument()
-    expect(screen.getByText('eBay')).toBeInTheDocument()
+    // Best (lowest-priced) offer leads: $40 eBay price + "via eBay" + CTA link.
+    expect(screen.getByText('$40.00')).toBeInTheDocument()
+    expect(screen.getByText('via eBay')).toBeInTheDocument()
+    // Remaining offer renders as a slim merchant-ledger row.
     expect(screen.getByText('Amazon')).toBeInTheDocument()
-    expect(screen.getByText('USD 40.00')).toBeInTheDocument()
-    expect(screen.getByText('USD 99.00')).toBeInTheDocument()
+    expect(screen.getByText('$99.00')).toBeInTheDocument()
+    // One outbound link per offer: the CTA + one ledger row.
+    expect(screen.getAllByRole('link')).toHaveLength(2)
   })
 
   it('shows the "Under budget" badge only on offers flagged below_budget_floor', () => {
@@ -62,9 +65,10 @@ describe('ProductReview — Where to buy', () => {
     expect(badges).toHaveLength(1)
     expect(badges[0]).toHaveTextContent('Under budget')
 
-    // The badge belongs to the $40 eBay offer, not the $99 Amazon one
-    const ebayLink = screen.getByText('USD 40.00').closest('a')
-    expect(ebayLink).toContainElement(badges[0])
+    // The badge belongs to the $40 eBay offer (money row), not the $99 Amazon
+    // ledger row.
+    const amazonLink = screen.getByText('$99.00').closest('a')
+    expect(amazonLink).not.toContainElement(badges[0])
   })
 
   it('renders no badge when no offer is flagged', () => {
@@ -85,7 +89,7 @@ describe('ProductReview — Where to buy', () => {
     expect(screen.queryByTestId('under-budget-badge')).not.toBeInTheDocument()
   })
 
-  it('renders "Check price →" instead of a zero price', () => {
+  it('renders a "Check price" CTA instead of a zero price', () => {
     const product = makeProduct({
       affiliate_links: [
         {
@@ -100,7 +104,9 @@ describe('ProductReview — Where to buy', () => {
     })
     render(<ProductReview product={product} />)
 
-    expect(screen.getByText('Check price →')).toBeInTheDocument()
+    const cta = screen.getByRole('link')
+    expect(cta).toHaveTextContent(/Check price/)
+    expect(cta).not.toHaveTextContent('$0')
   })
 })
 
@@ -134,9 +140,11 @@ describe('ProductReview - condition badges ($407-class honesty)', () => {
     expect(badges).toHaveLength(1)
     expect(badges[0]).toHaveTextContent('Used')
 
-    // The badge belongs to the $407 eBay offer, not the $999 Amazon one
-    const ebayLink = screen.getByText('USD 407.00').closest('a')
-    expect(ebayLink).toContainElement(badges[0])
+    // The badge belongs to the $407 eBay offer (the lead money row), not the
+    // $999 Amazon ledger row.
+    expect(screen.getByText('$407.00')).toBeInTheDocument()
+    const amazonLink = screen.getByText('$999.00').closest('a')
+    expect(amazonLink).not.toContainElement(badges[0])
   })
 
   it('renders Renewed and Open box labels verbatim', () => {

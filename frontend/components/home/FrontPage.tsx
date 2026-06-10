@@ -53,7 +53,7 @@ export function MastheadHero() {
       </div>
 
       <p className="text-base sm:text-lg mt-4 max-w-xl mx-auto" style={{ color: 'var(--text-secondary)' }}>
-        We read the reviews — Wirecutter, RTINGS, Reddit, the lot — so you get a straight answer with receipts.
+        We read thousands of expert and owner reviews, so you get a straight answer with receipts.
       </p>
 
       {/* Real input, terracotta submit */}

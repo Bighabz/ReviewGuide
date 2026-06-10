@@ -329,7 +329,7 @@ describe('B.3 — Curious follow-up question rendering', () => {
     }
   })
 
-  it('followUpQuestion renders BEFORE the UI blocks (carousel) in DOM order', () => {
+  it('followUpQuestion renders AFTER the UI blocks (carousel) in DOM order', () => {
     const message = makeAssistantMessage({
       content: 'Top pick is the QC Ultra.',
       followUpQuestion: 'Open to a Sonos alternative?',
@@ -340,9 +340,10 @@ describe('B.3 — Curious follow-up question rendering', () => {
     const blocksEl = container.querySelector('[data-testid="ui-blocks-container"]')
     expect(fuEl).toBeTruthy()
     expect(blocksEl).toBeTruthy()
-    // Per spec §11: follow-up sits INSIDE the blog card, above the carousel.
+    // Founder request 2026-06-10: the reader sees the recommendation cards
+    // first, then the conversational nudge — follow-up sits BELOW the blocks.
     const position = fuEl.compareDocumentPosition(blocksEl!)
-    expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(position & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy()
   })
 })
 

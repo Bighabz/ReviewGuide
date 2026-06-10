@@ -74,6 +74,28 @@ def _is_skip_all(message: str) -> bool:
     return msg in _SKIP_ALL_PHRASES
 
 
+# ── Ask-more affordance: the inverse of skip-all ────────────────────────────
+# The clarifier card carries an "Ask me a few more questions" link for users
+# who WANT deeper clarification. Tapping it (or typing an equivalent) keeps the
+# unanswered questions and adds up to three more drawn from the plan's optional
+# slots. The frontend chip text is a contract with this allowlist.
+
+_ASK_MORE_PHRASES = {
+    "ask me a few more questions",
+    "ask me more questions",
+    "ask me more",
+    "ask more questions",
+    "more questions",
+    "ask me anything else",
+}
+
+
+def _is_ask_more(message: str) -> bool:
+    """True when the user opts into more clarifying questions."""
+    msg = _strip_suggestion_prefix(message).lower().strip().rstrip(".!?")
+    return msg in _ASK_MORE_PHRASES
+
+
 # ── Outcome 5: comparison-mode clarification ────────────────────────────────
 # "iPhone 15 vs Pixel 8" doesn't need use_case/budget questions — it needs ONE
 # question: which dimension should decide the verdict. The answer rides the
@@ -891,8 +913,10 @@ class ClarifierAgent(BaseAgent):
         # Get intent from halt state for context
         intent = halt_state.get("intent", "")
 
-        # Get required slots from followups
-        required_slot_names = [f["slot"] for f in followups]
+        # Get required slots from followups. Questions added by the ask-more
+        # affordance carry optional=True — they must never count as required,
+        # or a partial submit would re-ask them in a loop.
+        required_slot_names = [f["slot"] for f in followups if not f.get("optional")]
 
         # Also get optional slots and slot replacements from plan's tool contracts
         optional_slot_names = []
@@ -924,6 +948,67 @@ class ClarifierAgent(BaseAgent):
                         if "slot_replacements" in contract:
                             for slot_name, replacement_slot in contract["slot_replacements"].items():
                                 slot_replacements[slot_name] = replacement_slot
+
+        # Ask-more questions on the current card are extractable but optional
+        for f in followups:
+            if (
+                f.get("optional")
+                and f["slot"] not in current_slots
+                and f["slot"] not in optional_slot_names
+                and f["slot"] not in required_slot_names
+            ):
+                optional_slot_names.append(f["slot"])
+
+        # "Ask me a few more questions" — the user opts INTO deeper clarification.
+        # Keep the still-unanswered questions and add up to three new ones drawn
+        # from the plan's optional slots; the extras are marked optional so they
+        # never gate execution.
+        if _is_ask_more(user_message):
+            unanswered = [f for f in followups if not current_slots.get(f["slot"])]
+            asked_slots = {f["slot"] for f in followups}
+            extra_slots = [
+                s for s in optional_slot_names
+                if s not in current_slots and s not in asked_slots
+            ][:3]
+            if not extra_slots:
+                # Nothing deeper to ask — run the search rather than stall the turn.
+                logger.info("[Clarifier Agent] Ask-more requested but no optional slots remain; proceeding")
+                await HaltStateManager.delete_halt_state(session_id)
+                return {
+                    "slots": current_slots,
+                    "followups": [],
+                    "missing_required_slots": [],
+                    "proceed_to_execution": True
+                }
+            extra_data = await self._generate_followup_questions(
+                extra_slots,
+                current_slots,
+                user_message,
+                intent,
+                conversation_history=conversation_history,
+                user_preferences=(state.get("metadata") or {}).get("user_preferences")
+            )
+            extra_questions = [{**q, "optional": True} for q in extra_data.get("questions", [])]
+            combined = unanswered + extra_questions
+            followups_data = {
+                "intro": "Happy to dig deeper — these sharpen the pick:",
+                "questions": combined,
+                "closing": extra_data.get("closing", ""),
+            }
+            halt_state["slots"] = current_slots
+            halt_state["followups"] = combined
+            await HaltStateManager.update_halt_state(session_id, halt_state)
+            logger.info(
+                f"[Clarifier Agent] Ask-more: presenting {len(combined)} questions "
+                f"({len(extra_questions)} new optional: {extra_slots})"
+            )
+            return {
+                "slots": current_slots,
+                "followups": combined,
+                "missing_required_slots": [f["slot"] for f in unanswered if not f.get("optional")],
+                "next_question": followups_data,
+                "proceed_to_execution": False
+            }
 
         # Combine required and optional slots for extraction (dedupe defensively —
         # see the duplicate-JSON-key trap documented above)

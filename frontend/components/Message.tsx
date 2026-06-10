@@ -112,8 +112,10 @@ function ClarifierQuestionGroup({
   }
 
   return (
-    <div className="space-y-2" data-testid="clarifier-question">
-      <p className="text-[14px] leading-[20px] text-[var(--ink)]">{question}</p>
+    <div className="space-y-2.5" data-testid="clarifier-question">
+      <p className="font-serif text-[16px] leading-[22px]" style={{ color: 'var(--ink)' }}>
+        {question}
+      </p>
       <div className="flex flex-wrap gap-2">
         {options.map((option) => {
           const isSelected = selected.includes(option)
@@ -224,11 +226,26 @@ function ClarifierCard({
 
   return (
     <div className="w-full mt-5">
-      <div className="rounded-[14px] p-4">
+      <div
+        className="rounded-md p-5 sm:p-6"
+        style={{
+          background: 'var(--paper-hi)',
+          border: '1px solid var(--line)',
+          borderLeft: '3px solid var(--terra)',
+        }}
+      >
+        <p
+          className="uppercase mb-2"
+          style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.16em', color: 'var(--terra)' }}
+        >
+          Let’s narrow it down
+        </p>
         {intro && (
-          <p className="text-[15px] font-medium text-[var(--ink)] mb-3">{intro}</p>
+          <p className="font-serif text-[15px] leading-relaxed mb-4" style={{ color: 'var(--ink-2)' }}>
+            {intro}
+          </p>
         )}
-        <div className="space-y-3">
+        <div className="space-y-5">
           {resolved.map((q, idx) => {
             if (q.resolvedOptions) {
               return (
@@ -277,9 +294,14 @@ function ClarifierCard({
             You can answer the rest or submit now — I&apos;ll work with what you give me.
           </p>
         )}
-        {/* Outcome 8 — skip-all escape hatch: proceed with no constraints at all */}
+        {/* Footer affordances: skip everything, or opt into deeper questions.
+            Both phrases are backend contracts (_is_skip_all / _is_ask_more in
+            clarifier_agent.py) — don't reword without updating the detector. */}
         {!submitted && (
-          <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--line)' }}>
+          <div
+            className="mt-4 pt-3 flex flex-wrap items-center gap-x-6 gap-y-1"
+            style={{ borderTop: '1px solid var(--line)' }}
+          >
             <button
               onClick={() => {
                 setSubmitted(true)
@@ -290,6 +312,19 @@ function ClarifierCard({
             >
               <span className="underline underline-offset-4 decoration-[var(--line-2)]">
                 Just show me the best overall
+              </span>
+              <ArrowRight size={13} strokeWidth={1.5} />
+            </button>
+            <button
+              onClick={() => {
+                setSubmitted(true)
+                onSubmit('Ask me a few more questions')
+              }}
+              data-testid="clarifier-ask-more"
+              className="inline-flex min-h-[40px] items-center gap-1.5 text-[13px] font-medium text-[var(--ink-2)] hover:text-[var(--terra)] transition-colors"
+            >
+              <span className="underline underline-offset-4 decoration-[var(--line-2)]">
+                Ask me a few more questions
               </span>
               <ArrowRight size={13} strokeWidth={1.5} />
             </button>
@@ -531,27 +566,23 @@ export default function Message({ message, isLast = false }: MessageProps) {
                   )
                 })()}
 
-                {/* B.3 — Curious follow-up question. Lives between the body
-                    and the UI blocks (carousel) so it's still inside the
-                    AI bubble per spec §11. Visual treatment is the restrained
-                    baseline noted in plan B.3: italic + medium weight + muted
-                    color + small top margin + thin hairline above. Design
-                    review (§13 #3 open question) may iterate on this. */}
+                {/* 2. Render all UI blocks via registry-driven dispatcher */}
+                <UIBlocks
+                  blocks={normalizeBlocks(message.ui_blocks ?? [])}
+                  itinerary={message.itinerary}
+                />
+
+                {/* B.3 — Curious follow-up question. Renders AFTER the product
+                    cards (founder request 2026-06-10): the reader sees the
+                    recommendation first, then the conversational nudge. */}
                 {message.followUpQuestion && (
-                  <div className="mt-4">
-                    {/* Blueprint §13 #3: 24px terra hairline above, then the question on its own line */}
+                  <div className="mt-5">
                     <div className="rg-hairline-short mb-3" />
                     <p className="rg-display text-[19px] leading-[26px] text-[var(--ink)]">
                       {message.followUpQuestion}
                     </p>
                   </div>
                 )}
-
-                {/* 2. Render all UI blocks via registry-driven dispatcher */}
-                <UIBlocks
-                  blocks={normalizeBlocks(message.ui_blocks ?? [])}
-                  itinerary={message.itinerary}
-                />
 
                 {/* 3. Render clarifier follow-up questions as ONE form-style card:
                     all question groups accumulate selections, a single submit sends

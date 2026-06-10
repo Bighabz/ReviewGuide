@@ -1,19 +1,11 @@
 'use client'
 
-import { Sun, Moon, Menu, Search, Plus, User, History, Palette } from 'lucide-react'
-import { useState, useEffect, useRef } from 'react'
+import { Sun, Moon, Menu, Search, Plus, User, History } from 'lucide-react'
+import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { Wordmark } from './Brand'
-
-const ACCENT_COLORS = [
-  { id: 'indigo', label: 'Terracotta', color: '#B8543A' }, // default theme (no data-accent)
-  { id: 'teal', label: 'Teal', color: '#0D9488' },
-  { id: 'rose', label: 'Rose', color: '#E11D48' },
-  { id: 'amber', label: 'Amber', color: '#D97706' },
-  { id: 'violet', label: 'Violet', color: '#7C3AED' },
-] as const
 
 interface UnifiedTopbarProps {
   onMenuClick?: () => void
@@ -31,13 +23,10 @@ export default function UnifiedTopbar({
   searchPlaceholder = 'Search products, reviews, travel...'
 }: UnifiedTopbarProps) {
   const [theme, setTheme] = useState<'light' | 'dark'>('light')
-  const [accent, setAccent] = useState<string>('indigo')
-  const [showColorPicker, setShowColorPicker] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [scrolled, setScrolled] = useState(false)
   const [searchFocused, setSearchFocused] = useState(false)
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false)
-  const colorPickerRef = useRef<HTMLDivElement>(null)
   const pathname = usePathname()
   const router = useRouter()
 
@@ -54,24 +43,15 @@ export default function UnifiedTopbar({
 
   useEffect(() => {
     const savedTheme = localStorage.getItem('theme') as 'light' | 'dark' | null
-    const savedAccent = localStorage.getItem('accent') || 'indigo'
     const initialTheme = savedTheme || 'light'
     setTheme(initialTheme)
-    setAccent(savedAccent)
     document.documentElement.setAttribute('data-theme', initialTheme)
-    if (savedAccent !== 'indigo') {
-      document.documentElement.setAttribute('data-accent', savedAccent)
-    }
-  }, [])
-
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (colorPickerRef.current && !colorPickerRef.current.contains(e.target as Node)) {
-        setShowColorPicker(false)
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
+    // Single-accent brand: scrub any stale accent override from the old picker
+    // so returning visitors get terracotta, not amber/teal/etc.
+    document.documentElement.removeAttribute('data-accent')
+    try {
+      localStorage.removeItem('accent')
+    } catch {}
   }, [])
 
   useEffect(() => {
@@ -85,17 +65,6 @@ export default function UnifiedTopbar({
     setTheme(newTheme)
     document.documentElement.setAttribute('data-theme', newTheme)
     localStorage.setItem('theme', newTheme)
-  }
-
-  const changeAccent = (newAccent: string) => {
-    setAccent(newAccent)
-    if (newAccent === 'indigo') {
-      document.documentElement.removeAttribute('data-accent')
-    } else {
-      document.documentElement.setAttribute('data-accent', newAccent)
-    }
-    localStorage.setItem('accent', newAccent)
-    setShowColorPicker(false)
   }
 
   const handleSearchSubmit = (e: React.FormEvent) => {
@@ -258,47 +227,6 @@ export default function UnifiedTopbar({
                 {theme === 'light' ? <Moon size={18} strokeWidth={1.5} /> : <Sun size={18} strokeWidth={1.5} />}
               </motion.div>
             </button>
-
-            {/* Accent Color Picker */}
-            <div ref={colorPickerRef} className="relative">
-              <button
-                onClick={() => setShowColorPicker(!showColorPicker)}
-                className="p-2 rounded-lg text-[var(--text-secondary)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)]"
-                title="Accent color"
-                aria-label="Change accent color"
-              >
-                <Palette size={18} strokeWidth={1.5} />
-              </button>
-
-              <AnimatePresence>
-                {showColorPicker && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 6, scale: 0.96 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: 6, scale: 0.96 }}
-                    transition={{ duration: 0.15 }}
-                    className="absolute right-0 top-full mt-2 p-3 bg-[var(--surface-elevated)] border border-[var(--border)] rounded-xl shadow-lg z-50"
-                  >
-                    <div className="text-[10px] font-semibold text-[var(--text-muted)] mb-2 uppercase tracking-widest">
-                      Theme
-                    </div>
-                    <div className="flex gap-2">
-                      {ACCENT_COLORS.map((c) => (
-                        <button
-                          key={c.id}
-                          onClick={() => changeAccent(c.id)}
-                          className={`w-7 h-7 rounded-full transition-transform hover:scale-110 ${accent === c.id ? 'ring-2 ring-[var(--text)] ring-offset-2 ring-offset-[var(--surface-elevated)] scale-110' : ''
-                            }`}
-                          style={{ backgroundColor: c.color }}
-                          title={c.label}
-                          aria-label={`Set ${c.label} accent`}
-                        />
-                      ))}
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
 
             {/* User Avatar */}
             <button

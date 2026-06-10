@@ -12,6 +12,7 @@
  */
 
 import { useEffect, useState } from 'react'
+import { notFound } from 'next/navigation'
 import { Moon, Sun, ExternalLink } from 'lucide-react'
 
 // Current production components (rendered as-is for comparison)
@@ -129,7 +130,15 @@ const NAV = [
 
 /* ── Page ── */
 
+// Internal design archive — gated off production. Set
+// NEXT_PUBLIC_ENABLE_PLAYGROUND=1 (build-time env) to expose it on a deploy.
+const PLAYGROUND_ENABLED =
+  process.env.NODE_ENV !== 'production' || process.env.NEXT_PUBLIC_ENABLE_PLAYGROUND === '1'
+
 export default function PlaygroundPage() {
+  if (!PLAYGROUND_ENABLED) {
+    notFound()
+  }
   return (
     <div className="min-h-full" style={{ background: 'var(--background)', color: 'var(--text)' }}>
       {/* Sticky toolbar */}

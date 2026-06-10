@@ -26,7 +26,7 @@ import CarRentalCard from '@/components/CarRentalCard'
 // successor: synthesized comparison prose + aggregate ratings, no sources.
 import ReviewConsensus from '@/components/ReviewConsensus'
 import PriceComparison from '@/components/PriceComparison'
-import ProductReviewCarousel from '@/components/ProductReviewCarousel'
+import { RefineRow } from '@/components/ProductReview'
 import DOMPurify from 'dompurify'
 
 /** Each renderer receives the normalized block and returns JSX or null */
@@ -159,21 +159,35 @@ export function UIBlocks({ blocks, itinerary }: UIBlocksProps) {
             return null // already rendered in grid above
         }
 
-        // Group product_review blocks into swipeable carousel
+        // Group product_review blocks into the stacked Shortlist (feature card
+        // for rank #1, standard cards for the field) — replaced the swipe
+        // carousel 2026-06-10: no picks hidden behind chevrons. One RefineRow
+        // closes the stack (the refine contract operates on the whole list).
         if (block.type === 'product_review' && hasMultipleReviews) {
             if (!productReviewCarouselRendered) {
                 productReviewCarouselRendered = true
+                const sorted = [...productReviewBlocks].sort(
+                    (a, b) => ((a.data as any)?.rank ?? 99) - ((b.data as any)?.rank ?? 99)
+                )
+                const firstName = (sorted[0]?.data as any)?.product_name ?? 'product'
                 return (
-                    <div key={`product-carousel-${idx}`}>
-                        <ProductReviewCarousel>
-                            {productReviewBlocks.map((b, i) => (
+                    <section key={`product-shortlist-${idx}`} className="w-full">
+                        <header className="mb-4">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] mb-1.5" style={{ color: 'var(--terra)' }}>
+                                The Shortlist · {sorted.length} contender{sorted.length === 1 ? '' : 's'}
+                            </p>
+                            <div className="editorial-rule" />
+                        </header>
+                        <div className="space-y-4">
+                            {sorted.map((b, i) => (
                                 <ProductReview key={`review-${i}`} product={(b.data as any) ?? {}} showRefine={false} />
                             ))}
-                        </ProductReviewCarousel>
-                    </div>
+                        </div>
+                        <RefineRow productName={firstName} />
+                    </section>
                 )
             }
-            return null // already rendered in carousel above
+            return null // already rendered in the shortlist above
         }
 
         // Find renderer — check exact match first, then _products wildcard
