@@ -85,6 +85,28 @@ async def test_intent_node_routes_strain_to_planner():
 
 
 @pytest.mark.asyncio
+async def test_workflow_intent_node_routes_strain_to_planner():
+    """The LIVE graph uses workflow.py's intent_node, which carries its OWN
+    intent whitelist (duplicate of intent_agent_node's). Caught in prod
+    2026-06-10: 'strain' passed the agent-side whitelist but the workflow
+    node's copy rejected it — 'I'm not sure how to help with that.'"""
+    from app.services.langgraph import workflow as wf
+
+    with patch.object(wf.intent_agent_instance, "execute", new=AsyncMock(return_value={"intent": "strain"})), \
+         patch("app.services.halt_state_manager.HaltStateManager.get_halt_state", new=AsyncMock(return_value=None)):
+        update = await wf.intent_node({
+            "sanitized_text": "sour d vs blue dream",
+            "user_message": "sour d vs blue dream",
+            "session_id": "test-session",
+        })
+
+    assert update.get("next_agent") == "planner", (
+        f"workflow intent_node rejected strain intent: {update.get('assistant_text')}"
+    )
+    assert update.get("status") != "error"
+
+
+@pytest.mark.asyncio
 async def test_planner_routes_strain_intent_to_strain_plan():
     from app.agents.planner_agent import PlannerAgent
 

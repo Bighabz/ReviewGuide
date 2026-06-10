@@ -202,7 +202,7 @@ async def intent_node(state: GraphState) -> Dict[str, Any]:
             update["assistant_text"] = result["intro_text"]
             logger.info(f"  Added intro to assistant_text: {result['intro_text'][:100]}...")
 
-        if result["intent"] in ["product", "travel", "service", "comparison", "general", "intro", "unclear"]:
+        if result["intent"] in ["product", "travel", "service", "strain", "comparison", "general", "intro", "unclear"]:
             update["next_agent"] = "planner"
             logger.info(f"  {result['intent']} intent -> PLANNER AGENT")
         else:
