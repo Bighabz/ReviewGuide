@@ -111,8 +111,19 @@ class PlannerAgent(BaseAgent):
 
             intent = state.get("intent", "general")
 
+            # Cannabis strain queries take a dedicated plan regardless of
+            # classified intent — the intent LLM files them under "general"
+            # (QA 2026-06-10: "sour d vs blue dream" got plain strain
+            # education, no pick/cards), and the product pipeline can't source
+            # cannabis through the affiliate stack anyway. The SmartVape
+            # engine owns the verdict; cards link out to Leafly.
+            from app.services.smartvape import is_strain_query
+
             # Handle simple intents with manual plans (no LLM needed)
-            if intent == "unclear":
+            if intent not in ("travel", "intro", "unclear") and is_strain_query(state.get("user_message", "")):
+                plan = self._create_strain_plan()
+                self.colored_logger.info("🌿 FAST PATH: strain query → SmartVape strain plan")
+            elif intent == "unclear":
                 plan = self._create_manual_plan_for_unclear()
                 self.colored_logger.info("📋 Using manual plan for unclear intent")
             elif intent == "intro":
@@ -663,6 +674,23 @@ Example: {{"tools": ["product_search"]}} - this will auto-add normalize, affilia
             {"id": f"step_{step_num + 5}", "tools": ["product_compose"], "parallel": False},
         ])
         return {"steps": steps}
+
+    def _create_strain_plan(self) -> Dict[str, Any]:
+        """
+        Hardcoded plan for cannabis strain queries (SmartVape vertical).
+
+        Pipeline:
+          Step 1: strain_search  (in-process engine, no network)
+          Step 2: strain_compose (verdict prose + Leafly link-out cards)
+          Step 3: next_step_suggestion
+        """
+        return {
+            "steps": [
+                {"id": "step_1", "tools": ["strain_search"], "parallel": False},
+                {"id": "step_2", "tools": ["strain_compose"], "parallel": False},
+                {"id": "step_3", "tools": ["next_step_suggestion"], "parallel": False},
+            ]
+        }
 
     def _create_fast_path_travel_plan(self) -> Dict[str, Any]:
         """

@@ -49,6 +49,8 @@ from tools.intro_compose import intro_compose
 from tools.unclear_compose import unclear_compose
 from tools.next_step_suggestion import next_step_suggestion
 from tools.review_search import review_search
+from tools.strain_search import strain_search
+from tools.strain_compose import strain_compose
 
 
 @app.list_tools()
@@ -82,6 +84,17 @@ async def list_tools() -> List[Tool]:
         Tool(
             name="product_evidence",
             description="Analyze product reviews for pros/cons. Reads: products. Writes: review_aspects.",
+            inputSchema=state_schema
+        ),
+        # Strain tools (SmartVape cannabis vertical)
+        Tool(
+            name="strain_search",
+            description="Recommend, compare, or find similar cannabis strains from the in-house strain database. Reads: user_message, slots. Writes: strain_results, strain_mode.",
+            inputSchema=state_schema
+        ),
+        Tool(
+            name="strain_compose",
+            description="Generate the final strain recommendation response with verdict prose and Leafly link-out cards. Reads: strain_results, strain_mode. Writes: assistant_text, ui_blocks.",
             inputSchema=state_schema
         ),
         Tool(
@@ -201,6 +214,10 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             result = await product_search(state)
         elif name == "review_search":
             result = await review_search(state)
+        elif name == "strain_search":
+            result = await strain_search(state)
+        elif name == "strain_compose":
+            result = await strain_compose(state)
         elif name == "product_evidence":
             result = await product_evidence(state)
         elif name == "product_affiliate":
