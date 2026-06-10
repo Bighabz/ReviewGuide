@@ -176,6 +176,23 @@ def _parse_blog_output(raw: str, decoupled: bool) -> Optional[dict]:
     return data
 
 
+# ── Relevance gate (QA 2026-06-10) ──────────────────────────────────────────
+# The composer is the only stage that reads the full product list against the
+# user's ask, so it emits the verdict that gates the cards. Without this, the
+# prose could call the list "a mess" while the cards crowned an irrelevant item
+# Pick #1 ("Ford v Ferrari" Blu-ray on a vehicle query). Appended to the role
+# at the CALL SITE only — blog_role itself is byte-pinned by the eval
+# prod-sync test (same pattern as the two-speed length directive).
+_RELEVANCE_GATE_SECTION = """
+
+RELEVANCE GATE (irrelevant_products field):
+Add one more field to your structured output, alongside the others:
+  "irrelevant_products": [<EXACT product names, copied verbatim from the product list, that are NOT the kind of item the user is shopping for>]
+- A product is irrelevant when it is a different KIND of item than the user asked about (a movie, a fragrance, or a toy on a vehicle query; an accessory on a main-product query).
+- Products listed here are HIDDEN from the user — never name one as a pick in the body.
+- When every product matches the request, return []. NEVER list a product merely because it ranks last or you like it least."""
+
+
 # Tool contract for planner
 TOOL_CONTRACT = {
     "name": "product_compose",
@@ -1820,6 +1837,10 @@ TRANSITIONAL RULES (transitional_reasoning field):
                 logger.info("[product_compose] Decoupled compose ON (Tier 2: prose + <data> tail)")
             logger.info(f"[product_compose] Consolidated compose ON: blog_max_tokens={blog_max_tokens}")
 
+        # Relevance gate rides every mode; appended AFTER the consolidated /
+        # decoupled transforms so their .replace() calls can't mangle it.
+        blog_role_effective += _RELEVANCE_GATE_SECTION
+
         if getattr(settings, "USE_GROUNDED_COMPOSE", False):
             # Tier 2.2/2.3: product facts → RESEARCH slot, conversation → history
             # slot, accumulated prefs → profile slot; the user message is just the
@@ -1910,6 +1931,34 @@ TRANSITIONAL RULES (transitional_reasoning field):
             prose_top_pick = (_blog_parsed_early.get("top_pick") or "").strip()
         if prose_top_pick:
             logger.info(f"[product_compose] Prose top pick: {prose_top_pick}")
+
+        # ── Relevance gate (QA 2026-06-10) ──
+        # Apply the composer's irrelevant_products verdict BEFORE any ui_block
+        # is assembled. Both card sources are pruned: products_with_offers
+        # (review cards / consensus / carousel) AND blog_product_names (the
+        # blog-mention fallback cards would otherwise resurrect an excluded
+        # product with an Amazon search link).
+        _irrelevant_names: list = []
+        if isinstance(_blog_parsed_early, dict):
+            _raw_irrelevant = _blog_parsed_early.get("irrelevant_products")
+            if isinstance(_raw_irrelevant, list):
+                _irrelevant_names = [str(n).strip() for n in _raw_irrelevant if str(n).strip()]
+        if _irrelevant_names:
+            def _is_irrelevant(name: str) -> bool:
+                return any(
+                    _fuzzy_product_match(name, bad, threshold=0.5)
+                    for bad in _irrelevant_names
+                )
+
+            _kept = [p for p in products_with_offers if not _is_irrelevant(p.get("name", ""))]
+            if len(_kept) < len(products_with_offers):
+                _dropped = [p.get("name") for p in products_with_offers if p not in _kept]
+                logger.info(
+                    f"[product_compose] Relevance gate: composer excluded "
+                    f"{len(_dropped)} product(s) from cards: {_dropped}"
+                )
+                products_with_offers = _kept
+            blog_product_names = [n for n in blog_product_names if not _is_irrelevant(n)]
 
         # Tier 3a: fold the consolidated blog JSON's consensus + descriptions back
         # into result_map so the existing assembly (consensus block + description
