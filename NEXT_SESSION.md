@@ -39,10 +39,15 @@ PR #122 v0 redesign · compose Step 7 (decoupled streaming, `USE_DECOUPLED_COMPO
 ## 5) Post-launch queue (first things after launch day)
 
 1. QA_ROUND8 polish batch (stale retry stub, truncated chip, comparison one-side cards, `--ink-3` contrast).
-2. Compose Step 7 streaming → then flip `USE_DECOUPLED_COMPOSE`.
+2. Compose decouple+streaming are BUILT but OFF (PRs #112/#113) — enabling is a flag flip (`USE_DECOUPLED_COMPOSE`, streaming flag) + prod verification.
 3. Search-credit decision (Serper ~$50 top-up vs SerpApi $75/mo) before real traffic scales.
 4. Travel clarifier quirk + travel inventory decision.
 5. Re-evaluate PR #122 redesign.
+
+## Housekeeping notes (2026-07-03 hardening pass)
+
+- Local branch `fix-provider-coverage` holds one unmerged commit (`7db3801`, affiliate_products passthrough + ~200 lines of tests). The fix itself was **superseded** by the merged price-pipeline PRs (main already propagates `affiliate_products`), but the tests may be worth salvaging into a small PR. Its worktree was removed; the branch was kept.
+- Branches `design/blueprint-implementation` and `feat/dreambeans-principles` have unmerged tips (old prototypes whose shipped versions went in via other PRs) — safe to delete after a quick `git log main..<branch>` sanity check.
 
 ## Security note (2026-07-03 hardening pass)
 
