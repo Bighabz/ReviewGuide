@@ -3,6 +3,7 @@
 import { Plane, Clock, ExternalLink, Search, ArrowRight } from 'lucide-react'
 import { trackAffiliateClick } from '@/lib/trackAffiliate'
 import { formatDate } from '@/lib/formatDate'
+import { safeHref } from '@/lib/safeHref'
 
 // Traditional flight card with full details
 interface FlightCard {
@@ -53,7 +54,7 @@ function PLPLinkCard({ flight, fullHeight = false }: { flight: FlightPLPLink; fu
 
   return (
     <a
-      href={flight.search_url}
+      href={safeHref(flight.search_url)}
       target="_blank"
       rel="noopener noreferrer"
       className={`block bg-[var(--surface)] border border-[var(--border)] rounded-xl p-8 transition-all shadow-card hover:shadow-card-hover product-card-hover ${fullHeight ? 'h-full flex flex-col' : ''}`}
@@ -147,7 +148,7 @@ function TraditionalFlightCard({ flight }: { flight: FlightCard }) {
 
   return (
     <a
-      href={flight.deeplink}
+      href={safeHref(flight.deeplink)}
       target="_blank"
       rel="noopener noreferrer"
       className="block bg-[var(--surface)] border border-[var(--border)] rounded-xl p-5 transition-all shadow-card hover:shadow-card-hover product-card-hover"

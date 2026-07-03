@@ -7,6 +7,7 @@ import { lookupCuratedProduct } from '@/lib/curatedProductLookup'
 import type { ExtractedProduct } from '@/lib/extractResultsData'
 import { toggleSaved, isSaved, slugifyProduct, type SavedItem } from '@/lib/savedItems'
 import { stashProductDetail } from '@/lib/productDetail'
+import { safeHref } from '@/lib/safeHref'
 
 interface ResultsProductCardProps {
   product: ExtractedProduct
@@ -147,7 +148,7 @@ export default function ResultsProductCard({ product, index }: ResultsProductCar
             <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--ink)' }}>${product.price}</span>
           ) : <span />}
           <a
-            href={ctaHref}
+            href={safeHref(ctaHref)}
             target="_blank"
             rel="noopener noreferrer"
             onClick={(e) => e.stopPropagation()}

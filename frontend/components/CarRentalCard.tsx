@@ -3,6 +3,7 @@
 import { Car, ExternalLink, Search, Calendar } from 'lucide-react'
 import { trackAffiliateClick } from '@/lib/trackAffiliate'
 import { formatDate } from '@/lib/formatDate'
+import { safeHref } from '@/lib/safeHref'
 
 interface CarRental {
   type: 'plp_link'
@@ -39,7 +40,7 @@ export default function CarRentalCard({ cars }: CarRentalCardProps) {
         {cars.map((car, idx) => (
           <a
             key={idx}
-            href={car.search_url}
+            href={safeHref(car.search_url)}
             target="_blank"
             rel="noopener noreferrer"
             className="block bg-[var(--surface)] border border-[var(--border)] rounded-xl p-8 transition-all shadow-card hover:shadow-card-hover product-card-hover"

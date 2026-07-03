@@ -1,5 +1,7 @@
 'use client'
 
+import { safeHref } from '@/lib/safeHref'
+
 interface ProductCard {
   // Old format fields
   rank?: number
@@ -62,7 +64,7 @@ export default function ProductCards({ products }: ProductCardsProps) {
               <div className="flex gap-4">
                 {/* Product image */}
                 {displayImage && (
-                  <a href={displayLink} target="_blank" rel="noopener noreferrer" className="shrink-0">
+                  <a href={safeHref(displayLink)} target="_blank" rel="noopener noreferrer" className="shrink-0">
                     <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-lg overflow-hidden bg-[var(--surface)] border border-[var(--border)]">
                       <img
                         src={displayImage}
@@ -80,7 +82,7 @@ export default function ProductCards({ products }: ProductCardsProps) {
                 <div className="flex-1 min-w-0">
                   <h3 className="font-serif text-xl font-semibold text-[var(--text)] leading-snug tracking-tight">
                     <span className="text-[var(--primary)]">{displayRank}.</span>{' '}
-                    <a href={displayLink} target="_blank" rel="noopener noreferrer" className="hover:underline decoration-1 underline-offset-4">
+                    <a href={safeHref(displayLink)} target="_blank" rel="noopener noreferrer" className="hover:underline decoration-1 underline-offset-4">
                       {displayTitle}
                     </a>
                   </h3>
@@ -135,7 +137,7 @@ export default function ProductCards({ products }: ProductCardsProps) {
               {/* CTA */}
               <div className="flex justify-start pt-3 border-t border-[var(--border)]">
                 <a
-                  href={displayLink}
+                  href={safeHref(displayLink)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-2 text-sm font-medium text-[var(--primary)] hover:text-[var(--primary-hover)] transition-colors"

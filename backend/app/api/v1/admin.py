@@ -312,7 +312,10 @@ def fetch_langfuse_errors(hours: int = 24) -> List[Dict]:
 # ===== Metrics Endpoints =====
 
 @router.get("/metrics", response_model=MetricsResponse)
-async def get_metrics(db: Session = Depends(get_db)):
+async def get_metrics(
+    db: Session = Depends(get_db),
+    _admin: dict = Depends(get_current_admin_user),
+):
     """
     Get all dashboard metrics:
     - Request volume (1 hour, 24 hours, requests per minute)
@@ -417,7 +420,8 @@ async def get_metrics(db: Session = Depends(get_db)):
 @router.get("/metrics/chart")
 async def get_chart_data(
     timeframe: str = "1h",  # '1h' or '24h'
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _admin: dict = Depends(get_current_admin_user),
 ):
     """
     Get time-series data for charts
@@ -466,7 +470,8 @@ async def get_chart_data(
 @router.get("/metrics/errors/chart")
 async def get_error_chart_data(
     timeframe: str = "24h",  # '1h' or '24h'
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _admin: dict = Depends(get_current_admin_user),
 ):
     """
     Get time-series data for error rate chart

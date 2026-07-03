@@ -1,6 +1,7 @@
 'use client'
 
 import { ExternalLink, Star } from 'lucide-react'
+import { safeHref } from '@/lib/safeHref'
 
 interface AffiliateLink {
   product_id: string
@@ -43,7 +44,7 @@ export default function AffiliateLinks({ productName, affiliateLinks, rank }: Af
         {affiliateLinks.map((link, idx) => (
           <a
             key={idx}
-            href={link.affiliate_link}
+            href={safeHref(link.affiliate_link)}
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center justify-between p-3 rounded-lg border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-hover)] hover:border-[var(--primary)]/30 transition-all group/link"

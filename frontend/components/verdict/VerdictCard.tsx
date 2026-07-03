@@ -24,6 +24,7 @@ import { ArrowUpRight, Bookmark } from 'lucide-react'
 import { lookupCuratedProduct } from '@/lib/curatedProductLookup'
 import { trackAffiliateClick } from '@/lib/trackAffiliate'
 import { toggleSaved, isSaved, slugifyProduct, type SavedItem } from '@/lib/savedItems'
+import { safeHref } from '@/lib/safeHref'
 
 /** Accepts every product shape the backend emits (legacy, MCP, carousel items, inline rows). */
 export interface ProductInput {
@@ -275,7 +276,7 @@ function BuyButton({ product, full = false }: { product: NormalizedProduct; full
   const onClick = useAffiliateClick(product)
   return (
     <a
-      href={product.link}
+      href={safeHref(product.link)}
       target="_blank"
       rel="noopener noreferrer"
       onClick={onClick}
@@ -412,7 +413,7 @@ function FeatureCard({
             {showRank && <RankNumeral rank={product.rank} accent className="text-5xl sm:text-6xl -mt-1" />}
             <div className="min-w-0">
               <h3 className="font-serif text-2xl sm:text-[1.75rem] leading-tight tracking-tight" style={{ color: 'var(--text)' }}>
-                <a href={product.link} target="_blank" rel="noopener noreferrer" className="hover:underline decoration-1 underline-offset-4">
+                <a href={safeHref(product.link)} target="_blank" rel="noopener noreferrer" className="hover:underline decoration-1 underline-offset-4">
                   {product.title}
                 </a>
               </h3>
@@ -484,7 +485,7 @@ function StandardCard({ product }: { product: NormalizedProduct }) {
             <RankNumeral rank={product.rank} className="text-3xl sm:text-4xl -mt-0.5" />
             <div className="min-w-0 flex-1">
               <h3 className="font-serif text-lg sm:text-xl leading-snug tracking-tight" style={{ color: 'var(--text)' }}>
-                <a href={product.link} target="_blank" rel="noopener noreferrer" className="hover:underline decoration-1 underline-offset-4">
+                <a href={safeHref(product.link)} target="_blank" rel="noopener noreferrer" className="hover:underline decoration-1 underline-offset-4">
                   {product.title}
                 </a>
               </h3>
@@ -545,7 +546,7 @@ function CompactRow({ product }: { product: NormalizedProduct }) {
           </span>
         )}
         <a
-          href={product.link}
+          href={safeHref(product.link)}
           target="_blank"
           rel="noopener noreferrer"
           onClick={onClick}
@@ -585,7 +586,7 @@ function RailCard({ product }: { product: NormalizedProduct }) {
             {formatPrice(product.price, product.currency) ?? ''}
           </span>
           <a
-            href={product.link}
+            href={safeHref(product.link)}
             target="_blank"
             rel="noopener noreferrer"
             onClick={onClick}

@@ -6,6 +6,7 @@ import { ShoppingCart, Star, ExternalLink, Check, X } from 'lucide-react'
 import { HeaderBrand } from '@/components/Brand'
 import { getSavedItems, toggleSaved, isSaved, slugifyProduct, type SavedItem } from '@/lib/savedItems'
 import { readProductDetail, hasAnalysis, type ProductDetail, type DetailPoint } from '@/lib/productDetail'
+import { safeHref } from '@/lib/safeHref'
 
 interface Props {
   params: { id: string }
@@ -43,7 +44,7 @@ function Citations({ point }: { point: DetailPoint }) {
       {point.citations.slice(0, 3).map((c) => (
         <a
           key={c.id}
-          href={c.url}
+          href={safeHref(c.url)}
           target="_blank"
           rel="noopener noreferrer"
           title={c.title}
@@ -172,7 +173,7 @@ export default function ProductDetailPage({ params }: Props) {
           <span className="rg-serif" style={{ fontSize: 24, fontWeight: 600, color: 'var(--ink)' }}>${product.price}</span>
         ) : <span />}
         <a
-          href={buyHref}
+          href={safeHref(buyHref)}
           target="_blank"
           rel="noopener noreferrer"
           className="rounded-pill px-5 py-2.5 text-[14px] font-medium"
@@ -234,7 +235,7 @@ export default function ProductDetailPage({ params }: Props) {
             {buyLinks.map((l, i) => (
               <a
                 key={i}
-                href={l.url}
+                href={safeHref(l.url)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center justify-between rounded-[12px] px-4 py-3"

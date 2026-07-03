@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import { ShoppingCart } from 'lucide-react'
 import { HeaderBrand } from '@/components/Brand'
 import { useSavedItems, type SavedItem } from '@/lib/savedItems'
+import { safeHref } from '@/lib/safeHref'
 
 function HeaderCard({ item }: { item: SavedItem }) {
   return (
@@ -120,7 +121,7 @@ export default function ComparePage() {
       {/* Dual CTA */}
       <div className="flex items-stretch gap-3 mt-7">
         <a
-          href={a.url || '#'}
+          href={safeHref(a.url)}
           target="_blank"
           rel="noopener noreferrer"
           className="flex-1 flex items-center justify-center rounded-pill py-2.5 text-[14px] font-medium"
@@ -129,7 +130,7 @@ export default function ComparePage() {
           Buy {a.name.split(' ').slice(0, 2).join(' ')}
         </a>
         <a
-          href={b.url || '#'}
+          href={safeHref(b.url)}
           target="_blank"
           rel="noopener noreferrer"
           className="flex items-center justify-center rounded-pill py-2.5 px-5 text-[14px] font-medium"

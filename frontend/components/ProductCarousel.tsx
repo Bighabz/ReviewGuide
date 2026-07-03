@@ -6,6 +6,7 @@ import FunPlaceholder from './ui/FunPlaceholder'
 import { motion } from 'framer-motion'
 import { trackAffiliateClick } from '@/lib/trackAffiliate'
 import { toggleSaved, isSaved, slugifyProduct, type SavedItem } from '@/lib/savedItems'
+import { safeHref } from '@/lib/safeHref'
 
 // Bookmark toggle — fill terra when saved, icon pop + expanding terra ring on tap (no toast).
 // Lives inside the card's <a>, so it stops propagation to avoid following the affiliate link.
@@ -188,7 +189,7 @@ export default function ProductCarousel({ items, title }: ProductCarouselProps) 
               transition={{ duration: 0.3, delay: idx * 0.05 }}
             >
               <a
-                href={item.affiliate_link}
+                href={safeHref(item.affiliate_link)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="block group"

@@ -17,6 +17,7 @@ import { stashProductDetail } from '@/lib/productDetail'
 import { useChatStatus } from '@/lib/chatStatusContext'
 import { trackAffiliateClick } from '@/lib/trackAffiliate'
 import { Rating, ForAgainst } from '@/components/verdict/VerdictCard'
+import { safeHref } from '@/lib/safeHref'
 
 // Bookmark toggle — terra fill when saved, pop + ring on tap, no toast.
 function SaveToggle({ item }: { item: Omit<SavedItem, 'savedAt'> }) {
@@ -379,7 +380,7 @@ export default function ProductReview({ product, showRefine = false }: ProductRe
               </p>
               <div className="sm:ml-auto">
                 <a
-                  href={bestOffer.affiliate_link}
+                  href={safeHref(bestOffer.affiliate_link)}
                   target="_blank"
                   rel="noopener noreferrer"
                   onClick={buyClick(bestOffer)}
@@ -399,7 +400,7 @@ export default function ProductReview({ product, showRefine = false }: ProductRe
               {otherOffers.map((offer, idx) => (
                 <a
                   key={`${offer.merchant}-${idx}`}
-                  href={offer.affiliate_link}
+                  href={safeHref(offer.affiliate_link)}
                   target="_blank"
                   rel="noopener noreferrer"
                   onClick={buyClick(offer)}

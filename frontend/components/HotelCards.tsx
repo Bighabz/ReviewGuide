@@ -3,6 +3,7 @@
 import { MapPin, Star, ExternalLink, Search, Hotel as HotelIcon } from 'lucide-react'
 import { trackAffiliateClick } from '@/lib/trackAffiliate'
 import { formatDate } from '@/lib/formatDate'
+import { safeHref } from '@/lib/safeHref'
 
 // Traditional hotel card with full details
 interface HotelCard {
@@ -48,7 +49,7 @@ function PLPLinkCard({ hotel, fullHeight = false }: { hotel: HotelPLPLink; fullH
 
   return (
     <a
-      href={hotel.search_url}
+      href={safeHref(hotel.search_url)}
       target="_blank"
       rel="noopener noreferrer"
       className={`block border border-[var(--border)] rounded-xl p-8 transition-all bg-[var(--surface)] hover:shadow-card-hover product-card-hover ${fullHeight ? 'h-full flex flex-col' : ''}`}
@@ -108,7 +109,7 @@ function PLPLinkCard({ hotel, fullHeight = false }: { hotel: HotelPLPLink; fullH
 function TraditionalHotelCard({ hotel }: { hotel: HotelCard }) {
   return (
     <a
-      href={hotel.deeplink}
+      href={safeHref(hotel.deeplink)}
       target="_blank"
       rel="noopener noreferrer"
       className="block border border-[var(--border)] rounded-xl overflow-hidden bg-[var(--surface)] shadow-card hover:shadow-card-hover transition-all product-card-hover group"
