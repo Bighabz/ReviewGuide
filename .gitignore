@@ -93,3 +93,11 @@ frontend/design/ReviewGuide standalone.html
 # Codex review scratch (transient — the ask-codex.sh wrapper IS tracked)
 .codex-review-prompt.txt
 .codex-review-output.txt
+
+# Agent/tooling scratch (2026-07 hardening pass)
+.playwright-mcp/
+/mockups/
+/.agents/
+/.codex/
+# Root-level screenshots are session debris; real images live in frontend/public
+/*.png

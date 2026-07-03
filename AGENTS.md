@@ -1,7 +1,5 @@
 # ReviewGuide.ai - Development Notes
 
-> **Session entry point:** read `NEXT_SESSION.md` (repo root) first — it holds the current launch focus list, open PRs, and what NOT to work on. Deep-dive specs live in `docs/handoffs/`; superseded material is in `archive/`.
-
 ## Quick Start
 
 ```bash
@@ -58,10 +56,10 @@ Response to User
 
 ### MCP Server
 
-19 tools exposed via Model Context Protocol (`backend/mcp_server/main.py`):
+17 tools exposed via Model Context Protocol (`backend/mcp_server/main.py`):
 
-- **Product tools (8):** search, review_search, evidence, affiliate, ranking, normalize, compose, comparison
-- **Travel tools (6):** itinerary, search_hotels, search_flights, search_cars, destination_facts, compose
+- **Product tools (7):** search, evidence, affiliate, ranking, normalize, compose, comparison
+- **Travel tools (5):** itinerary, search_hotels, search_flights, destination_facts, compose
 - **Utility tools (5):** general_search, general_compose, intro_compose, unclear_compose, next_step_suggestion
 
 ### State Management
@@ -212,7 +210,7 @@ docker-compose exec redis redis-cli ping
 | `docker-compose.yml` | Docker services, **CORS settings** |
 | `backend/app/core/config.py` | Backend settings (300+ options) |
 | `backend/app/services/langgraph/workflow.py` | LangGraph state machine |
-| `backend/mcp_server/main.py` | MCP server with 19 tools |
+| `backend/mcp_server/main.py` | MCP server with 17 tools |
 | `backend/tests/conftest.py` | Test fixtures and mocks |
 | `frontend/lib/chatApi.ts` | API client with SSE streaming |
 | `frontend/components/ChatContainer.tsx` | Main chat UI |
@@ -239,34 +237,16 @@ docker-compose exec redis redis-cli ping
 - Always visible in UnifiedTopbar (not just on /chat route)
 - Handlers passed from parent components or use router fallback
 
-## Production Reality (verified 2026-07-03)
+## Custom Skills
 
-### Search & affiliate providers
-- **Product reviews/prices:** Serper.dev (Google Shopping) is the primary provider but is **out of credits**; the SerpApi.com failover carries prod. `SEARCH_PROVIDER` ("openai"/"perplexity") only controls general web search, not shopping data.
-- **Affiliate links:** Amazon tag (live) + eBay EPN (`EBAY_CAMPAIGN_ID` — placeholder until launch task done) + Skimlinks (code complete, dormant; activate via `SKIMLINKS_PUBLISHER_ID` + `SKIMLINKS_API_ENABLED=true`, zero code). Provider code: `backend/app/services/affiliate/providers/`, SerpApi client: `backend/app/services/serpapi/`.
+Use these slash commands for common workflows:
 
-### Compose pipeline (consolidated)
-- Prose composes on **Haiku 4.5 via OpenRouter** (gpt-4o-mini is only the JSON-mode fallback/CI path). 6 compose LLM calls were consolidated into 1: `USE_CONSOLIDATED_COMPOSE=true` + `USE_VOICE_PASS=true` + `USE_GROUNDED_COMPOSE=true` in prod; `USE_DECOUPLED_COMPOSE` is built+verified but OFF (awaits token streaming, "Step 7").
-
-### Travel domain (works, keyless by design)
-- Chat IS the travel surface (no dedicated page). Travel queries return **affiliate-tagged Expedia PLP deep links** (hotels/flights/cars, `partnerId` embedded) + LLM itinerary + destination facts — no provider API keys needed. Frontend renders them via `HotelCards`/`FlightCards`/`ItineraryView` (all handle `type: 'plp_link'`).
-- Real live inventory would require Amadeus/Booking/Skyscanner keys (`backend/app/services/travel/providers/`) — a post-launch decision. Known quirk: clarifier asks for departure city even on hotel-only queries.
-
-### Deploy pipeline
-- Backend deploys via **`.github/workflows/deploy.yml`** (`railway up` on every main push) — this is the real deployer; Railway's native GitHub auto-deploy was disabled 2026-07-03. The workflow pins `GIT_SHA` so `curl <railway-backend>/health` `.version` returns the deployed commit — always verify a merge landed with that, never trust "merged = deployed".
-- Frontend deploys via Vercel git integration on merge to main (no workflow file).
-
-### Eval harness
-- `backend/eval/` — clarifier eval + LLM judge + fixtures (OpenRouter-backed). CI gates skip silently until the `OPENAI_API_KEY` Actions secret is set.
-
-## Custom Skills & Agents (`.claude/`)
-
-| Name | Kind | Purpose |
-|------|------|---------|
-| `add-graphstate-field` | skill | Walk a new GraphState field through all 5 passthrough layers |
-| `verify-deploy` | skill | Verify the deployed SHA matches main after a merge |
-| `passthrough-checker` | agent | Audit that a composer field actually reaches the frontend SSE |
-| `design-fidelity-reviewer` | agent | Review changed UI against the design blueprint before shipping |
+| Command | Purpose |
+|---------|---------|
+| `/feature-dev` | Multi-phase feature development |
+| `/review` | Code review checklist |
+| `/test` | Run and analyze tests |
+| `/deploy` | Deployment checklist |
 
 ## Component Map (read before editing UI — there are duplicates!)
 
@@ -281,10 +261,10 @@ This codebase has **multiple components for the same concept**. Editing the wron
 - Saved/Compare cards are inline in `app/saved/page.tsx` / `app/compare/page.tsx`.
 - The shared bookmark store is `lib/savedItems.ts` (`SaveToggle` is duplicated inline in ProductCarousel + ProductReview + ResultsProductCard).
 
-### Logos (TWO components + one raw asset)
+### Logos (THREE)
 - **`components/Brand.tsx`** — `Wordmark`/`WordmarkStatic`/`LogoHero`/`HeaderBrand`/`TransitionalBubble` (code-based terracotta; `Wordmark` is in the topbar/header). `LogoHero` is now unused on Discover but still exported.
-- **`components/DiscoverHeroLogo.tsx`** — animates `/images/animated_logo.webp` on the Discover hero (`app/page.tsx`), with a static-PNG reduced-motion fallback.
-- `/login` renders `/images/animated_logo.webp` directly in `app/login/page.tsx` (there is no `AnimatedLogo.tsx` component — it was removed).
+- **`components/AnimatedLogo.tsx`** — plays the recolored `/images/animated_logo.mp4`; used on **`/login` only**.
+- **`components/DiscoverHeroLogo.tsx`** — autoplays the recolored video on the Discover hero (`app/page.tsx`), with a static-PNG reduced-motion fallback.
 
 ### Routes / screens
 - **Discover = `app/page.tsx`** (served at `/`). `/discover` and `/browse` just **redirect to `/`**.
