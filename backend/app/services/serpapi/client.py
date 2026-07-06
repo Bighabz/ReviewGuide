@@ -157,9 +157,14 @@ def _get_favicon_url(url: str) -> str:
         return ""
 
 
-def _cache_key(product_name: str, category: str) -> str:
-    """Generate Redis cache key for a product search."""
-    raw = f"{product_name.lower().strip()}:{category.lower().strip()}"
+def _cache_key(product_name: str, category: str, use_case: str = "") -> str:
+    """Generate Redis cache key for a product search.
+
+    use_case is part of the key (Fix A 2026-07-05): the review query now varies by
+    use case, so a "running" bundle must NOT be served for a plain lookup — that
+    would poison every other ask for the 24h TTL.
+    """
+    raw = f"{product_name.lower().strip()}:{category.lower().strip()}:{use_case.lower().strip()}"
     h = hashlib.sha256(raw.encode()).hexdigest()[:16]
     return f"serpapi:{h}"
 
@@ -185,6 +190,7 @@ class SerpAPIClient:
         self,
         product_name: str,
         category: str = "",
+        use_case: str = "",
     ) -> ReviewBundle:
         """
         Search for real product reviews from trusted sources.
@@ -193,9 +199,13 @@ class SerpAPIClient:
         1. Google Search: editorial review sites
         2. Google Search: Reddit discussions
         3. Google Shopping: ratings and review counts
+
+        use_case (Fix A) sharpens the editorial/reddit queries toward the intended
+        use (e.g. "for running") so ratings/snippets reflect suitability; the
+        shopping (model-identity price/rating) leg is left untouched.
         """
         # Check cache first
-        cached = await self._get_cached(product_name, category)
+        cached = await self._get_cached(product_name, category, use_case)
         if cached:
             logger.info(f"[serper] Cache hit for '{product_name}'")
             return cached
@@ -204,8 +214,8 @@ class SerpAPIClient:
 
         try:
             # Run parallel searches
-            editorial_task = self._search_editorial(product_name, category)
-            reddit_task = self._search_reddit(product_name, category)
+            editorial_task = self._search_editorial(product_name, category, use_case)
+            reddit_task = self._search_reddit(product_name, category, use_case)
             shopping_task = self._search_shopping(product_name)
 
             results = await asyncio.gather(
@@ -274,7 +284,7 @@ class SerpAPIClient:
             # genuinely-empty result (searches succeeded, just no reviews) is still
             # cached to avoid re-querying obscure products.
             if unique_sources or not had_provider_error:
-                await self._set_cached(product_name, category, bundle)
+                await self._set_cached(product_name, category, bundle, use_case)
             else:
                 logger.warning(
                     f"[serper] Not caching empty bundle for '{product_name}' — provider error "
@@ -291,21 +301,23 @@ class SerpAPIClient:
             logger.error(f"[serper] Search failed for '{product_name}': {e}", exc_info=True)
             return ReviewBundle(product_name=product_name)
 
-    async def _search_editorial(self, product_name: str, category: str) -> List[ReviewSource]:
+    async def _search_editorial(self, product_name: str, category: str, use_case: str = "") -> List[ReviewSource]:
         """Search editorial review sites via Google."""
         site_filter = " OR ".join(f"site:{site}" for site in EDITORIAL_SITES)
-        query = f"{product_name} review {site_filter}"
+        uc = f" for {use_case}" if use_case else ""
+        query = f"{product_name} review{uc} {site_filter}"
         if category:
-            query = f"{product_name} {category} review {site_filter}"
+            query = f"{product_name} {category} review{uc} {site_filter}"
 
         results = await self._serper_search(query, num=10)
         return self._parse_organic_results(results)
 
-    async def _search_reddit(self, product_name: str, category: str) -> List[ReviewSource]:
+    async def _search_reddit(self, product_name: str, category: str, use_case: str = "") -> List[ReviewSource]:
         """Search Reddit discussions via Google."""
-        query = f"{product_name} review site:reddit.com"
+        uc = f" for {use_case}" if use_case else ""
+        query = f"{product_name} review{uc} site:reddit.com"
         if category:
-            query = f"{product_name} {category} review site:reddit.com"
+            query = f"{product_name} {category} review{uc} site:reddit.com"
 
         results = await self._serper_search(query, num=10)
         return self._parse_organic_results(results)
@@ -631,11 +643,11 @@ class SerpAPIClient:
 
         return sources
 
-    async def _get_cached(self, product_name: str, category: str) -> Optional[ReviewBundle]:
+    async def _get_cached(self, product_name: str, category: str, use_case: str = "") -> Optional[ReviewBundle]:
         """Get cached review bundle from Redis."""
         try:
             from app.core.redis_client import redis_get_with_retry
-            key = _cache_key(product_name, category)
+            key = _cache_key(product_name, category, use_case)
             data = await redis_get_with_retry(key)
             if data:
                 return ReviewBundle.from_dict(json.loads(data))
@@ -643,11 +655,11 @@ class SerpAPIClient:
             logger.warning(f"[serper] Cache read failed: {e}")
         return None
 
-    async def _set_cached(self, product_name: str, category: str, bundle: ReviewBundle) -> None:
+    async def _set_cached(self, product_name: str, category: str, bundle: ReviewBundle, use_case: str = "") -> None:
         """Cache review bundle in Redis."""
         try:
             from app.core.redis_client import redis_set_with_retry
-            key = _cache_key(product_name, category)
+            key = _cache_key(product_name, category, use_case)
             data = json.dumps(bundle.to_dict())
             await redis_set_with_retry(key, data, ex=self.cache_ttl)
         except Exception as e:
