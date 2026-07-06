@@ -212,7 +212,7 @@ export default function ProductReview({ product, showRefine = true }: ProductRev
             <img
               src={image_url || getFallbackImage(product_name)}
               alt={product_name}
-              className="w-16 h-16 sm:w-24 sm:h-24 object-contain rounded-[10px]"
+              className="w-20 h-20 sm:w-24 sm:h-24 object-contain rounded-[10px]"
               style={{ background: 'var(--paper-alt)' }}
               loading="lazy"
             />

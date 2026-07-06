@@ -454,9 +454,15 @@ export default function Message({ message, isLast = false }: MessageProps) {
                 </div>
               )}
               {/* AI bubble wrapper */}
+              {/* Fix 5 (mobile-only): answers carrying cards (ui_blocks) go
+                  full-width BELOW sm so the card deck isn't boxed into 85% on a
+                  phone; from sm up every bubble keeps the 85% desktop width
+                  unchanged. Plain-text replies stay 85% at all widths. */}
               <div
-                className="rounded-tl-[14px] rounded-tr-[14px] rounded-br-[14px] rounded-bl-[4px] border border-[var(--line)] px-4 py-3.5"
-                style={{ background: 'var(--paper-hi)', maxWidth: '85%' }}
+                className={`rounded-tl-[14px] rounded-tr-[14px] rounded-br-[14px] rounded-bl-[4px] border border-[var(--line)] px-4 py-3.5 ${
+                  (message.ui_blocks?.length ?? 0) > 0 ? 'max-w-full sm:max-w-[85%]' : 'max-w-[85%]'
+                }`}
+                style={{ background: 'var(--paper-hi)' }}
               >
                 {/* ReviewGuide byline */}
                 <div className="text-[12px] font-semibold mb-2" style={{ color: 'var(--primary)' }}>
