@@ -1,98 +1,133 @@
 'use client'
 
-import { useState } from 'react'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { useRef, useState, useCallback, useEffect } from 'react'
+import { ArrowRight, ArrowLeft } from 'lucide-react'
 
 interface ProductReviewCarouselProps {
   children: React.ReactNode[]
 }
 
 /**
- * "Deck of cards" product rail (design from v0). The top pick sits on top; the
- * next picks fan out behind it with depth, and decorative card edges below
- * reinforce the stack. Wraps the real <ProductReview> children, so all product
- * data, save, and affiliate wiring is unchanged — only the carousel chrome is
- * new. Header pill + nav arrows + dots advance; non-active cards are `inert`
- * (not focusable/clickable) so the deck behind can't be mis-tapped.
+ * Highlight + peek product rail. The top pick (index 0) sits as a prominent
+ * focused card; the next card peeks at the right edge to signal "there's more,"
+ * and a terracotta arrow (plus tapping a peeking card, swipe, dots, and ←/→
+ * keys) advances. Terracotta tokens only.
+ *
+ * Restored from PR #120 (b40f151), which was reverted only because it was
+ * bundled with unrelated Discover-page changes; the carousel itself is intact.
+ * Replaces the deck-of-cards stack (c449b7a) per Habib's call.
  */
 export default function ProductReviewCarousel({ children }: ProductReviewCarouselProps) {
+  const scrollRef = useRef<HTMLDivElement>(null)
   const [current, setCurrent] = useState(0)
+  const [touchStart, setTouchStart] = useState<number | null>(null)
   const total = children.length
-  const go = (i: number) => setCurrent(Math.max(0, Math.min(i, total - 1)))
+
+  const scrollToIndex = useCallback((idx: number) => {
+    const container = scrollRef.current
+    if (!container) return
+    const clamped = Math.max(0, Math.min(idx, total - 1))
+    const card = container.children[clamped] as HTMLElement
+    if (!card) return
+    card.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' })
+    setCurrent(clamped)
+  }, [total])
+
+  const next = useCallback(() => scrollToIndex(current + 1), [current, scrollToIndex])
+  const prev = useCallback(() => scrollToIndex(current - 1), [current, scrollToIndex])
+
+  const handleTouchStart = (e: React.TouchEvent) => setTouchStart(e.touches[0].clientX)
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (touchStart === null) return
+    const diff = touchStart - e.changedTouches[0].clientX
+    if (Math.abs(diff) > 50) (diff > 0 ? next() : prev())
+    setTouchStart(null)
+  }
+
+  // Keep `current` in sync with manual scroll/swipe (snap settle). `scrollend`
+  // is already relied on elsewhere (MessageList.tsx); a scroll-timeout fallback
+  // covers browsers that don't fire it so the dots/badge never desync.
+  useEffect(() => {
+    const container = scrollRef.current
+    if (!container) return
+    const settle = () => {
+      const center = container.scrollLeft + container.clientWidth / 2
+      let best = 0, bestDist = Infinity
+      Array.from(container.children).forEach((c, i) => {
+        const el = c as HTMLElement
+        const mid = el.offsetLeft + el.clientWidth / 2
+        const d = Math.abs(mid - center)
+        if (d < bestDist) { bestDist = d; best = i }
+      })
+      setCurrent(best)
+    }
+    let t: ReturnType<typeof setTimeout>
+    const onScroll = () => { clearTimeout(t); t = setTimeout(settle, 120) }
+    container.addEventListener('scrollend', settle)
+    container.addEventListener('scroll', onScroll, { passive: true })
+    return () => {
+      clearTimeout(t)
+      container.removeEventListener('scrollend', settle)
+      container.removeEventListener('scroll', onScroll)
+    }
+  }, [total])
 
   if (total <= 1) return <div>{children}</div>
 
+  const atStart = current === 0
+  const atEnd = current === total - 1
+
   return (
     <div
+      className="relative"
       role="group"
       aria-roledescription="carousel"
       aria-label="Recommended products"
       tabIndex={0}
       onKeyDown={(e) => {
-        if (e.key === 'ArrowRight') { e.preventDefault(); go(current + 1) }
-        if (e.key === 'ArrowLeft') { e.preventDefault(); go(current - 1) }
+        if (e.key === 'ArrowRight') { e.preventDefault(); next() }
+        if (e.key === 'ArrowLeft') { e.preventDefault(); prev() }
       }}
-      className="font-sans"
     >
-      {/* Header */}
-      <div className="flex items-center justify-between mb-4 px-1">
-        {current === 0 ? (
-          <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-[var(--terra-soft)] text-[var(--terra)] text-xs font-semibold">
-            <span className="w-1.5 h-1.5 rounded-full bg-[var(--terra)] animate-pulse" />
-            Top pick for you
+      {/* Header — top-pick badge on the first card, position elsewhere */}
+      <div className="flex items-center justify-between mb-2.5 px-1">
+        {atStart ? (
+          <span className="inline-flex items-center gap-1.5 rg-eyebrow" style={{ color: 'var(--terra)' }}>
+            <span aria-hidden="true" style={{ fontSize: 12 }}>✦</span> Top pick for you
           </span>
         ) : (
-          <span className="text-sm font-medium text-[var(--ink-3)]">Pick {current + 1} of {total}</span>
+          <span className="text-xs font-medium text-[var(--text-muted)]">
+            Pick {current + 1} of {total}
+          </span>
         )}
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold text-[var(--ink-3)] tabular-nums mr-1">{current + 1}/{total}</span>
-          <button
-            onClick={() => go(current - 1)}
-            disabled={current === 0}
-            aria-label="Previous product"
-            className="w-8 h-8 rounded-full bg-[var(--paper-hi)] ring-1 ring-[var(--line)] flex items-center justify-center transition-all hover:ring-[var(--terra)]/50 hover:bg-[var(--terra-soft)]/30 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:ring-[var(--line)] disabled:hover:bg-[var(--paper-hi)]"
-          >
-            <ChevronLeft size={16} className="text-[var(--ink)]" />
-          </button>
-          <button
-            onClick={() => go(current + 1)}
-            disabled={current === total - 1}
-            aria-label="Next product"
-            className="w-8 h-8 rounded-full bg-[var(--paper-hi)] ring-1 ring-[var(--line)] flex items-center justify-center transition-all hover:ring-[var(--terra)]/50 hover:bg-[var(--terra-soft)]/30 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:ring-[var(--line)] disabled:hover:bg-[var(--paper-hi)]"
-          >
-            <ChevronRight size={16} className="text-[var(--ink)]" />
-          </button>
-        </div>
+        <span className="hidden sm:block text-xs font-medium text-[var(--text-muted)]">
+          {current + 1} / {total}
+        </span>
       </div>
 
-      {/* Stacked deck */}
+      {/* Rail — focused card centered, next card peeking at the edge */}
       <div className="relative">
-        <div className="relative">
-          {children.map((child, index) => {
-            const offset = index - current
-            const isActive = offset === 0
-            const isBehind = offset > 0
-            const isHidden = offset < 0 || offset > 2
+        <div
+          ref={scrollRef}
+          className="flex gap-4 overflow-x-auto snap-x snap-mandatory scrollbar-hide pb-1"
+          style={{ scrollBehavior: 'smooth', scrollPaddingInline: '0px' }}
+          onTouchStart={handleTouchStart}
+          onTouchEnd={handleTouchEnd}
+        >
+          {children.map((child, idx) => {
+            const isActive = idx === current
             return (
               <div
-                key={index}
-                ref={(el) => { if (el) (el as any).inert = !isActive }}
-                className={cn(
-                  'transition-all duration-500 ease-out',
-                  isActive ? 'relative z-30' : 'absolute inset-x-0 top-0',
-                  isBehind && offset === 1 && 'z-20',
-                  isBehind && offset === 2 && 'z-10',
-                  isHidden && 'opacity-0 pointer-events-none',
-                )}
+                key={idx}
+                onClick={() => { if (!isActive) scrollToIndex(idx) }}
+                className="snap-center flex-shrink-0 w-[86%] sm:w-[82%] lg:w-[74%] transition-all duration-300"
                 style={{
-                  transform: isBehind
-                    ? `translateY(${offset * 12}px) scale(${1 - offset * 0.04})`
-                    : offset < 0
-                      ? 'translateX(-110%)'
-                      : undefined,
-                  opacity: isBehind ? 1 - offset * 0.25 : offset < 0 ? 0 : 1,
+                  opacity: isActive ? 1 : 0.55,
+                  transform: isActive ? 'scale(1)' : 'scale(0.965)',
+                  cursor: isActive ? 'default' : 'pointer',
+                  filter: isActive ? 'none' : 'saturate(0.92)',
                 }}
+                aria-hidden={!isActive}
               >
                 {child}
               </div>
@@ -100,29 +135,44 @@ export default function ProductReviewCarousel({ children }: ProductReviewCarouse
           })}
         </div>
 
-        {/* Decorative stacked-edge shadows for depth */}
-        {current < total - 1 && (
-          <>
-            <div className="absolute -bottom-2 left-3 right-3 h-4 bg-[var(--paper-hi)] rounded-b-2xl ring-1 ring-[var(--line)] -z-10 opacity-60" style={{ transform: 'translateY(8px)' }} />
-            {current < total - 2 && (
-              <div className="absolute -bottom-2 left-6 right-6 h-4 bg-[var(--paper-hi)] rounded-b-2xl ring-1 ring-[var(--line)] -z-20 opacity-30" style={{ transform: 'translateY(16px)' }} />
-            )}
-          </>
+        {/* Advance arrow — terracotta FAB at the right peek edge */}
+        {!atEnd && (
+          <button
+            onClick={next}
+            aria-label="Next product"
+            className="absolute right-1 top-[120px] -translate-y-1/2 z-10 w-11 h-11 rounded-full flex items-center justify-center transition-all hover:scale-105 active:scale-95"
+            style={{ background: 'var(--terra)', color: '#fff', boxShadow: 'var(--shadow-float)' }}
+          >
+            <ArrowRight size={18} strokeWidth={2.2} />
+          </button>
+        )}
+        {/* Back arrow — quiet, only past the first card */}
+        {!atStart && (
+          <button
+            onClick={prev}
+            aria-label="Previous product"
+            className="absolute left-1 top-[120px] -translate-y-1/2 z-10 w-10 h-10 rounded-full flex items-center justify-center transition-all hover:scale-105 active:scale-95"
+            style={{ background: 'var(--paper-hi)', color: 'var(--ink)', border: '1px solid var(--line)', boxShadow: 'var(--shadow-soft, 0 2px 8px rgba(0,0,0,0.08))' }}
+          >
+            <ArrowLeft size={16} strokeWidth={2.2} />
+          </button>
         )}
       </div>
 
-      {/* Dots */}
-      <div className="flex justify-center items-center gap-1.5 mt-8">
+      {/* Dots — elongated terracotta active pill */}
+      <div className="flex justify-center items-center gap-1.5 mt-3">
         {children.map((_, i) => (
           <button
             key={i}
-            onClick={() => go(i)}
-            aria-label={`Go to pick ${i + 1}`}
+            onClick={() => scrollToIndex(i)}
+            className="transition-all duration-300 rounded-full"
+            style={{
+              width: i === current ? '22px' : '6px',
+              height: '6px',
+              background: i === current ? 'var(--terra)' : 'var(--line-2, #D4D1CC)',
+            }}
+            aria-label={`Go to product ${i + 1}`}
             aria-current={i === current}
-            className={cn(
-              'h-1.5 rounded-full transition-all duration-300',
-              i === current ? 'w-6 bg-[var(--terra)]' : 'w-1.5 bg-[var(--line-2)] hover:bg-[var(--terra)]/40',
-            )}
           />
         ))}
       </div>
