@@ -1301,6 +1301,53 @@ async def product_compose(state: Dict[str, Any]) -> Dict[str, Any]:
                 + ", ".join(p.get("name", "?") for p in products_with_offers[:5])
             )
 
+        # ── Fix 1d: use-case contradiction guardrail ──
+        # Card #1 must never be a product whose own review text negates the stated
+        # use (the Sony "aren't the best choice for sports use" case). After value
+        # sort, if the top product's fuzzy-matched review text explicitly says it's
+        # NOT for the use-case, swap in the first non-contradicting product from
+        # index 1–2. Runs before prose composition so the writer sees the corrected
+        # order; the #93 top-pick pinning still overrides card/consensus #1 after.
+        # Inert (never fires) when use_case is empty — protects every existing test.
+        _uc_raw = str((slots or {}).get("use_case") or "").strip()
+        _uc_tok = next(
+            (t for t in re.findall(r"[a-z0-9]+", _uc_raw.lower())
+             if len(t) >= 4 and t not in {
+                 "everyday", "general", "daily", "using", "with", "your"}),
+            "",
+        )
+        if _uc_tok and len(products_with_offers) > 1:
+            _neg_re = re.compile(
+                r"\b(?:not|isn'?t|aren'?t|won'?t|avoid|poor|bad)\W+"
+                r"(?:\w+\W+){0,4}for\W+(?:\w+\W+){0,2}"
+                + re.escape(_uc_tok[:4]) + r"\w*",
+                re.IGNORECASE,
+            )
+
+            def _review_text_for(_name: str) -> str:
+                parts = []
+                for _rname, _bundle in (review_data or {}).items():
+                    if not _fuzzy_product_match(_name, _rname):
+                        continue
+                    for _s in (_bundle or {}).get("sources", [])[:5]:
+                        parts.append(f"{_s.get('title', '')} {_s.get('snippet', '')}")
+                return " ".join(parts)
+
+            def _contradicts(_name: str) -> bool:
+                return bool(_neg_re.search(_review_text_for(_name)))
+
+            if _contradicts(products_with_offers[0].get("name", "")):
+                for _i in range(1, min(3, len(products_with_offers))):
+                    if not _contradicts(products_with_offers[_i].get("name", "")):
+                        _swapped = products_with_offers.pop(_i)
+                        products_with_offers.insert(0, _swapped)
+                        logger.info(
+                            "[product_compose] Fix 1d: swapped in '%s' as card #1 — "
+                            "prior top negated use-case '%s'",
+                            _swapped.get("name", "?"), _uc_raw,
+                        )
+                        break
+
         # Assign editorial labels based on review quality + price
         editorial_labels = _assign_editorial_labels(review_data, products_with_offers)
         if editorial_labels:
