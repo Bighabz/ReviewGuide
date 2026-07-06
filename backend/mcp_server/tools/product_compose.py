@@ -264,6 +264,39 @@ def _fuzzy_product_match(query_name: str, candidate_name: str, threshold: float 
     return len(intersection) / len(union) >= threshold
 
 
+# ── Fix 2 (Defect C): classified pros/cons + word-boundary truncation ───────
+# The old card loop pushed EVERY review snippet into `pros` and left `cons`
+# empty, then hard-sliced at [:150] mid-word ("...noise cancellati"). Cards now
+# prefer the classified pros/cons from product_evidence's `review_aspects`; when
+# a product has none, snippets are routed by sentiment (a negative cue → "cons")
+# so the frontend's "The catch" section finally receives content — and every
+# blurb is truncated on a word boundary.
+
+_NEGATIVE_CUES = re.compile(
+    r"\b(?:not|isn'?t|aren'?t|don'?t|doesn'?t|won'?t|can'?t|lacks?|lacking|"
+    r"missing|problem|issues?|complaints?|disappoint\w*|uncomfortable|poor|"
+    r"worse|worst|avoid|however|unfortunately|downside|drawback)\b",
+    re.IGNORECASE,
+)
+
+
+def _reads_negative(text: str) -> bool:
+    """True when a review snippet carries a negative cue — routes it to `cons`."""
+    return bool(_NEGATIVE_CUES.search(text or ""))
+
+
+def _truncate_at_word(text: str, limit: int = 150) -> str:
+    """Trim to <= limit chars on a word boundary, appending an ellipsis. Never
+    splits a word mid-character the way a bare `text[:150]` slice did."""
+    text = (text or "").strip()
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    if " " in cut:
+        cut = cut[:cut.rfind(" ")]
+    return cut.rstrip(" ,;:.–—-") + "…"
+
+
 # ── F4: model-code identity for near-duplicate dedup ────────────────────────
 # Search providers return the same physical product under slightly different
 # names ("Sony WH-1000XM5 Wireless Headphones" vs "Sony WH1000XM5/B Noise
@@ -2426,15 +2459,43 @@ TRANSITIONAL RULES (transitional_reasoning field):
             sources = review_bundle.get("sources", [])
             pros = []
             cons = []
-            for s in sources[:3]:
-                snippet = s.get("snippet", "")
-                site = s.get("site_name", "")
-                url = s.get("url", "")
-                if snippet:
-                    pros.append({
-                        "description": snippet[:150],
-                        "citations": [{"id": 1, "url": url, "title": site}] if url else []
-                    })
+
+            # Fix 2 (Defect C): prefer the classified pros/cons that
+            # product_evidence already extracted into review_aspects. This is
+            # the primary path — real "pro" vs "con" split, so the frontend's
+            # "The catch" section receives honest downsides instead of nothing.
+            review_aspects = state.get("review_aspects") or []
+            aspect = next(
+                (a for a in review_aspects
+                 if _fuzzy_product_match(pname, a.get("product", ""))),
+                None,
+            )
+            if aspect and (aspect.get("pros") or aspect.get("cons")):
+                for p in (aspect.get("pros") or [])[:3]:
+                    if str(p).strip():
+                        pros.append({"description": _truncate_at_word(str(p)), "citations": []})
+                for c in (aspect.get("cons") or [])[:2]:
+                    if str(c).strip():
+                        cons.append({"description": _truncate_at_word(str(c)), "citations": []})
+            else:
+                # Fallback (no aspects): route each snippet by sentiment so a
+                # negative review lands in `cons` rather than masquerading as a
+                # pro. Word-boundary truncation replaces the old bare [:150].
+                for s in sources[:3]:
+                    snippet = s.get("snippet", "")
+                    site = s.get("site_name", "")
+                    url = s.get("url", "")
+                    if not snippet:
+                        continue
+                    entry = {
+                        "description": _truncate_at_word(snippet),
+                        "citations": [{"id": 1, "url": url, "title": site}] if url else [],
+                    }
+                    if _reads_negative(snippet):
+                        if len(cons) < 2:
+                            cons.append(entry)
+                    elif len(pros) < 3:
+                        pros.append(entry)
 
             card_data = {
                 "product_name": pname,
