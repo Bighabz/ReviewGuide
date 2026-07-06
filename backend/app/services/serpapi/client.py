@@ -19,6 +19,7 @@ import asyncio
 import hashlib
 import json
 import math
+import re
 from dataclasses import dataclass, field, asdict
 from typing import List, Optional, Dict, Any
 from datetime import datetime
@@ -157,6 +158,20 @@ def _get_favicon_url(url: str) -> str:
         return ""
 
 
+# Fix 6 (Defect C bug 3): model-code identity for review-source filtering.
+# Search engines happily return a WH-1000XM4 (over-ear) review for a WF-1000XM4
+# (earbud) query — same family, wrong product. A source that carries its own
+# model code sharing NONE with the queried product is reviewing the wrong thing.
+_MODEL_CODE_RE = re.compile(r"\b[A-Z]{1,4}-?\d{3,}\w*\b")
+
+
+def _model_codes(text: str) -> set:
+    """Normalized model codes in a string ('WH-1000XM4' → 'WH1000XM4')."""
+    if not isinstance(text, str):
+        return set()
+    return {m.replace("-", "").upper() for m in _MODEL_CODE_RE.findall(text)}
+
+
 def _cache_key(product_name: str, category: str, use_case: str = "") -> str:
     """Generate Redis cache key for a product search.
 
@@ -246,6 +261,28 @@ class SerpAPIClient:
                 if source.url not in seen_urls:
                     seen_urls.add(source.url)
                     unique_sources.append(source)
+
+            # Fix 6 (Defect C bug 3): drop review sources about a DIFFERENT model.
+            # A source carrying its own model code(s) that shares NONE with the
+            # queried product (WF-1000XM4 vs WH-1000XM4 → ∅) is reviewing the wrong
+            # product — drop it. Code-less sources are ambiguous and always kept.
+            # Never filter to empty: if every coded source mismatches, keep them
+            # all rather than return a bundle with no evidence.
+            query_codes = _model_codes(product_name)
+            if query_codes:
+                kept = []
+                for s in unique_sources:
+                    src_codes = _model_codes(f"{s.title} {s.snippet}")
+                    if src_codes and not (src_codes & query_codes):
+                        logger.info(
+                            f"[serper] Fix 6: dropped off-model source "
+                            f"'{(s.title or '')[:60]}' (codes {src_codes} ∩ "
+                            f"query {query_codes} = ∅)"
+                        )
+                        continue
+                    kept.append(s)
+                if kept:
+                    unique_sources = kept
 
             # Sort by authority score (highest first)
             unique_sources.sort(key=lambda s: s.authority_score, reverse=True)
