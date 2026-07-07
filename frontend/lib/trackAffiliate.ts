@@ -1,3 +1,5 @@
+import { safeHref } from './safeHref'
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 interface TrackClickParams {
@@ -21,8 +23,10 @@ export function trackAffiliateClick(params: TrackClickParams) {
     // Silently ignore tracking failures — don't block navigation
   })
 
-  // Open affiliate link in new tab
-  window.open(params.url, '_blank', 'noopener,noreferrer')
+  // Open affiliate link in new tab — scheme-guarded so a poisoned provider URL
+  // can't execute `javascript:`/`data:` in our origin.
+  const target = safeHref(params.url, '')
+  if (target) window.open(target, '_blank', 'noopener,noreferrer')
 }
 
 // RFC §2.4 — General-purpose event tracker for non-affiliate interactions

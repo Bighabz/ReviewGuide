@@ -75,6 +75,25 @@ test.describe('smoke', () => {
 
     // Fallback string must NOT appear.
     await expect(page.getByText(/error while formatting the response/i)).toHaveCount(0)
+
+    // Revenue guardrails (2026-07 launch hardening):
+    // 1. Prices must be real — at least one card shows a non-zero dollar price.
+    const priceTexts = await page.locator('text=/\\$\\d/').allTextContents()
+    const realPrices = priceTexts.filter((t) => !/\$0(\.0+)?(\s|$)/.test(t))
+    expect(realPrices.length).toBeGreaterThan(0)
+
+    // 2. eBay links must not carry the placeholder campaign ID (earns $0).
+    const ebayHrefs = await page.locator('a[href*="ebay"]').evaluateAll((els) =>
+      els.map((e) => (e as HTMLAnchorElement).href),
+    )
+    for (const h of ebayHrefs) expect(h).not.toContain('campid=1234567890')
+
+    // 3. Link-injection guard: every link in the results must be http(s) —
+    //    provider/LLM data must never produce javascript:/data: hrefs.
+    const allHrefs = await page.locator('main a[href]').evaluateAll((els) =>
+      els.map((e) => (e as HTMLAnchorElement).href),
+    )
+    for (const h of allHrefs) expect(h).toMatch(/^https?:/)
   })
 
   test('travel query completes within 30s — no indefinite hang', async ({ page }) => {

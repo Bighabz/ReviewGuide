@@ -69,10 +69,13 @@ const BLOCK_RENDERERS: Record<string, BlockRenderer> = {
     // product). Emitted instead of comparison_html when review data exists.
     review_consensus: (b) => <ReviewConsensus data={(b.data as any) ?? { products: [] }} title={b.title} />,
     comparison_html: (b) => {
+        // Backend-generated comparison HTML is LLM-authored — sanitize hard.
+        // No <style> (CSS-based UI-redress/spoofing); force rel on any anchor.
         const html = DOMPurify.sanitize((b.data as any)?.html ?? '', {
-            ADD_TAGS: ['style'],
-            ADD_ATTR: ['target', 'rel'],
-        })
+            ADD_ATTR: ['target'],
+            FORBID_TAGS: ['style'],
+            FORBID_ATTR: ['onload', 'onerror'],
+        }).replace(/<a /g, '<a rel="noopener noreferrer" ')
         return (
             <div
                 className="comparison-html-container rounded-xl overflow-x-auto shadow-card border border-[var(--border)] max-w-full"

@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { Check, X, ExternalLink, Star } from 'lucide-react'
+import { safeHref } from '@/lib/safeHref'
 
 interface ComparisonProduct {
   title: string
@@ -272,7 +273,7 @@ export default function ComparisonTable({ data, title }: ComparisonTableProps) {
                   >
                     {product.url ? (
                       <a
-                        href={product.url}
+                        href={safeHref(product.url)}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="inline-flex items-center justify-center gap-1.5 w-full px-4 py-2.5 rounded-lg text-sm font-semibold transition-all shadow-card hover:shadow-md active:scale-95"

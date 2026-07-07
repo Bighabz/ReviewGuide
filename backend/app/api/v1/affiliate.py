@@ -37,13 +37,16 @@ class EventRequest(BaseModel):
     payload: dict = Field(default_factory=dict, description="Event payload")
 
 
-@router.post("/event")
+@router.post("/event", dependencies=[Depends(check_rate_limit)])
 async def track_event(
     request: EventRequest,
     db: AsyncSession = Depends(get_db),
 ):
     """Track a named UI event (e.g., suggestion_click). Logs for now; no DB write required."""
-    logger.info(f"[affiliate] event={request.event} payload={request.payload}")
+    # Strip CR/LF so a crafted event/payload can't forge extra log lines (log injection).
+    safe_event = request.event.replace("\r", " ").replace("\n", " ")[:100]
+    safe_payload = str(request.payload).replace("\r", " ").replace("\n", " ")[:500]
+    logger.info(f"[affiliate] event={safe_event} payload={safe_payload}")
     return {"status": "ok"}
 
 
@@ -91,7 +94,7 @@ class CJSearchResponse(BaseModel):
     count: int
 
 
-@router.post("/cj/search", response_model=CJSearchResponse)
+@router.post("/cj/search", response_model=CJSearchResponse, dependencies=[Depends(check_rate_limit)])
 async def cj_search(req: CJSearchRequest):
     """Search CJ product catalog"""
     from app.services.affiliate.manager import affiliate_manager

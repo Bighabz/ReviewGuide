@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { ShoppingCart } from 'lucide-react'
 import { lookupCuratedProduct } from '@/lib/curatedProductLookup'
+import { safeHref } from '@/lib/safeHref'
 
 interface ProductItem {
   name: string
@@ -108,7 +109,7 @@ export default function InlineProductCard({ products }: InlineProductCardProps) 
                 </span>
               )}
               <a
-                href={linkUrl}
+                href={safeHref(linkUrl)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-xs font-medium whitespace-nowrap"
