@@ -1,4 +1,5 @@
 import NavLayout from '@/components/NavLayout'
+import { Analytics } from '@vercel/analytics/react'
 import type { Metadata, Viewport } from 'next'
 import { DM_Sans, Instrument_Serif, Newsreader } from 'next/font/google'
 import './globals.css'
@@ -69,6 +70,7 @@ export default function RootLayout({
       </head>
       <body className={`${dmSans.variable} ${instrumentSerif.variable} ${newsreader.variable} font-sans`} suppressHydrationWarning>
         <NavLayout>{children}</NavLayout>
+        <Analytics />
       </body>
     </html>
   )
