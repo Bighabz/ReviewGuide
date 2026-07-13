@@ -1,0 +1,313 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - banner [ref=e4]:
+      - generic [ref=e6]:
+        - link "ReviewGuide.Ai home" [ref=e7] [cursor=pointer]:
+          - /url: /
+          - generic [ref=e8]:
+            - generic [ref=e9]: Review
+            - generic [ref=e10]: Guide
+            - generic [ref=e11]: .Ai
+        - navigation [ref=e12]:
+          - link "Discover" [ref=e13] [cursor=pointer]:
+            - /url: /
+          - link "Saved" [ref=e14] [cursor=pointer]:
+            - /url: /saved
+          - link "Ask" [ref=e15] [cursor=pointer]:
+            - /url: /chat?new=1
+          - link "Compare" [ref=e16] [cursor=pointer]:
+            - /url: /compare
+        - generic [ref=e18]:
+          - img [ref=e19]
+          - textbox "Search products, reviews, travel..." [ref=e22]
+        - generic [ref=e23]:
+          - button "Chat history" [ref=e24] [cursor=pointer]:
+            - img [ref=e25]
+          - button "New Chat" [ref=e29] [cursor=pointer]:
+            - img [ref=e30]
+            - generic [ref=e31]: New Chat
+          - button "Toggle theme" [ref=e33] [cursor=pointer]:
+            - img [ref=e35]
+          - button "Change accent color" [ref=e38] [cursor=pointer]:
+            - img [ref=e39]
+          - button "User menu" [ref=e45] [cursor=pointer]:
+            - img [ref=e46]
+    - main [ref=e50]:
+      - generic [ref=e55]:
+        - generic [ref=e57]:
+          - generic [ref=e184]:
+            - generic [ref=e185]:
+              - paragraph [ref=e187]: best running shoes
+              - img [ref=e190]
+            - generic [ref=e193]: 3 minutes ago
+          - generic [ref=e195]:
+            - img "AI" [ref=e198]
+            - generic [ref=e201]:
+              - generic [ref=e202]: ✦ ReviewGuide
+              - generic [ref=e205]: Sorting the contenders…
+              - generic [ref=e207]:
+                - paragraph [ref=e208]: Let's narrow down the best running shoes for you by getting some details.
+                - generic [ref=e209]:
+                  - generic [ref=e210]:
+                    - paragraph [ref=e211]: What kind of running do you do?
+                    - generic [ref=e212]:
+                      - button "Road running" [disabled] [pressed] [ref=e213]: Road running
+                      - button "Trail running" [disabled] [ref=e215]: Trail running
+                      - button "Treadmill / gym" [disabled] [ref=e217]: Treadmill / gym
+                      - button "Walking & casual" [disabled] [ref=e219]: Walking & casual
+                    - paragraph [ref=e221]: or describe your own use
+                  - generic [ref=e222]:
+                    - paragraph [ref=e223]: What feel do you want underfoot?
+                    - generic [ref=e224]:
+                      - button "Max cushion" [ref=e225] [cursor=pointer]: Max cushion
+                      - button "Stability support" [ref=e227] [cursor=pointer]: Stability support
+                      - button "Lightweight / racing" [ref=e229] [cursor=pointer]: Lightweight / racing
+                      - button "No strong preference" [ref=e231] [cursor=pointer]: No strong preference
+                    - paragraph [ref=e233]: or type your own answer
+                  - generic [ref=e234]:
+                    - paragraph [ref=e235]: What's your budget for running shoes?
+                    - generic [ref=e236]:
+                      - button "Under $80" [ref=e237] [cursor=pointer]: Under $80
+                      - button "$80–$130" [ref=e239] [cursor=pointer]: $80–$130
+                      - button "$130–$180" [ref=e241] [cursor=pointer]: $130–$180
+                      - button "$180+" [ref=e243] [cursor=pointer]: $180+
+                    - paragraph [ref=e245]: or type an amount
+                - paragraph [ref=e246]: With this info, I can help you find the right pair.
+              - generic "Jun 2, 2026, 02:24 AM" [ref=e247]: 3 minutes ago
+          - generic [ref=e252]: "You chose: Road running"
+          - generic [ref=e254]:
+            - img "AI" [ref=e257]
+            - generic [ref=e260]:
+              - generic [ref=e261]: ✦ ReviewGuide
+              - generic [ref=e264]: Pulling the receipts…
+              - generic [ref=e266]:
+                - paragraph [ref=e267]: Let's narrow down the best running shoes for your road running needs by getting a bit more detail.
+                - generic [ref=e268]:
+                  - generic [ref=e269]:
+                    - paragraph [ref=e270]: What feel do you want underfoot?
+                    - generic [ref=e271]:
+                      - button "Max cushion" [ref=e272] [cursor=pointer]: Max cushion
+                      - button "Stability support" [ref=e274] [cursor=pointer]: Stability support
+                      - button "Lightweight / racing" [ref=e276] [cursor=pointer]: Lightweight / racing
+                    - paragraph [ref=e278]: or describe your own preference
+                  - generic [ref=e279]:
+                    - paragraph [ref=e280]: What's your budget for running shoes?
+                    - generic [ref=e281]:
+                      - button "Under $80" [ref=e282] [cursor=pointer]: Under $80
+                      - button "$80–$130" [ref=e284] [cursor=pointer]: $80–$130
+                      - button "$130–$180" [ref=e286] [cursor=pointer]: $130–$180
+                      - button "$180+" [ref=e288] [cursor=pointer]: $180+
+                    - paragraph [ref=e290]: or type an amount
+                - paragraph [ref=e291]: Once I have this info, I can recommend some great options for you.
+              - generic "Jun 2, 2026, 02:25 AM" [ref=e292]: 3 minutes ago
+          - generic [ref=e295]:
+            - generic [ref=e296]:
+              - paragraph [ref=e298]: I want maximum cushioning for long distances
+              - img [ref=e301]
+            - generic [ref=e304]: 1 minute ago
+          - generic [ref=e306]:
+            - img "AI" [ref=e309]
+            - generic [ref=e312]:
+              - generic [ref=e313]: ✦ ReviewGuide
+              - generic [ref=e316]: Digging for answers…
+              - generic [ref=e318]:
+                - paragraph [ref=e319]: To help find the best cushioned running shoes for your long distances, I need to know your budget.
+                - generic [ref=e321]:
+                  - paragraph [ref=e322]: How much are you looking to spend on your running shoes?
+                  - generic [ref=e323]:
+                    - button "Under $80" [disabled] [ref=e324]: Under $80
+                    - button "$80–$130" [disabled] [pressed] [ref=e326]: $80–$130
+                    - button "$130–$180" [disabled] [ref=e328]: $130–$180
+                    - button "$180+" [disabled] [ref=e330]: $180+
+                  - paragraph [ref=e332]: or type an amount
+                - paragraph [ref=e333]: Once I have your budget, I can recommend the best options for you.
+              - generic "Jun 2, 2026, 02:26 AM" [ref=e334]: 1 minute ago
+          - generic [ref=e339]: "You chose: $80–$130"
+          - generic [ref=e341]:
+            - img "AI" [ref=e344]
+            - generic [ref=e346]:
+              - generic [ref=e584]: $80–$130 puts real cushioning on the table without the premium price — that shifts the pick toward value-first shoes with genuine daily durability.
+              - generic [ref=e347]:
+                - generic [ref=e348]: ✦ ReviewGuide
+                - generic [ref=e353]:
+                  - generic [ref=e354]: The pick
+                  - generic [ref=e355]:
+                    - paragraph [ref=e356]: At $80–$130, you're in the sweet spot for maximum cushioning without paying flagship prices. The New Balance Fresh Foam 1080v13 is the pick here — it stacks genuine cushioning with stability that doesn't feel mushy on long runs. The foam is soft underfoot but responsive enough that your feet don't sink into a cloud and lose control. At $40 on secondary markets right now, it's a steal.
+                    - paragraph [ref=e357]:
+                      - text: The Hoka One One Bondi 8 is the runner-up, and it wins if you want
+                      - emphasis [ref=e358]: more
+                      - text: "cushioning — it's literally thicker and bouncier than the New Balance. The tradeoff is real though: all that height makes it less stable on uneven terrain, and it can feel sluggish on faster efforts. For pure distance running on predictable surfaces, it's excellent. For varied terrain or mixed-pace days, the New Balance handles it better."
+                    - paragraph [ref=e585]: Brooks Glycerin 20 and Saucony Endorphin Shift 2 both land in your budget and both are solid, but they're not the pick. The Glycerin is softer but less responsive — you lose some energy return on long distances. The Endorphin Shift 2 is faster and snappier, which works against what you're after; it's built for tempo work, not all-day cushioning.
+                    - paragraph [ref=e586]: "The New Balance wins for most people chasing distance comfort: it's cushioned enough to feel luxurious over 10+ miles, stable enough to trust on varied surfaces, and priced low enough that you're not overthinking the purchase. Grab the Bondi 8 only if you've run in Hokas before and know you love that floaty feel."
+                - paragraph [ref=e589]: When you say long distances, are we talking marathon training, or more like weekly 8–10 mile runs?
+                - generic [ref=e359]:
+                  - region "How They Compare" [ref=e361]:
+                    - generic [ref=e363]: How They Compare
+                    - article [ref=e366]:
+                      - generic [ref=e367]:
+                        - generic [ref=e368]: "01"
+                        - heading "New Balance Fresh Foam 1080v13" [level=4] [ref=e369]
+                        - generic [ref=e370]:
+                          - img "Rated 4.4 out of 5" [ref=e371]:
+                            - generic [ref=e372]:
+                              - img [ref=e373]
+                              - img [ref=e375]
+                              - img [ref=e377]
+                              - img [ref=e379]
+                              - img [ref=e381]
+                          - generic [ref=e383]: "4.4"
+                        - generic [ref=e384]: 1K reviews
+                      - paragraph [ref=e385]: "The 1080v13 is a straightforward daily trainer that nails the fundamentals: soft, stable ride with a durable outsole and a fit that accommodates most feet without fussing. The lighter, lower-stack redesign compared to earlier versions actually works in its favor—it feels grounded rather than bouncy, which matters if you've found other New Balance cushioned shoes too pillowy. The tradeoff is that it's not built for speed work or racing; this is a shoe for the long run, recovery day, or someone who just wants to show up and train without thinking about their shoes. It's the pick for runners who value durability and consistency over trend, and who log enough miles to justify a workhorse that won't let them down."
+                  - generic [ref=e387]:
+                    - generic [ref=e388]:
+                      - generic [ref=e389]: 1 of 5 products
+                      - generic [ref=e390]:
+                        - button "Previous product" [disabled] [ref=e391]:
+                          - img [ref=e392]
+                        - button "Next product" [ref=e394] [cursor=pointer]:
+                          - img [ref=e395]
+                    - generic [ref=e397]:
+                      - generic [ref=e399]:
+                        - generic [ref=e401]:
+                          - img "Hoka One One Bondi 8" [ref=e403]
+                          - generic [ref=e405]:
+                            - generic [ref=e406]:
+                              - generic [ref=e407]: Top pick · for you
+                              - button "Hoka One One Bondi 8" [ref=e408] [cursor=pointer]:
+                                - heading "Hoka One One Bondi 8" [level=3] [ref=e409]
+                            - button "Save" [ref=e411] [cursor=pointer]:
+                              - img [ref=e412]
+                        - generic [ref=e414]:
+                          - heading "Where to buy" [level=4] [ref=e415]
+                          - link "eBay (sagitata) eBay (sagitata) - Hoka One One Bondi 8 USD 35.99" [ref=e417] [cursor=pointer]:
+                            - /url: https://www.ebay.com/itm/287368651040?mkcid=1&mkrid=711-53200-19255-0&campid=1234567890&toolid=10001&mkevt=1
+                            - generic [ref=e418]:
+                              - generic [ref=e420]: eBay (sagitata)
+                              - paragraph [ref=e421]: eBay (sagitata) - Hoka One One Bondi 8
+                              - paragraph [ref=e422]: USD 35.99
+                            - img [ref=e423]
+                      - generic [ref=e428]:
+                        - generic [ref=e430]:
+                          - img "Brooks Glycerin 20" [ref=e432]
+                          - generic [ref=e434]:
+                            - generic [ref=e435]:
+                              - generic [ref=e436]: "Pick #2"
+                              - button "Brooks Glycerin 20" [ref=e437] [cursor=pointer]:
+                                - heading "Brooks Glycerin 20" [level=3] [ref=e438]
+                            - button "Save" [ref=e440] [cursor=pointer]:
+                              - img [ref=e441]
+                        - generic [ref=e443]:
+                          - heading "Where to buy" [level=4] [ref=e444]
+                          - link "eBay (motamarketplace) eBay (motamarketplace) - Brooks Glycerin 20 USD 99.00" [ref=e446] [cursor=pointer]:
+                            - /url: https://www.ebay.com/itm/236845282354?mkcid=1&mkrid=711-53200-19255-0&campid=1234567890&toolid=10001&mkevt=1
+                            - generic [ref=e447]:
+                              - generic [ref=e449]: eBay (motamarketplace)
+                              - paragraph [ref=e450]: eBay (motamarketplace) - Brooks Glycerin 20
+                              - paragraph [ref=e451]: USD 99.00
+                            - img [ref=e452]
+                      - generic [ref=e457]:
+                        - generic [ref=e459]:
+                          - img "New Balance Fresh Foam 1080v13" [ref=e461]
+                          - generic [ref=e462]:
+                            - generic [ref=e463]:
+                              - generic [ref=e464]:
+                                - generic [ref=e465]: "Pick #3"
+                                - button "New Balance Fresh Foam 1080v13" [ref=e466] [cursor=pointer]:
+                                  - heading "New Balance Fresh Foam 1080v13" [level=3] [ref=e467]
+                              - generic [ref=e468]:
+                                - generic [ref=e469]:
+                                  - img [ref=e470]
+                                  - generic [ref=e472]: 4.4/5
+                                - button "Save" [ref=e473] [cursor=pointer]:
+                                  - img [ref=e474]
+                            - paragraph [ref=e476]: "The 1080v13 is a straightforward daily trainer that nails the fundamentals: soft, stable ride with a durable outsole and a fit that accommodates most feet without fussing. The lighter, lower-stack redesign compared to earlier versions actually works in its favor—it feels grounded rather than bouncy, which matters if you've found other New Balance cushioned shoes too pillowy. The tradeoff is that it's not built for speed work or racing; this is a shoe for the long run, recovery day, or someone who just wants to show up and train without thinking about their shoes. It's the pick for runners who value durability and consistency over trend, and who log enough miles to justify a workhorse that won't let them down."
+                        - generic [ref=e477]:
+                          - heading "What matters here" [level=4] [ref=e478]
+                          - list [ref=e479]:
+                            - listitem [ref=e480]: Best Overall
+                        - generic [ref=e482]:
+                          - heading "The good" [level=4] [ref=e483]
+                          - list [ref=e484]:
+                            - listitem [ref=e485]:
+                              - generic [ref=e486]: +
+                              - generic [ref=e487]: The New Balance comes in lighter and not quite as high-stacked, which helps it feel more stable and grounded overall, giving it a reliable, no-fuss ri
+                            - listitem [ref=e488]:
+                              - generic [ref=e489]: +
+                              - generic [ref=e490]: The New Balance 1080v13 is an excellent, everyday training shoe, with a soft, cushioned feel underfoot. It's our favorite version of the shoe to date.
+                            - listitem [ref=e491]:
+                              - generic [ref=e492]: +
+                              - generic [ref=e493]: It's a cushioned shoe built to handle your daily training runs, and the changes made to the latest version make it one of the best running shoes avail
+                        - generic [ref=e494]:
+                          - heading "Where to buy" [level=4] [ref=e495]
+                          - link "eBay (firstcow) eBay (firstcow) - New Balance Fresh Foam 1080v13 USD 40.00" [ref=e497] [cursor=pointer]:
+                            - /url: https://www.ebay.com/itm/227361486483?mkcid=1&mkrid=711-53200-19255-0&campid=1234567890&toolid=10001&mkevt=1
+                            - generic [ref=e498]:
+                              - generic [ref=e500]: eBay (firstcow)
+                              - paragraph [ref=e501]: eBay (firstcow) - New Balance Fresh Foam 1080v13
+                              - paragraph [ref=e502]: USD 40.00
+                            - img [ref=e503]
+                      - generic [ref=e508]:
+                        - generic [ref=e510]:
+                          - img "Asics Gel-Nimbus 25" [ref=e512]
+                          - generic [ref=e514]:
+                            - generic [ref=e515]:
+                              - generic [ref=e516]: "Pick #4"
+                              - button "Asics Gel-Nimbus 25" [ref=e517] [cursor=pointer]:
+                                - heading "Asics Gel-Nimbus 25" [level=3] [ref=e518]
+                            - button "Save" [ref=e520] [cursor=pointer]:
+                              - img [ref=e521]
+                        - generic [ref=e523]:
+                          - heading "Where to buy" [level=4] [ref=e524]
+                          - link "eBay (des3317) eBay (des3317) - Asics Gel-Nimbus 25 USD 72.23" [ref=e526] [cursor=pointer]:
+                            - /url: https://www.ebay.com/itm/127780296869?mkcid=1&mkrid=711-53200-19255-0&campid=1234567890&toolid=10001&mkevt=1
+                            - generic [ref=e527]:
+                              - generic [ref=e529]: eBay (des3317)
+                              - paragraph [ref=e530]: eBay (des3317) - Asics Gel-Nimbus 25
+                              - paragraph [ref=e531]: USD 72.23
+                            - img [ref=e532]
+                      - generic [ref=e537]:
+                        - generic [ref=e539]:
+                          - img "Saucony Endorphin Shift 2" [ref=e541]
+                          - generic [ref=e543]:
+                            - generic [ref=e544]:
+                              - generic [ref=e545]: "Pick #5"
+                              - button "Saucony Endorphin Shift 2" [ref=e546] [cursor=pointer]:
+                                - heading "Saucony Endorphin Shift 2" [level=3] [ref=e547]
+                            - button "Save" [ref=e549] [cursor=pointer]:
+                              - img [ref=e550]
+                        - generic [ref=e552]:
+                          - heading "Where to buy" [level=4] [ref=e553]
+                          - generic [ref=e554]:
+                            - link "Amazon Amazon - Saucony Endorphin Shift 2 USD 98.00" [ref=e555] [cursor=pointer]:
+                              - /url: https://www.amazon.com/s?k=Saucony+Endorphin+Shift+2&tag=revguide-20
+                              - generic [ref=e556]:
+                                - generic [ref=e558]: Amazon
+                                - paragraph [ref=e559]: Amazon - Saucony Endorphin Shift 2
+                                - paragraph [ref=e560]: USD 98.00
+                              - img [ref=e561]
+                            - link "eBay (richiedge) eBay (richiedge) - Saucony Endorphin Shift 2 USD 85.00" [ref=e565] [cursor=pointer]:
+                              - /url: https://www.ebay.com/itm/147343740022?mkcid=1&mkrid=711-53200-19255-0&campid=1234567890&toolid=10001&mkevt=1
+                              - generic [ref=e566]:
+                                - generic [ref=e568]: eBay (richiedge)
+                                - paragraph [ref=e569]: eBay (richiedge) - Saucony Endorphin Shift 2
+                                - paragraph [ref=e570]: USD 85.00
+                              - img [ref=e571]
+                    - generic [ref=e575]:
+                      - button "Go to product 1" [ref=e576] [cursor=pointer]
+                      - button "Go to product 2" [ref=e577] [cursor=pointer]
+                      - button "Go to product 3" [ref=e578] [cursor=pointer]
+                      - button "Go to product 4" [ref=e579] [cursor=pointer]
+                      - button "Go to product 5" [ref=e580] [cursor=pointer]
+                - generic "Jun 2, 2026, 02:27 AM" [ref=e352]: 1 minute ago
+              - generic [ref=e590]:
+                - button "Different use case" [ref=e591] [cursor=pointer]: Different use case
+                - button "Show cheaper options" [ref=e593] [cursor=pointer]: Show cheaper options
+                - button "More premium picks" [ref=e595] [cursor=pointer]: More premium picks
+                - button "Only Hoka" [ref=e597] [cursor=pointer]: Only Hoka
+        - generic [ref=e173]:
+          - generic [ref=e174]:
+            - textbox "Ask anything" [ref=e175]
+            - button "Send message" [disabled] [ref=e176]:
+              - img [ref=e177]
+          - generic [ref=e180]: ReviewGuide AI can make mistakes. Verify important information.
+  - alert [ref=e181]
