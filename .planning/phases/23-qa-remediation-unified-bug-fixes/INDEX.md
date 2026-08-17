@@ -1,7 +1,23 @@
 # QA Remediation — Plan Index
 
 **Source:** 10-conversation QA audit of Ask/Chat, 2026-07-31
-**Status:** Guardrails SHIPPED (see below). Remaining plans written, not executed.
+**Status (2026-08-17): EXECUTED.** All plans shipped except two deferred items.
+Session run-down (backend 952 / frontend 390 tests green at close):
+
+| Plan | State |
+|---|---|
+| Guardrails (P2/P4 core) | Shipped 2026-07-31, committed 2026-08-17 (`40d947a`) |
+| PLAN-8 T1/T2/T4 | Shipped; T4 live-verified (forced plan_exec timeout → "degraded") |
+| PLAN-8 T3 | **DEFERRED** — waits for the Habib-approved PROD flag flip (USE_CONSOLIDATED_COMPOSE + USE_REVIEW_GROUNDING; rollout decision 2026-08-17) |
+| PLAN-7 | Shipped incl. mobile history entry (Habib's scope add) + T4 (comparison rows from elected offers); T7 measured non-repro, pinned in e2e |
+| PLAN-3 | Shipped dark (flags OFF); grounded-path live smoke needs a SerpAPI-enabled env |
+| PLAN-6 | Shipped incl. T4b cheap bugs; live-verified (backend killed mid-stream → banner, composer free) |
+| PLAN-5 | Shipped incl. D4 execution (Outcome 7 removed); live replay green |
+| PLAN-1 | Shipped (T1–T6 tests); **live replay pending** — Docker daemon wedged at session end |
+| PLAN-9 | Shipped (all three layers) |
+| DOCTRINE D4 | DECIDED + EXECUTED: session-scoped preferences |
+| DOCTRINE D5 | DECIDED + EXECUTED: safety timeout blocks, clarifier timeout re-asks |
+| DOCTRINE D1/D2/D3 | Open (D2 proposed as the next refactor) |
 
 ---
 

@@ -1,5 +1,21 @@
 # Architecture Doctrine — decisions for Habib
 
+**Decisions recorded 2026-08-17 (Habib, in-session):**
+- **D4 — DECIDED + EXECUTED: scope to session.** Outcome 7 injection removed
+  (clarifier_agent), rg_pref_summary cleared on New Chat, starter unbiased in
+  fresh chats. Preference rows still get WRITTEN (harmless, unused).
+- **D5 — DECIDED + EXECUTED: flip both.** Safety timeout now errors with a
+  retry message (never routes content "unchecked"); clarifier timeout halts
+  and re-asks. `_derive_completeness` keeps its clarifier exclusion — a
+  timed-out clarifier now halts the turn, so there is no degraded-continue
+  to mark. Strain refusal-is-final (PLAN-9) implements axis three too.
+- **PLAN-3 flags — ship OFF, flip after smoke test.** PLAN-8 T3 waits for the
+  prod flip.
+- **PLAN-7 T1 — extended:** add a mobile history entry point (mobile currently
+  has none), beyond the validated desktop-only scope.
+- D1 (retrieval-first), D2 (typed envelope), D3 (clarification state) remain
+  open — D2 is proposed to ride immediately after PLAN-8.
+
 Five milestone-scale calls surfaced by the 2026-07-31 two-round debug sweep.
 None of these are bug fixes; each changes what the product IS or how it is built.
 The plans (1-8) fix what can be fixed inside the current architecture — these are
