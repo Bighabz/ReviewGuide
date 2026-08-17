@@ -178,6 +178,9 @@ export interface ChatStreamOptions {
    *  the legacy handlers run.  Useful for routing by event type without
    *  rewriting all existing call-sites. */
   onEvent?: (msg: SSEMessage) => void
+  /** PLAN-6 T3: supersede signal. When it aborts, this stream stops silently —
+   *  no onError, no retry — because a newer stream deliberately replaced it. */
+  signal?: AbortSignal
 }
 
 /**
@@ -196,6 +199,7 @@ export async function streamChat({
   onReconnecting,
   onReconnected,
   onEvent,
+  signal,
 }: ChatStreamOptions): Promise<void> {
   // RFC §4.1 — Generate a unique interaction ID for this request for end-to-end trace correlation
   const interactionId = crypto.randomUUID()
@@ -216,7 +220,13 @@ export async function streamChat({
   let attempt = 0
 
   while (attempt < MAX_RETRIES) {
+    // Supersede check at the top of EVERY attempt (binding validation catch):
+    // an abort during the backoff sleep must not continue into another POST.
+    if (signal?.aborted) return
+
     const controller = new AbortController()
+    const onOuterAbort = () => controller.abort()
+    signal?.addEventListener('abort', onOuterAbort)
     const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
 
     try {
@@ -504,6 +514,10 @@ export async function streamChat({
     } catch (error) {
       clearTimeout(timeoutId)
 
+      // Deliberate supersede: a newer stream replaced this one. Stop silently —
+      // surfacing it as an error (or retrying) would corrupt the new stream.
+      if (signal?.aborted) return
+
       const isNetworkError = error instanceof TypeError ||
         (error instanceof Error && error.name === 'AbortError') ||
         (error instanceof Error && error.message.includes('network'))
@@ -529,6 +543,8 @@ export async function streamChat({
       console.error('Stream error:', error)
       onError(error instanceof Error ? error.message : 'Connection failed. Please try again.')
       return
+    } finally {
+      signal?.removeEventListener('abort', onOuterAbort)
     }
   }
 }

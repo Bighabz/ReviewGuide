@@ -314,6 +314,13 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
     if (externalSessionId && externalSessionId !== lastExternalSessionIdRef.current && !initialQuery) {
       lastExternalSessionIdRef.current = externalSessionId
 
+      // PLAN-6 T3/T4b: switching sessions mid-stream aborts the live stream
+      // and resets the FSM — this effect has no isStreaming guard, so it was
+      // the reachable interleave vector (drawer selection during a stream).
+      activeStreamRef.current?.abort()
+      activeStreamRef.current = null
+      dispatchStream({ type: 'RESET' })
+
       // QA5 bug 4 — brand-new session (New Chat / ?new=1): nothing to fetch.
       // Reset synchronously with NO loading spinner, so the welcome screen (and
       // anything the user already focused/typed) never unmounts, and no
@@ -412,10 +419,21 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
   // the user experienced as one action (the phantom-commit bug from external QA).
   // A ref flips synchronously on the first call and blocks the second.
   const sendInFlightRef = useRef(false)
+  // PLAN-6 T3: the one live stream's controller. A new stream (or a session
+  // switch) aborts it so late events can never interleave with newer state.
+  const activeStreamRef = useRef<AbortController | null>(null)
+  // PLAN-6 T2: which message the visible error belongs to.
+  const [errorMessageId, setErrorMessageId] = useState<string>('')
 
   // Shared function to handle streaming with error management
   // overrideSessionId allows passing session ID directly when state hasn't updated yet
   const handleStream = async (messageToSend: string, isSuggestion: boolean = false, overrideSessionId?: string) => {
+    // A second stream supersedes the first: abort it so its late events cannot
+    // interleave with the new stream's state (PLAN-6 T3).
+    activeStreamRef.current?.abort()
+    const controller = new AbortController()
+    activeStreamRef.current = controller
+
     dispatchStream({ type: 'RESET' })
     dispatchStream({ type: 'SEND_MESSAGE' })
     setPendingSkeleton(null)
@@ -464,17 +482,29 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
     setMessages((prev) => [...prev, assistantMessage])
     currentMessageIdRef.current = assistantMessageId
 
+    // Capture the message this stream belongs to (PLAN-6 T2). Without it, a
+    // late error from an earlier stream lands on whatever message is pending
+    // now — the audit saw an error attributed to a new message while the
+    // original spinner kept running.
+    const streamMessageId = assistantMessageId
+    const streamQuery = messageToSend
+    // Staleness guard: once this stream is superseded (controller aborted),
+    // every one of its callbacks becomes a no-op.
+    const stale = () => controller.signal.aborted
+
     // Stream response from API
     try {
     await streamChat({
       message: messageToSend,
       sessionId: currentSessionId,
       userId: userId || undefined,
+      signal: controller.signal,
       // RFC §1.8: dispatch stream-reducer actions by named SSE event type.
       // The legacy onToken/onClear/onComplete/onError callbacks still run for
       // the actual UI updates — this layer only drives the FSM state machine.
       // RFC §2.2: also manages pendingSkeleton based on tool names in status text.
       onEvent: ({ eventType, data }) => {
+        if (stale()) return
         switch (eventType) {
           case 'status': {
             dispatchStream({ type: 'RECEIVE_STATUS', text: '' })
@@ -503,6 +533,7 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
         }
       },
       onToken: (token, isPlaceholder) => {
+        if (stale()) return
         if (isPlaceholder) {
           dispatchStream({ type: 'RECEIVE_STATUS', text: token })
         } else {
@@ -519,6 +550,7 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
         )
       },
       onClear: () => {
+        if (stale()) return
         setMessages((prev) =>
           prev.map((msg) =>
             msg.id === currentMessageIdRef.current
@@ -528,6 +560,7 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
         )
       },
       onComplete: (data) => {
+        if (stale()) return
         if (data.user_id && data.user_id !== userId) {
           setUserId(data.user_id)
         }
@@ -630,16 +663,20 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
         setPendingSkeleton(null)
       },
       onError: (errorMsg) => {
-        console.error('Stream error:', errorMsg)
+        if (stale()) return
+        console.error('Stream error:', errorMsg, 'for message', streamMessageId)
 
         // 'errored' state: explicit error event from backend → global error banner
         // 'interrupted' state: no terminal event after 120s → inline recovery UI
         // These are separate concerns; recovery UI is not shown for explicit backend errors
 
         // Remove the empty assistant message
-        setMessages((prev) => prev.filter(msg => msg.id !== assistantMessageId))
+        setMessages((prev) => prev.filter(msg => msg.id !== streamMessageId))
 
-        // Show error banner with actual error for diagnosis
+        // Show error banner with actual error for diagnosis, attributed to the
+        // message whose stream failed — not whatever is pending now (PLAN-6 T2).
+        setErrorMessageId(streamMessageId)
+        setPendingUserMessage(streamQuery)
         setShowErrorBanner(true)
         setErrorMessage(`${UI_TEXT.ERROR_MESSAGE}\n\nDetails: ${errorMsg}`)
         setError(errorMsg)
@@ -650,19 +687,25 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
         setPendingSkeleton(null)
       },
       onReconnecting: (attempt, maxRetries) => {
+        if (stale()) return
         setIsReconnecting(true)
         setReconnectAttempt(attempt)
         console.log(`Reconnecting... attempt ${attempt}/${maxRetries}`)
       },
       onReconnected: () => {
+        if (stale()) return
         setIsReconnecting(false)
         setReconnectAttempt(0)
       },
     })
     } finally {
+      // Clear the ref only if it is still THIS stream's controller — a newer
+      // stream may already own it (PLAN-6 T3).
+      if (activeStreamRef.current === controller) activeStreamRef.current = null
       // If stream closed without a terminal event (no done, no error), interrupt immediately.
       // With the STREAM_INTERRUPTED guard in place, this is a no-op when the stream completed normally.
-      dispatchStream({ type: 'STREAM_INTERRUPTED' })
+      // A superseded stream must not interrupt the FSM the new stream now owns.
+      if (!stale()) dispatchStream({ type: 'STREAM_INTERRUPTED' })
     }
   }
 
@@ -922,13 +965,16 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
             </div>
           )}
 
-          {/* Error Banner - shown after last message */}
+          {/* Error Banner - shown after last message, attributed to the
+              message whose stream failed (PLAN-6 T2) */}
           {showErrorBanner && (
-            <ErrorBanner
-              message={errorMessage}
-              onRetry={handleRetry}
-              disabled={isStreaming || !pendingUserMessage}
-            />
+            <div data-testid="chat-error-banner" data-message-id={errorMessageId}>
+              <ErrorBanner
+                message={errorMessage}
+                onRetry={handleRetry}
+                disabled={isStreaming || !pendingUserMessage}
+              />
+            </div>
           )}
 
           {/* RFC §2.3: Inline recovery UI — rendered below the interrupted message bubble.
