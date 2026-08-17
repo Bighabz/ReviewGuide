@@ -13,6 +13,21 @@ const INITIAL_BACKOFF_MS = 1000
 const MAX_BACKOFF_MS = 10000
 const REQUEST_TIMEOUT_MS = 120000 // 2 minutes
 
+// Bounds SILENCE on the body stream, not total duration. The 120s pre-header
+// abort dies the moment fetch() resolves; without this, a stalled connection
+// leaves reader.read() pending forever — the stream promise never settles and
+// its eventual callbacks fire into a newer stream's state (PLAN-6 T1).
+export const READ_IDLE_TIMEOUT_MS = 90_000
+
+/** Mid-stream stall. Non-retryable by construction: content was already
+ *  appended to the UI, and a retry re-POSTs from byte zero — double-append. */
+class StallError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'StallError'
+  }
+}
+
 /**
  * Sleep for a specified duration
  */
@@ -266,8 +281,27 @@ export async function streamChat({
       // the next attempt.
       let currentEventType = 'data'
 
+      // PLAN-6 T1: per-read idle race. Resets on every received chunk — a
+      // healthy long stream keeps talking; only silence trips it.
+      let idleTimer: ReturnType<typeof setTimeout> | undefined
+
       while (true) {
-        const { done, value } = await reader.read()
+        const { done, value } = await Promise.race([
+          reader.read(),
+          new Promise<never>((_, reject) => {
+            idleTimer = setTimeout(
+              () => reject(new StallError(`stream stalled: no data for ${READ_IDLE_TIMEOUT_MS / 1000}s`)),
+              READ_IDLE_TIMEOUT_MS,
+            )
+          }),
+        ]).finally(() => clearTimeout(idleTimer)).catch((err) => {
+          if (err instanceof StallError) {
+            // Defensive: cancel() returns a Promise on real readers; never let
+            // a cancel failure mask the stall itself.
+            try { (reader.cancel() as any)?.catch?.(() => {}) } catch { /* noop */ }
+          }
+          throw err
+        })
 
         if (done) {
           break
@@ -474,8 +508,13 @@ export async function streamChat({
         (error instanceof Error && error.name === 'AbortError') ||
         (error instanceof Error && error.message.includes('network'))
 
+      // Mid-stream stalls are explicitly non-retryable (PLAN-6 T1): content
+      // was already appended, a re-POST would double it. Checked by name so a
+      // message rewording can never silently make stalls retryable.
+      const isStall = error instanceof Error && error.name === 'StallError'
+
       // Only retry on network errors or timeouts
-      if (isNetworkError && attempt < MAX_RETRIES - 1) {
+      if (!isStall && isNetworkError && attempt < MAX_RETRIES - 1) {
         attempt++
         const delay = getBackoffDelay(attempt)
         console.warn(`SSE connection failed, retrying in ${Math.round(delay)}ms (attempt ${attempt}/${MAX_RETRIES})`)
