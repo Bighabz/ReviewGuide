@@ -1101,12 +1101,25 @@ async def product_compose(state: Dict[str, Any]) -> Dict[str, Any]:
         # Check if we have any data to display
         if not normalized_products and not affiliate_products and not review_data:
             if general_product_info and general_product_info.strip():
-                return {
-                    "assistant_text": general_product_info,
-                    "ui_blocks": [],
-                    "citations": [],
-                    "success": True
-                }
+                # PLAN-3 T3: this early return used to ship ANY factoid prose
+                # with ui_blocks: [] — the audit's laptop answer recommended
+                # named products with prices and nothing actionable. All three
+                # sources are empty here, so prices in the prose are parametric
+                # invention, not listings. Recommendation-shaped prose (2+
+                # price mentions) becomes the honest no-listings answer;
+                # genuine factoids still pass through.
+                _price_mentions = re.findall(r"[$€£]\s?\d", general_product_info)
+                if len(_price_mentions) < 2:
+                    return {
+                        "assistant_text": general_product_info,
+                        "ui_blocks": [],
+                        "citations": [],
+                        "success": True
+                    }
+                logger.info(
+                    f"[product_compose] Suppressed recommendation-shaped factoid prose "
+                    f"({len(_price_mentions)} price mentions, zero sourced listings)"
+                )
             assistant_text = (
                 "I wasn't able to find current listings for that product. "
                 "Try searching with a broader term — for example, the product category "

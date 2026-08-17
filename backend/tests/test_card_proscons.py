@@ -80,3 +80,70 @@ def test_items_are_never_raw_truncations():
     pros, _ = _card_pros_cons("P", long_entry, {"P": {"avg_rating": 4, "total_reviews": 10}})
     # Over-long items are dropped, not truncated mid-word.
     assert pros == []
+
+
+# ---------------------------------------------------------------------------
+# Task 3 — a product query never ends as prose with no card.
+#
+# Branch under test (early return, pre-LLM): fires ONLY when
+# normalized_products AND affiliate_products AND review_data are ALL empty
+# (final-validation correction — a fixture with products present can never
+# exercise it). When general_product_info is present it used to ship that
+# prose verbatim with ui_blocks: [] — the audit's laptop answer: named
+# products with prices, nothing actionable.
+# ---------------------------------------------------------------------------
+
+from mcp_server.tools.product_compose import product_compose
+
+
+def _empty_sources_state(info: str) -> dict:
+    return {
+        "user_message": "best gaming laptop under $1500",
+        "intent": "product",
+        "slots": {"category": "laptops"},
+        "normalized_products": [],
+        "affiliate_products": {},
+        "review_data": {},
+        "comparison_html": None,
+        "comparison_data": None,
+        "general_product_info": info,
+        "conversation_history": [],
+        "last_search_context": {},
+        "search_history": [],
+    }
+
+
+@pytest.mark.asyncio
+async def test_recommendation_shaped_prose_with_no_listings_is_suppressed():
+    """Prose recommending named purchasable products with prices, backed by
+    zero sourced listings, must become an explicit no-listings answer."""
+    info = (
+        "For gaming, the ASUS ROG Strix G16 at $1,299 is excellent. "
+        "The Lenovo Legion 5 at $999 is the value pick, and the "
+        "Acer Nitro V at $749 covers the budget end."
+    )
+    result = await product_compose(_empty_sources_state(info))
+
+    assert result["ui_blocks"] == []
+    text = result["assistant_text"]
+    assert "$1,299" not in text and "$999" not in text and "$749" not in text
+    assert "listings" in text.lower()
+
+
+@pytest.mark.asyncio
+async def test_plain_factoid_prose_still_passes_through():
+    """A genuine factoid (no price-quoting recommendations) keeps flowing —
+    zero cards is CORRECT when nothing purchasable was asked about."""
+    info = (
+        "Espresso machines force hot water through finely ground coffee at "
+        "around nine bars of pressure; the grind size controls extraction."
+    )
+    result = await product_compose(_empty_sources_state(info))
+    assert "nine bars" in result["assistant_text"]
+
+
+@pytest.mark.asyncio
+async def test_no_info_still_returns_honest_no_listings():
+    result = await product_compose(_empty_sources_state(""))
+    assert result["ui_blocks"] == []
+    assert "listings" in result["assistant_text"].lower()
