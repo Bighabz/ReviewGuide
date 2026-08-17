@@ -295,6 +295,11 @@ export async function streamChat({
       // healthy long stream keeps talking; only silence trips it.
       let idleTimer: ReturnType<typeof setTimeout> | undefined
 
+      // PLAN-6 T4: one bad frame must not kill a healthy stream, but a stream
+      // that ends with no terminal event AFTER malformed frames is a failure,
+      // not a silent success.
+      let parseFailures = 0
+
       while (true) {
         const { done, value } = await Promise.race([
           reader.read(),
@@ -421,23 +426,24 @@ export async function streamChat({
                 // B-phase 3: cache the user's interest keywords to bias the
                 // chat empty-state starter on their next visit.
                 cachePreferenceSummary(chunk.preference_summary)
-                // Guard: only dispatch RECEIVE_DONE when chunk carries a real session_id,
-                // preventing artifact onComplete callbacks from triggering the FSM transition.
-                if (chunk.session_id) {
-                  onComplete({
-                    session_id: chunk.session_id,
-                    user_id: chunk.user_id,
-                    status: chunk.status,
-                    intent: chunk.intent,
-                    ui_blocks: chunk.ui_blocks,
-                    citations: chunk.citations,
-                    followups: chunk.followups,
-                    next_suggestions: chunk.next_suggestions,
-                    completeness: chunk.completeness,
-                    request_id: chunk.request_id,
-                    response_metadata: chunk.response_metadata,  // RFC §2.5 content trust
-                  })
-                }
+                // PLAN-6 T4: a done event is TERMINAL whether or not it carries
+                // a session_id — the old `if (chunk.session_id)` guard silently
+                // swallowed completion ("finished mid-sentence, no error").
+                // ChatContainer's own session_id check still decides what to
+                // persist / whether the FSM finalizes.
+                onComplete({
+                  session_id: chunk.session_id,
+                  user_id: chunk.user_id,
+                  status: chunk.status,
+                  intent: chunk.intent,
+                  ui_blocks: chunk.ui_blocks,
+                  citations: chunk.citations,
+                  followups: chunk.followups,
+                  next_suggestions: chunk.next_suggestions,
+                  completeness: chunk.completeness,
+                  request_id: chunk.request_id,
+                  response_metadata: chunk.response_metadata,  // RFC §2.5 content trust
+                })
                 return
               }
 
@@ -502,10 +508,19 @@ export async function streamChat({
                 return
               }
             } catch (e) {
+              parseFailures++
               console.error('Failed to parse SSE data:', e)
             }
           }
         }
+      }
+
+      // Reaching here means the stream closed WITHOUT a terminal done/error
+      // event. If frames were dropped to parse failures, that silence is the
+      // failure mode the audit saw — surface it (PLAN-6 T4).
+      if (parseFailures > 0) {
+        onError(`stream ended after ${parseFailures} malformed frame${parseFailures > 1 ? 's' : ''}`)
+        return
       }
 
       // If we get here, stream completed successfully

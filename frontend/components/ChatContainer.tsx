@@ -17,6 +17,7 @@ import { TOOL_BLOCK_MAP, BLOCK_SKELETON_CONFIG } from '@/lib/skeletonMap'
 import type { SkeletonBlockType } from '@/components/BlockSkeleton'
 import { useChatStatus } from '@/lib/chatStatusContext'
 import AffiliateDisclosure from '@/components/AffiliateDisclosure'
+import { isLikelyTruncated } from '@/lib/isTruncated'
 
 export interface FollowupQuestion {
   slot: string
@@ -488,6 +489,9 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
     // original spinner kept running.
     const streamMessageId = assistantMessageId
     const streamQuery = messageToSend
+    // PLAN-6 T4: accumulate the prose this stream actually delivered, so the
+    // done handler can detect a mid-sentence cutoff without reading stale state.
+    let streamedText = ''
     // Staleness guard: once this stream is superseded (controller aborted),
     // every one of its callbacks becomes a no-op.
     const stale = () => controller.signal.aborted
@@ -538,6 +542,7 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
           dispatchStream({ type: 'RECEIVE_STATUS', text: token })
         } else {
           dispatchStream({ type: 'RECEIVE_CONTENT', token })
+          streamedText += token
         }
         setMessages((prev) =>
           prev.map((msg) =>
@@ -551,6 +556,7 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
       },
       onClear: () => {
         if (stale()) return
+        streamedText = ''
         setMessages((prev) =>
           prev.map((msg) =>
             msg.id === currentMessageIdRef.current
@@ -636,8 +642,16 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
                 : msg
             )
           )
-          // RFC §2.3: no interruption to recover from
-          setInterruptedMessageId(null)
+          // PLAN-6 T4: a "successful" completion whose prose is cut off
+          // mid-sentence is a truncation — offer the retry affordance instead
+          // of presenting the answer as finished.
+          if (isLikelyTruncated(streamedText)) {
+            console.warn('[stream] completed with truncated prose — offering retry')
+            setInterruptedMessageId(streamMessageId)
+          } else {
+            // RFC §2.3: no interruption to recover from
+            setInterruptedMessageId(null)
+          }
         }
 
         // Save to recent searches if product results were shown
@@ -980,7 +994,9 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
           {/* RFC §2.3: Inline recovery UI — rendered below the interrupted message bubble.
                Only shown while interruptedMessageId is set (dismissed by onShowPartial or
                cleared automatically when a new stream starts / retry fires). */}
-          {interruptedMessageId && streamState === 'interrupted' && !showErrorBanner && (
+          {/* PLAN-6 T4: also shown on 'finalized' — a done event whose prose
+              is truncated sets interruptedMessageId without an FSM interrupt. */}
+          {interruptedMessageId && (streamState === 'interrupted' || streamState === 'finalized') && !showErrorBanner && (
             <div
               className="mx-auto px-4 pb-2"
               style={{ maxWidth: '780px' }}
