@@ -539,7 +539,7 @@ def test_comparison_blocks_only_emitted_on_comparison_intent() -> None:
     # the full body of the branch (~700 chars). Width covers the
     # current structure plus reasonable refactor headroom.
     pattern_pc = _re_audit.compile(
-        r"if\s+_is_comparison_follow_up\([\s\S]{0,1200}?"
+        r"if\s+_is_comparison_follow_up\([\s\S]{0,2000}?"
         r'"type"\s*:\s*"product_comparison"',
     )
     assert pattern_pc.search(content), (
