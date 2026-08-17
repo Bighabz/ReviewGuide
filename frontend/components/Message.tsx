@@ -168,15 +168,21 @@ function ClarifierCard({
   questions,
   closing,
   onSubmit,
+  stale = false,
 }: {
   intro?: string
   questions: ClarifierQuestion[]
   closing?: string
   onSubmit: (text: string) => void
+  /** PLAN-7 T5: true when a NEWER clarifier card exists — this one goes inert.
+      (An ordinary results message must NOT stale a card: the ask-more flow
+      keeps the older card's slots deliberately answerable.) */
+  stale?: boolean
 }) {
   // selections: slot -> chosen option(s)
   const [selections, setSelections] = useState<Record<string, string[]>>({})
   const [submitted, setSubmitted] = useState(false)
+  const isLocked = submitted || stale
 
   // Resolve each question's chips (legacy budget payloads fall back to generic tiers).
   const resolved = questions.map((q) => {
@@ -204,13 +210,13 @@ function ClarifierCard({
       .join('; ')
 
   const submitCard = () => {
-    if (submitted || answeredSlots.length === 0) return
+    if (isLocked || answeredSlots.length === 0) return
     setSubmitted(true)
     onSubmit(buildCombinedAnswer(selections))
   }
 
   const handleSelect = (q: (typeof resolved)[number], next: string[]) => {
-    if (submitted) return
+    if (isLocked) return
     const nextSelections = { ...selections, [q.slot]: next }
     setSelections(nextSelections)
     // Single-question card + single-select → keep the one-tap-sends UX
@@ -257,7 +263,7 @@ function ClarifierCard({
                   multiSelect={q.type === 'multi_select'}
                   selected={selections[q.slot] ?? []}
                   onSelect={(next) => handleSelect(q, next)}
-                  locked={submitted}
+                  locked={isLocked}
                   preferenceOption={q.preference_chip}
                 />
               )
@@ -267,7 +273,7 @@ function ClarifierCard({
               <button
                 key={idx}
                 className="w-full text-left px-3.5 py-2.5 rounded-[12px] border border-[var(--line-2)] bg-[var(--paper-hi)] hover:border-[var(--terra)] hover:bg-[var(--terra-soft)] transition-all text-[14px] leading-[20px] font-medium text-[var(--ink)] flex items-center gap-2.5 group"
-                onClick={() => onSubmit(q.question)}
+                onClick={() => { if (!isLocked) onSubmit(q.question) }}
               >
                 {/* 4px terracotta leading dot — reads as "tap to reply" */}
                 <span className="w-1 h-1 rounded-full flex-shrink-0" style={{ background: 'var(--terra)' }} />
@@ -278,7 +284,7 @@ function ClarifierCard({
           })}
         </div>
         {/* The card's single submit */}
-        {needsSubmitButton && answeredSlots.length > 0 && !submitted && (
+        {needsSubmitButton && answeredSlots.length > 0 && !isLocked && (
           <button
             onClick={submitCard}
             data-testid={isSingleQuestionCard ? 'clarifier-multiselect-done' : 'clarifier-card-submit'}
@@ -289,7 +295,7 @@ function ClarifierCard({
           </button>
         )}
         {/* Progress nudge: answered some but not all, submit available */}
-        {needsSubmitButton && !submitted && answeredSlots.length > 0 && answeredSlots.length < chipQuestions.length && (
+        {needsSubmitButton && !isLocked && answeredSlots.length > 0 && answeredSlots.length < chipQuestions.length && (
           <p className="mt-2 text-[12px] italic text-[var(--ink-3)]">
             You can answer the rest or submit now — I&apos;ll work with what you give me.
           </p>
@@ -297,7 +303,7 @@ function ClarifierCard({
         {/* Footer affordances: skip everything, or opt into deeper questions.
             Both phrases are backend contracts (_is_skip_all / _is_ask_more in
             clarifier_agent.py) — don't reword without updating the detector. */}
-        {!submitted && (
+        {!isLocked && (
           <div
             className="mt-4 pt-3 flex flex-wrap items-center gap-x-6 gap-y-1"
             style={{ borderTop: '1px solid var(--line)' }}
@@ -341,9 +347,12 @@ function ClarifierCard({
 interface MessageProps {
   message: MessageType
   isLast?: boolean
+  /** PLAN-7 T5: a newer clarifier card exists — this message's card goes inert.
+      Derived in MessageList (last-clarifier rule, NOT last-assistant-message). */
+  isStale?: boolean
 }
 
-export default function Message({ message, isLast = false }: MessageProps) {
+export default function Message({ message, isLast = false, isStale = false }: MessageProps) {
   const isUser = message.role === 'user'
   const [copied, setCopied] = useState(false)
   const [relativeTime, setRelativeTime] = useState(() => formatTimestamp(message.timestamp))
@@ -591,14 +600,17 @@ export default function Message({ message, isLast = false }: MessageProps) {
                     all question groups accumulate selections, a single submit sends
                     the combined answer (QA Round 5, external bugs 1+2). */}
                 {message.followups && typeof message.followups === 'object' && !Array.isArray(message.followups) && (
-                  <ClarifierCard
-                    intro={message.followups.intro}
-                    questions={(message.followups.questions ?? []) as ClarifierQuestion[]}
-                    closing={message.followups.closing}
-                    onSubmit={(text: string) =>
-                      window.dispatchEvent(new CustomEvent('sendSuggestion', { detail: { question: text } }))
-                    }
-                  />
+                  <div className={isStale ? 'opacity-50 pointer-events-none' : undefined}>
+                    <ClarifierCard
+                      intro={message.followups.intro}
+                      questions={(message.followups.questions ?? []) as ClarifierQuestion[]}
+                      closing={message.followups.closing}
+                      stale={isStale}
+                      onSubmit={(text: string) =>
+                        window.dispatchEvent(new CustomEvent('sendSuggestion', { detail: { question: text } }))
+                      }
+                    />
+                  </div>
                 )}
 
                 {/* RFC §2.3: degraded completeness indicator */}

@@ -21,6 +21,15 @@ export default function MessageList({ messages, isStreaming }: MessageListProps)
   const lastAiMessage = [...messages].reverse().find(m => m.role === 'assistant')
   const lastAiId = lastAiMessage?.id ?? null
 
+  // PLAN-7 T5 — staleness rule: a clarifier card goes inert only when a NEWER
+  // clarifier card exists. "Not the last assistant message" would lock the
+  // ask-more flow's deliberately-still-answerable older card — an ordinary
+  // results message after a card must NOT stale it. Mirror the render guard
+  // Message.tsx uses for ClarifierCard.
+  const hasClarifierCard = (m: MessageType) =>
+    m.role === 'assistant' && !!m.followups && typeof m.followups === 'object' && !Array.isArray(m.followups)
+  const lastClarifierId = [...messages].reverse().find(hasClarifierCard)?.id ?? null
+
   // Detect intentional user scroll (wheel/touch), not programmatic
   useEffect(() => {
     const container = containerRef.current
@@ -138,6 +147,7 @@ export default function MessageList({ messages, isStreaming }: MessageListProps)
             key={message.id}
             message={message}
             isLast={idx === messages.length - 1}
+            isStale={hasClarifierCard(message) && message.id !== lastClarifierId}
           />
         ))}
       </div>
