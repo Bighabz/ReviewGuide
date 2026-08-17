@@ -234,3 +234,121 @@ def test_slot_budget_wins_over_message():
 
 def test_no_budget_anywhere_is_none():
     assert _resolve_budget({}, "best espresso machine") == (None, None)
+
+
+# ---------------------------------------------------------------------------
+# Task 6 — integration with the REAL state shape, end to end through
+# product_compose (mocked model service), asserting on ui_blocks.
+# ---------------------------------------------------------------------------
+
+import json
+from unittest.mock import AsyncMock, MagicMock, patch
+
+from app.core.config import settings
+from mcp_server.tools.product_compose import product_compose
+
+
+def _pin_simple_path(monkeypatch):
+    monkeypatch.setattr(settings, "USE_CONSOLIDATED_COMPOSE", False)
+    monkeypatch.setattr(settings, "USE_DECOUPLED_COMPOSE", False, raising=False)
+    monkeypatch.setattr(settings, "USE_COMPOSE_STREAMING", False, raising=False)
+    monkeypatch.setattr(settings, "USE_GROUNDED_COMPOSE", False, raising=False)
+    monkeypatch.setattr(settings, "USE_VOICE_PASS", False, raising=False)
+
+
+def _fake_service(top_pick, body):
+    blog = json.dumps({
+        "body": body,
+        "follow_up_question": "Anything else that matters?",
+        "transitional_reasoning": "",
+        "top_pick": top_pick,
+    })
+    fake = MagicMock()
+
+    async def _generate_compose(*args, **kwargs):
+        if kwargs.get("agent_name") == "blog_article_composer":
+            return blog
+        return "x"
+
+    fake.generate_compose = AsyncMock(side_effect=_generate_compose)
+    return fake
+
+
+def _real_offer(title, price, merchant="Amazon", condition="", source="amazon"):
+    o = make_offer(title, price, merchant=merchant, condition=condition, source=source)
+    o["url"] = f"https://www.amazon.com/dp/{abs(hash(title)) % 99999}?tag=revguide-20"
+    return o
+
+
+@pytest.mark.asyncio
+async def test_cordless_query_end_to_end_keeps_vacuum_drops_filter(monkeypatch):
+    _pin_simple_path(monkeypatch)
+    fake = _fake_service("Shark ION Robot Vacuum RV750",
+                         "The Shark ION Robot Vacuum RV750 is the cordless pick.")
+    state = {
+        "user_message": "cordless vacuum for pet hair",
+        "intent": "product",
+        "slots": {"category": "vacuums"},
+        "normalized_products": [
+            {"name": "Shark ION Robot Vacuum RV750", "price": 249, "url": "https://e.com/rv750"},
+        ],
+        "affiliate_products": {
+            "amazon": [{
+                "product_name": "Shark ION Robot Vacuum RV750",
+                "offers": [
+                    _real_offer("Shark ION Robot Vacuum RV750, Cordless", 249.00),
+                    _real_offer("Shark RV750 Replacement Filter 2-Pack", 15.98),
+                ],
+            }],
+        },
+        "review_data": {},
+        "comparison_html": None, "comparison_data": None,
+        "general_product_info": "", "conversation_history": [],
+        "last_search_context": {}, "search_history": [],
+    }
+    with patch("app.services.model_service.model_service", fake):
+        result = await product_compose(state)
+
+    blocks_json = json.dumps(result["ui_blocks"])
+    assert "Replacement Filter" not in blocks_json
+    assert "RV750" in blocks_json
+
+
+@pytest.mark.asyncio
+async def test_all_over_budget_fails_loud_end_to_end(monkeypatch):
+    _pin_simple_path(monkeypatch)
+    fake = _fake_service("Breville Barista Express",
+                         "The Breville Barista Express is the pick.")
+    state = {
+        "user_message": "best espresso machine under $500",
+        "intent": "product",
+        "slots": {"category": "espresso machines", "budget": "under $500"},
+        "normalized_products": [
+            {"name": "Breville Barista Express", "price": 668, "url": "https://e.com/bbe"},
+        ],
+        "affiliate_products": {
+            "amazon": [{
+                "product_name": "Breville Barista Express",
+                "offers": [_real_offer("Breville Barista Express BES870XL", 668.00)],
+            }],
+        },
+        "review_data": {},
+        "comparison_html": None, "comparison_data": None,
+        "general_product_info": "", "conversation_history": [],
+        "last_search_context": {}, "search_history": [],
+    }
+    with patch("app.services.model_service.model_service", fake):
+        result = await product_compose(state)
+
+    # The over-budget offer is retained (degraded beats empty)…
+    blocks_json = json.dumps(result["ui_blocks"])
+    assert "668" in blocks_json
+    # …but tagged in the projected card links…
+    links = [
+        link
+        for b in result["ui_blocks"] if b.get("type") == "product_review"
+        for link in b["data"]["affiliate_links"]
+    ]
+    assert any(link.get("over_budget") for link in links)
+    # …and the prose says so, loudly and deterministically.
+    assert "Nothing I found fits under $500" in (result.get("transitional_reasoning") or "")
