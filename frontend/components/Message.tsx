@@ -182,6 +182,8 @@ function ClarifierCard({
   // selections: slot -> chosen option(s)
   const [selections, setSelections] = useState<Record<string, string[]>>({})
   const [submitted, setSubmitted] = useState(false)
+  // PLAN-5 T2: the typed-answer input under the chips
+  const [freeText, setFreeText] = useState('')
   const isLocked = submitted || stale
 
   // Resolve each question's chips (legacy budget payloads fall back to generic tiers).
@@ -300,6 +302,36 @@ function ClarifierCard({
             You can answer the rest or submit now — I&apos;ll work with what you give me.
           </p>
         )}
+        {/* PLAN-5 T2: the "or type your own answer" hint finally has an input.
+            Submits through the same onSubmit the chips use (sendSuggestion). */}
+        {!isLocked && (
+          <form
+            data-testid="clarifier-freetext-form"
+            className="mt-3 flex items-center gap-2"
+            onSubmit={(e) => {
+              e.preventDefault()
+              const value = freeText.trim()
+              if (!value) return
+              setSubmitted(true)
+              onSubmit(value)
+            }}
+          >
+            <input
+              data-testid="clarifier-freetext-input"
+              value={freeText}
+              onChange={(e) => setFreeText(e.target.value)}
+              placeholder="Or type your own answer"
+              className="flex-1 min-h-[40px] rounded-[12px] border border-[var(--line)] bg-transparent px-3 text-[14px] text-[var(--ink)] placeholder:text-[var(--ink-3)] focus:border-[var(--terra)] focus:outline-none"
+            />
+            <button
+              type="submit"
+              className="inline-flex min-h-[40px] items-center rounded-[12px] border border-[var(--terra)] px-3 text-[13px] font-medium text-[var(--terra)] hover:bg-[var(--terra)] hover:text-white transition-colors"
+            >
+              Send
+            </button>
+          </form>
+        )}
+
         {/* Footer affordances: skip everything, or opt into deeper questions.
             Both phrases are backend contracts (_is_skip_all / _is_ask_more in
             clarifier_agent.py) — don't reword without updating the detector. */}
