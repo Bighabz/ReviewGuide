@@ -147,3 +147,104 @@ async def test_no_info_still_returns_honest_no_listings():
     result = await product_compose(_empty_sources_state(""))
     assert result["ui_blocks"] == []
     assert "listings" in result["assistant_text"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Task 4 — characterization: the "How They Compare" block already pins the
+# prose top pick to rank 1 (QA Round 6). Pin the behaviour so PLAN-1/PLAN-8
+# compose edits can't regress it.
+# ---------------------------------------------------------------------------
+
+import json
+from unittest.mock import AsyncMock, MagicMock, patch
+
+from app.core.config import settings
+
+
+def _offer(name, price, slug):
+    return {
+        "title": name, "price": price, "currency": "USD",
+        "url": f"https://www.amazon.com/dp/{slug}?tag=revguide-20",
+        "merchant": "Amazon",
+        "image_url": f"https://img.example.com/{slug}.jpg",
+        "source": "amazon",
+    }
+
+
+@pytest.mark.asyncio
+async def test_consensus_block_leads_with_the_prose_pick(monkeypatch):
+    """Input order and review score both favor Alpha; the prose top_pick is
+    Bravo — the comparison block must rank Bravo first as Editor's pick."""
+    monkeypatch.setattr(settings, "USE_CONSOLIDATED_COMPOSE", True)
+    monkeypatch.setattr(settings, "USE_DECOUPLED_COMPOSE", False, raising=False)
+    monkeypatch.setattr(settings, "USE_COMPOSE_STREAMING", False, raising=False)
+    monkeypatch.setattr(settings, "USE_GROUNDED_COMPOSE", False, raising=False)
+    monkeypatch.setattr(settings, "USE_VOICE_PASS", False, raising=False)
+
+    blog = json.dumps({
+        "body": "The Bravo Espresso Two is the pick for most people.",
+        "follow_up_question": "Milk drinks or straight espresso?",
+        "transitional_reasoning": "",
+        "top_pick": "Bravo Espresso Two",
+        "consensus": {
+            "Alpha Espresso One": "Reviewers praise the Alpha's consistency and value. "
+                                  "Some note a slow warm-up. Best for patient owners.",
+            "Bravo Espresso Two": "Reviewers call the Bravo the better all-rounder. "
+                                  "A few dislike the tank size. Best for daily drinkers.",
+        },
+        "descriptions": {},
+        "pros_cons": {},
+    })
+
+    fake = MagicMock()
+
+    async def _generate_compose(*args, **kwargs):
+        if kwargs.get("agent_name") == "blog_article_composer":
+            return blog
+        return "x"
+
+    fake.generate_compose = AsyncMock(side_effect=_generate_compose)
+
+    state = {
+        "user_message": "best espresso machine",
+        "intent": "product",
+        "slots": {"category": "espresso machines"},
+        "normalized_products": [
+            {"name": "Alpha Espresso One", "price": 300, "url": "https://example.com/a"},
+            {"name": "Bravo Espresso Two", "price": 350, "url": "https://example.com/b"},
+        ],
+        "affiliate_products": {
+            "amazon": [
+                {"product_name": "Alpha Espresso One", "offers": [_offer("Alpha Espresso One", 300, "alpha1")]},
+                {"product_name": "Bravo Espresso Two", "offers": [_offer("Bravo Espresso Two", 350, "bravo2")]},
+            ],
+        },
+        "review_data": {
+            # Non-empty sources required: bundles without sources never enter
+            # review_bundles (product_compose.py, products_with_sources filter).
+            "Alpha Espresso One": {
+                "avg_rating": 4.8, "total_reviews": 2000, "quality_score": 9.0,
+                "sources": [{"snippet": "Consistent shots.", "site_name": "x", "url": "https://x.example/a"}],
+            },
+            "Bravo Espresso Two": {
+                "avg_rating": 4.0, "total_reviews": 100, "quality_score": 4.0,
+                "sources": [{"snippet": "Great all-rounder.", "site_name": "y", "url": "https://y.example/b"}],
+            },
+        },
+        "comparison_html": None,
+        "comparison_data": None,
+        "general_product_info": "",
+        "conversation_history": [],
+        "last_search_context": {},
+        "search_history": [],
+    }
+
+    with patch("app.services.model_service.model_service", fake):
+        result = await product_compose(state)
+
+    consensus_blocks = [b for b in result["ui_blocks"] if b.get("type") == "review_consensus"]
+    assert consensus_blocks, "review_consensus block missing"
+    products = consensus_blocks[0]["data"]["products"]
+    assert products[0]["name"] == "Bravo Espresso Two"
+    assert products[0].get("editors_pick") is True
+    assert products[0]["rank"] == 1
