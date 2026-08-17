@@ -111,14 +111,18 @@ async def safety_node(state: GraphState) -> Dict[str, Any]:
         result = await safety_agent_instance.execute(state)
 
         user_message = state.get("user_message")
-        conversation_history = state.get("conversation_history", []).copy()
-
+        # conversation_history uses an operator.add reducer (graph_state.py:22):
+        # LangGraph CONCATENATES whatever this node returns onto the channel.
+        # Returning the full copied history therefore doubled the prior
+        # conversation on every turn (round-2 sweep, 2026-07-31). Return ONLY
+        # the delta — the reducer does the append.
+        history_delta = []
         if user_message:
-            conversation_history.append({
+            history_delta.append({
                 "role": "user",
                 "content": user_message
             })
-            logger.info(f"[SafetyAgent] Added user message to conversation_history state ({len(conversation_history)} total messages)")
+            logger.info("[SafetyAgent] Appending user message to conversation_history (delta)")
 
         update = {
             "policy_status": result["policy_status"],
@@ -130,7 +134,7 @@ async def safety_node(state: GraphState) -> Dict[str, Any]:
             # node boundary (same trap as follow_up_question below).
             "health_advisory": result.get("health_advisory", False),
             "current_agent": "safety",
-            "conversation_history": conversation_history,
+            "conversation_history": history_delta,
         }
 
         if result.get("errors"):
