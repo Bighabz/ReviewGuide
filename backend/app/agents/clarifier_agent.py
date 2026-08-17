@@ -184,6 +184,54 @@ def capture_freetext_answer(
     return stripped or text
 
 
+# ── PLAN-5 T4: constraints restated or changed in a message always win ──────
+_BUDGET_RE = re.compile(
+    r"(?:under|below|less than|up to|max(?:imum)?|budget (?:is|of|dropped to)?|around|about)\s*"
+    r"\$?\s*(\d[\d,]*)(?:\s*(?:-|to)\s*\$?\s?\d[\d,]*)?|(\$\s?\d[\d,]*\s*(?:-|to)\s*\$?\s?\d[\d,]*)",
+    re.IGNORECASE,
+)
+# Replacement of an EXISTING budget requires an explicit budget verb — a bare
+# price inside a follow-up question ("does the $300 model…?") must never
+# silently overwrite what the user actually set (binding validation catch).
+_BUDGET_VERB_RE = re.compile(
+    r"\b(?:budget|under|below|less than|up to|max(?:imum)?|dropped to|spend|"
+    r"no more than|at most|around|about)\b",
+    re.IGNORECASE,
+)
+_BRAND_ALLOW_RE = re.compile(
+    r"\b([A-Z][\w'&-]+)\b[^.?!]{0,20}\bis (?:now )?(?:allowed|fine|ok|okay|back on)\b",
+    re.IGNORECASE,
+)
+
+
+def merge_constraint_updates(message: str, slots: dict) -> dict:
+    """Apply constraints restated or changed in this message to the slot dict.
+
+    Two audit failures share this root: a budget given in the opening message
+    was asked for again two turns later, and "budget dropped to $700 and Apple
+    is now allowed" changed nothing. A constraint the user has stated must
+    never be re-asked, and a changed one must win over the stored value.
+    """
+    if not message:
+        return slots
+    updated = dict(slots)
+
+    m = _BUDGET_RE.search(message)
+    if m:
+        has_existing = bool(updated.get("budget"))
+        if not has_existing or _BUDGET_VERB_RE.search(message):
+            updated["budget"] = (m.group(0) or "").strip()
+
+    allow = _BRAND_ALLOW_RE.search(message)
+    if allow:
+        brand = allow.group(1)
+        excluded = [b for b in updated.get("excluded_brands", [])
+                    if b.lower() != brand.lower()]
+        updated["excluded_brands"] = excluded
+
+    return updated
+
+
 # ── PLAN-5 T3: follow-up questions about the previous answer ────────────────
 # Interrogatives that refer back to an answer already given rather than
 # starting a new search. Requires prior context — with no previous answer
@@ -454,6 +502,18 @@ class ClarifierAgent(BaseAgent):
 
         try:
             logger.info(f"[Clarifier Agent] Executing for session: {session_id}")
+
+            # PLAN-5 T4 — constraints stated in THIS message always win over
+            # stored values, BEFORE any missing-slot decision is made. This is
+            # what stops the budget given in the opening message being asked
+            # for again two turns later.
+            _t4_msg = state.get("sanitized_text") or state.get("user_message", "")
+            _t4_before = dict(state.get("slots", {}) or {})
+            _t4_merged = merge_constraint_updates(_t4_msg, _t4_before)
+            if _t4_merged != _t4_before:
+                logger.info(f"[Clarifier Agent] Constraint updates applied from message: "
+                            f"{ {k: v for k, v in _t4_merged.items() if _t4_before.get(k) != v} }")
+            state["slots"] = _t4_merged
 
             # Skip clarifier logic for "intro" or "unclear" intents - route directly to next step
             if intent in ["intro", "unclear"]:
@@ -1021,7 +1081,9 @@ class ClarifierAgent(BaseAgent):
         """
         user_message = state.get("sanitized_text") or state.get("user_message", "")
         followups = halt_state.get("followups", [])
-        current_slots = halt_state.get("slots", {})
+        # PLAN-5 T4: restated/changed constraints in the answer win over the
+        # halt's stored values ("budget dropped to $700" mid-clarification).
+        current_slots = merge_constraint_updates(user_message, halt_state.get("slots", {}))
         conversation_history = state.get("conversation_history", [])
 
         if not followups:
