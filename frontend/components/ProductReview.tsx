@@ -131,6 +131,9 @@ interface AffiliateLink {
   // $407-class honesty: "Renewed" / "Used" / "Open box" for non-new listings —
   // the low price is real, the user just deserves to know why.
   condition_label?: string | null
+  // PLAN-1 T5 / DOCTRINE D5: offer exceeds the user's stated budget ceiling —
+  // retained only because nothing fits; must be visibly marked, never silent.
+  over_budget?: boolean
 }
 
 interface ProductReviewProps {
@@ -182,6 +185,15 @@ function pickBestOffer(offers: AffiliateLink[]): AffiliateLink | undefined {
 function OfferBadges({ offer }: { offer: AffiliateLink }) {
   return (
     <>
+      {offer.over_budget && (
+        <span
+          data-testid="over-budget-badge"
+          className="uppercase px-1.5 py-0.5 rounded-full whitespace-nowrap"
+          style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.06em', color: 'var(--terra)', background: 'transparent', border: '1px solid var(--terra)' }}
+        >
+          Over budget
+        </span>
+      )}
       {offer.below_budget_floor && (
         <span
           data-testid="under-budget-badge"

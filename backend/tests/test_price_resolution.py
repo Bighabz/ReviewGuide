@@ -215,3 +215,22 @@ def test_assembly_survives_unpriced_offers():
                                           merchant="MockAffiliate"))
     out = _assemble_offers_for_product("Breville Barista Express", groups)
     assert len(out) == 4  # no TypeError, unpriced offer retained (carries links)
+
+
+# ---------------------------------------------------------------------------
+# Task 5 — budget parses from the message fallback; fails loud, never silent.
+# ---------------------------------------------------------------------------
+
+from mcp_server.tools.product_compose import _resolve_budget
+
+
+def test_budget_falls_back_to_the_user_message():
+    assert _resolve_budget({}, "cordless vacuum under $400")[1] == 400.0
+
+
+def test_slot_budget_wins_over_message():
+    assert _resolve_budget({"budget": "under $500"}, "something about $99")[1] == 500.0
+
+
+def test_no_budget_anywhere_is_none():
+    assert _resolve_budget({}, "best espresso machine") == (None, None)

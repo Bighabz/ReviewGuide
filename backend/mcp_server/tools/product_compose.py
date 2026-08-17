@@ -1009,6 +1009,19 @@ def _drop_price_outliers(offers: list) -> tuple:
     return kept, dropped
 
 
+def _resolve_budget(slots: Optional[dict], user_message: str) -> tuple:
+    """Budget bounds from the slot, falling back to the raw message.
+
+    The slot pipeline can lose a stated budget (audit: re-asked after being
+    given). The user's message is the primary source of truth — when the slot
+    is empty, parse the message so 'under $400' in the query always filters."""
+    budget_str = (slots or {}).get("budget", "") or ""
+    b_min, b_max = _parse_budget(budget_str)
+    if b_min is None and b_max is None:
+        b_min, b_max = _parse_budget(user_message or "")
+    return b_min, b_max
+
+
 def _synthesize_transitional(user_message: str, slots: Optional[dict]) -> str:
     """E2: deterministically frame the shortlist when the query carries a real
     constraint but the LLM declined to emit transitional_reasoning.
@@ -1284,9 +1297,13 @@ async def product_compose(state: Dict[str, Any]) -> Dict[str, Any]:
                     "provider": provider_name
                 })
 
-        # Parse budget constraint once — used for offer-level filtering below
-        budget_str = (slots.get("budget", "") or "") if slots else ""
-        budget_min, budget_max = _parse_budget(budget_str)
+        # Parse budget constraint once — slot first, message fallback (PLAN-1
+        # T5: a lost slot must not mean no filtering).
+        budget_min, budget_max = _resolve_budget(slots, user_message)
+        # DOCTRINE D5: set when a stated ceiling is violated by everything we
+        # can show — the prose then says so instead of presenting over-budget
+        # picks as if they fit.
+        _budget_nothing_fits = False
 
         products_with_offers = []
         for product in normalized_products:
@@ -1374,6 +1391,22 @@ async def product_compose(state: Dict[str, Any]) -> Dict[str, Any]:
                                 bounds.append(f"≤${budget_max:.0f}")
                             logger.info(f"[product_compose] Budget filter ({' and '.join(bounds)}): removed {removed_count} out-of-budget offer(s) for {product_name}")
                         all_offers_for_product = in_budget
+                    elif budget_max is not None:
+                        # PLAN-1 T5 / DOCTRINE D5: the keep-all fallback keeps
+                        # showing offers (degraded beats empty) but a violated
+                        # stated CEILING now fails LOUD — retained over-budget
+                        # offers are tagged (projected as over_budget on the
+                        # card) and the prose says nothing fits.
+                        _budget_nothing_fits = True
+                        for o in all_offers_for_product:
+                            _p = _extract_price(o)
+                            if _p is not None and _p > budget_max:
+                                o["over_budget"] = True
+                        logger.info(
+                            f"[product_compose] Budget fail-loud: nothing under "
+                            f"${budget_max:.0f} for {product_name} — retaining "
+                            f"{len(all_offers_for_product)} offer(s), tagged over_budget"
+                        )
 
                     # Tag below-floor survivors (range budgets only) for the card badge.
                     if budget_min is not None and not floor_is_hard:
@@ -1436,6 +1469,22 @@ async def product_compose(state: Dict[str, Any]) -> Dict[str, Any]:
                 # affiliate-only products) don't reintroduce these as prose mentions or
                 # fallback cards — that's how the "$299 pick on a $500+ ask" leaked.
                 _budget_pruned_names.update(n for n in dropped_names if n)
+            elif len(in_budget_products) < 2 and budget_max is not None:
+                # PLAN-1 T5 / DOCTRINE D5: the keep-≥2 fallback retained
+                # over-budget products — tag them so the cards and prose are
+                # honest about it instead of headlining them as if they fit.
+                tagged = 0
+                for p in products_with_offers:
+                    if not _product_in_budget(p):
+                        p["over_budget"] = True
+                        tagged += 1
+                if tagged:
+                    _budget_nothing_fits = _budget_nothing_fits or len(in_budget_products) == 0
+                    logger.info(
+                        f"[product_compose] Budget fail-loud: only "
+                        f"{len(in_budget_products)} product(s) fit ≤${budget_max:.0f}; "
+                        f"{tagged} over-budget product(s) retained and tagged"
+                    )
 
         # Tier 5 / A2 anti-hallucination: drop products that the LLM search may have
         # invented — those with NEITHER a real shopping match (a priced offer with a
@@ -2571,6 +2620,14 @@ TRANSITIONAL RULES (transitional_reasoning field):
                         budget_min is not None and budget_max is not None
                         and _link_price is not None and _link_price < budget_min
                     ),
+                    # PLAN-1 T5 / DOCTRINE D5: an offer surviving only via the
+                    # keep-all fallbacks while exceeding the stated ceiling is
+                    # marked so the card can render an "over budget" chip —
+                    # derived at projection so the flag always reaches ui_blocks.
+                    "over_budget": bool(
+                        budget_max is not None
+                        and _link_price is not None and _link_price > budget_max
+                    ),
                     # $407-class honesty: "Renewed" / "Used" / "Open box" badge for
                     # non-new listings (eBay condition field or title keywords) —
                     # the price is real, the user just deserves to know why it's low.
@@ -2728,6 +2785,14 @@ TRANSITIONAL RULES (transitional_reasoning field):
                 # use-case that shapes the pick, frame it deterministically.
                 if not transitional_text:
                     transitional_text = _synthesize_transitional(user_message, slots)
+                # PLAN-1 T5 / DOCTRINE D5: a violated stated ceiling fails LOUD
+                # — this deterministic sentence overrides whatever the LLM
+                # framed, because nothing shown actually fits.
+                if _budget_nothing_fits and budget_max is not None:
+                    transitional_text = (
+                        f"Nothing I found fits under ${int(budget_max)} — "
+                        "showing the closest options above it, clearly marked."
+                    )
                 assistant_text = body
                 logger.info(
                     f"[product_compose] LLM blog article: body={len(body)} chars, "
