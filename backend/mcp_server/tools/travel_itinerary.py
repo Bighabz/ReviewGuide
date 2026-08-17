@@ -9,6 +9,7 @@ from app.core.error_manager import tool_error_handler
 import sys
 import os
 import json
+import re
 from typing import Dict, Any
 from datetime import datetime, timedelta
 from app.core.error_manager import tool_error_handler
@@ -44,6 +45,46 @@ TOOL_CONTRACT = {
 }
 
 
+_CHILD_RE = re.compile(r"\b(?:kid|child|children|toddler|infant|baby)\w*\b", re.IGNORECASE)
+
+
+def _travel_constraint_block(slots: dict) -> str:
+    """Prompt fragment asserting hard party constraints for the itinerary.
+
+    An itinerary for a family with two under-8s that opens with Bairro Alto
+    nightlife and a late Fado dinner is not a near-miss — it is unusable. And
+    dates the user never gave must not be invented (the audit got a specific
+    Sep 30 – Oct 4 window from thin air).
+    """
+    slots = slots or {}
+    parts = []
+
+    travelers = slots.get("travelers")
+    has_children = False
+    if isinstance(travelers, dict):
+        has_children = bool(travelers.get("children") or travelers.get("kids") or travelers.get("infants"))
+    if not has_children:
+        has_children = bool(_CHILD_RE.search(str(travelers or "")))
+    if has_children:
+        parts.append(
+            "PARTY INCLUDES YOUNG CHILDREN — this is a hard constraint:\n"
+            "- No nightlife, bar crawls, late-night dining, or adults-only venues.\n"
+            "- Keep evenings early; assume an early bedtime.\n"
+            "- Prefer parks, beaches, trams, aquariums, and short walks between stops."
+        )
+
+    if not slots.get("dates") and not slots.get("start_date") and not slots.get("check_in"):
+        parts.append(
+            "DATES ARE UNKNOWN — do not invent them. Write the itinerary as "
+            "Day 1 / Day 2 / Day 3. Never print a specific calendar date the user "
+            "did not give you."
+        )
+
+    if not parts:
+        return ""
+    return "\n\n".join(parts)
+
+
 @tool_error_handler(tool_name="travel_itinerary", error_message="Failed to create itinerary")
 async def travel_itinerary(state: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -75,8 +116,12 @@ async def travel_itinerary(state: Dict[str, Any]) -> Dict[str, Any]:
 
         interests_str = ", ".join(interests) if interests else "general sightseeing"
 
-        prompt = f"""Create a {duration_days}-day itinerary for {destination}.
+        # PLAN-5 T7: hard constraints (young children, unknown dates) lead the
+        # prompt — they are requirements, not preferences.
+        constraint_block = _travel_constraint_block(slots)
 
+        prompt = f"""Create a {duration_days}-day itinerary for {destination}.
+{(constraint_block + chr(10) + chr(10)) if constraint_block else ''}
 Interests: {interests_str}
 Travelers: {travelers or {'adults': 1}}
 
