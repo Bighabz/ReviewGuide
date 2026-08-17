@@ -1216,13 +1216,18 @@ async def product_compose(state: Dict[str, Any]) -> Dict[str, Any]:
             for pname in product_names:
                 price = last_search_context.get("top_prices", {}).get(pname, 0)
                 rating = last_search_context.get("avg_rating", {}).get(pname, 0)
+                # PLAN-7 T4: rows come from the elected offer saved in the
+                # context — merchant/image/price match the cards the user just
+                # saw, instead of empty fields rendering "No Image" / "N/A".
+                offer = last_search_context.get("top_offers", {}).get(pname, {})
                 comparison_products.append({
                     "title": pname,
                     "price": price,
-                    "currency": "USD",
+                    "currency": offer.get("currency", "USD"),
                     "rating": rating,
-                    "merchant": "",
-                    "url": "",
+                    "merchant": offer.get("merchant", ""),
+                    "url": offer.get("url", ""),
+                    "image_url": offer.get("image_url", ""),
                 })
             comparison_block = {
                 "type": "product_comparison",
@@ -2917,6 +2922,19 @@ TRANSITIONAL RULES (transitional_reasoning field):
                 p["name"]: p["best_offer"]["price"]
                 for p in products_with_offers
                 if (p.get("best_offer") or {}).get("price")
+            },
+            # PLAN-7 T4: the elected offer's merchant/image/url travel with the
+            # context so a comparison follow-up renders real rows instead of
+            # "No Image" / "N/A" (the table can never disagree with the cards).
+            "top_offers": {
+                p["name"]: {
+                    "merchant": (p.get("best_offer") or {}).get("merchant", ""),
+                    "url": (p.get("best_offer") or {}).get("url", ""),
+                    "image_url": (p.get("best_offer") or {}).get("image_url", ""),
+                    "currency": (p.get("best_offer") or {}).get("currency", "USD"),
+                }
+                for p in products_with_offers
+                if p.get("best_offer")
             },
             "avg_rating": {
                 name: rd.get("avg_rating", 0)

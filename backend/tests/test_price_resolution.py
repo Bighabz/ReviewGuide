@@ -352,3 +352,45 @@ async def test_all_over_budget_fails_loud_end_to_end(monkeypatch):
     assert any(link.get("over_budget") for link in links)
     # …and the prose says so, loudly and deterministically.
     assert "Nothing I found fits under $500" in (result.get("transitional_reasoning") or "")
+
+
+# ---------------------------------------------------------------------------
+# PLAN-7 T4 — the comparison follow-up renders rows from the elected offers
+# saved in last_search_context (merchant/image/price match the cards), not
+# empty fields that display "No Image" / "N/A".
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_comparison_followup_rows_carry_offer_data():
+    context = {
+        "category": "espresso machines",
+        "product_names": ["Breville Barista Express", "De'Longhi Dedica"],
+        "top_prices": {"Breville Barista Express": 699.95, "De'Longhi Dedica": 249.0},
+        "avg_rating": {"Breville Barista Express": 4.6},
+        "top_offers": {
+            "Breville Barista Express": {
+                "merchant": "Best Buy", "url": "https://bestbuy.example/bbe",
+                "image_url": "https://img.example/bbe.jpg", "currency": "USD",
+            },
+            "De'Longhi Dedica": {
+                "merchant": "Amazon", "url": "https://amazon.example/dedica",
+                "image_url": "https://img.example/dedica.jpg", "currency": "USD",
+            },
+        },
+    }
+    result = await product_compose({
+        "user_message": "compare them",
+        "intent": "product",
+        "slots": {},
+        "normalized_products": [], "affiliate_products": {}, "review_data": {},
+        "comparison_html": None, "comparison_data": None,
+        "general_product_info": "", "conversation_history": [],
+        "last_search_context": context, "search_history": [],
+    })
+    blocks = [b for b in result["ui_blocks"] if b.get("type") == "product_comparison"]
+    assert blocks, "comparison block missing"
+    rows = blocks[0]["data"]["products"]
+    by_title = {r["title"]: r for r in rows}
+    assert by_title["Breville Barista Express"]["merchant"] == "Best Buy"
+    assert by_title["Breville Barista Express"]["image_url"] == "https://img.example/bbe.jpg"
+    assert by_title["De'Longhi Dedica"]["price"] == 249.0
