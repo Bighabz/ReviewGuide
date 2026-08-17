@@ -10,6 +10,11 @@ interface ChatInputProps {
   onSend: () => void
   disabled?: boolean
   placeholder?: string
+  /** PLAN-7 T6: focus the textarea on mount (and again whenever focusToken
+      changes) so keystrokes typed right after New Chat land in the composer
+      instead of nowhere. */
+  autoFocus?: boolean
+  focusToken?: string | number
 }
 
 export default function ChatInput({
@@ -18,9 +23,15 @@ export default function ChatInput({
   onSend,
   disabled = false,
   placeholder = 'Ask about products, travel, or deals...',
+  autoFocus = false,
+  focusToken,
 }: ChatInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [isFocused, setIsFocused] = useState(false)
+
+  useEffect(() => {
+    if (autoFocus) textareaRef.current?.focus()
+  }, [autoFocus, focusToken])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -55,6 +66,7 @@ export default function ChatInput({
       >
         <textarea
           ref={textareaRef}
+          data-testid="chat-input"
           value={value}
           onChange={(e) => {
             onChange(e.target.value)

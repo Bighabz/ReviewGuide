@@ -857,6 +857,8 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
                   onSend={handleSendMessage}
                   disabled={isStreaming}
                   placeholder="Ask anything — best headphones, Tokyo trip, laptop deals..."
+                  autoFocus
+                  focusToken={sessionId}
                 />
                 {affiliateDisclosure}
               </div>
