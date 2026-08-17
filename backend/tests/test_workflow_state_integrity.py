@@ -68,3 +68,97 @@ async def test_simulated_reducer_yields_no_duplicates():
     assert len(merged) == len(PRIOR) + 1
     contents = [m["content"] for m in merged]
     assert contents.count("best espresso machine under $500") == 1
+
+
+# ---------------------------------------------------------------------------
+# Task 2 — resumed messages bypass moderation: the resume branch manufactured
+# policy_status="allow" and returned before safety_agent_instance.execute was
+# called, so blockable content sent mid-clarification skipped safety entirely.
+# ---------------------------------------------------------------------------
+
+BLOCKED_RESULT = {
+    "policy_status": "block",
+    "sanitized_text": "…",
+    "redaction_map": {},
+    "health_advisory": False,
+    "errors": ["Content flagged for: hate/threatening"],
+}
+
+
+@pytest.mark.asyncio
+async def test_resumed_message_is_still_moderated():
+    """A blockable message sent while a clarification halt is pending must be
+    blocked, not routed to the clarifier as a slot answer."""
+    halt = {"intent": "product", "slots": {"category": "laptops"},
+            "followups": [{"slot": "budget", "question": "Budget?"}], "plan": None}
+
+    fake_exec = AsyncMock(return_value=dict(BLOCKED_RESULT))
+    with patch.object(wf.safety_agent_instance, "execute", fake_exec), \
+         patch("app.services.halt_state_manager.HaltStateManager.check_halt_exists",
+               AsyncMock(return_value=True)), \
+         patch("app.services.halt_state_manager.HaltStateManager.load_halt_state",
+               AsyncMock(return_value=halt)):
+        update = await wf.safety_node({
+            "session_id": "s1",
+            "user_message": "<blockable content>",
+            "conversation_history": [],
+        })
+
+    fake_exec.assert_awaited()          # moderation actually ran
+    assert update["policy_status"] == "block"
+    assert update.get("next_agent") != "clarifier"
+
+
+@pytest.mark.asyncio
+async def test_clean_resumed_message_still_routes_to_clarifier():
+    """The halt/resume contract survives: a clean answer resumes clarification
+    with restored intent and slots."""
+    halt = {"intent": "product", "slots": {"category": "laptops"},
+            "followups": [{"slot": "budget", "question": "Budget?"}], "plan": None}
+
+    fake_exec = AsyncMock(return_value={
+        "policy_status": "allow", "sanitized_text": "under $800",
+        "redaction_map": {}, "health_advisory": False,
+    })
+    with patch.object(wf.safety_agent_instance, "execute", fake_exec), \
+         patch("app.services.halt_state_manager.HaltStateManager.check_halt_exists",
+               AsyncMock(return_value=True)), \
+         patch("app.services.halt_state_manager.HaltStateManager.load_halt_state",
+               AsyncMock(return_value=halt)):
+        update = await wf.safety_node({
+            "session_id": "s1",
+            "user_message": "under $800",
+            "conversation_history": [],
+        })
+
+    fake_exec.assert_awaited()
+    assert update["next_agent"] == "clarifier"
+    assert update["intent"] == "product"
+    assert update["slots"] == {"category": "laptops"}
+
+
+@pytest.mark.asyncio
+async def test_resumed_message_returns_history_delta_too():
+    """The old early return skipped the history append entirely — the resume
+    path must return the same one-message delta as the normal path."""
+    halt = {"intent": "product", "slots": {"category": "laptops"},
+            "followups": [{"slot": "budget", "question": "Budget?"}], "plan": None}
+
+    fake_exec = AsyncMock(return_value={
+        "policy_status": "allow", "sanitized_text": "under $800",
+        "redaction_map": {}, "health_advisory": False,
+    })
+    with patch.object(wf.safety_agent_instance, "execute", fake_exec), \
+         patch("app.services.halt_state_manager.HaltStateManager.check_halt_exists",
+               AsyncMock(return_value=True)), \
+         patch("app.services.halt_state_manager.HaltStateManager.load_halt_state",
+               AsyncMock(return_value=halt)):
+        update = await wf.safety_node({
+            "session_id": "s1",
+            "user_message": "under $800",
+            "conversation_history": list(PRIOR),
+        })
+
+    assert update["conversation_history"] == [
+        {"role": "user", "content": "under $800"}
+    ]

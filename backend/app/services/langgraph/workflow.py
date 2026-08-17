@@ -57,57 +57,13 @@ async def safety_node(state: GraphState) -> Dict[str, Any]:
 
     async def _run_safety(state: GraphState) -> Dict[str, Any]:
         """Inner coroutine so run_stage_with_budget can cancel it cleanly."""
-        # Check if we're resuming from a halted state
         session_id = state.get("session_id")
-        logger.info(f"  Checking for halt state with session_id: {session_id}")
-        if session_id:
-            try:
-                from app.services.halt_state_manager import HaltStateManager
 
-                halted_state_exists = await HaltStateManager.check_halt_exists(session_id)
-                logger.info(f"  Halt state exists: {halted_state_exists}")
-
-                if halted_state_exists:
-                    halt_state_data = await HaltStateManager.load_halt_state(session_id)
-
-                    if halt_state_data:
-                        logger.info(f"  Found halt state - intent: {halt_state_data.get('intent')}, slots: {halt_state_data.get('slots')}")
-
-                        followups = halt_state_data.get("followups", [])
-
-                        if not followups or len(followups) == 0:
-                            logger.info("  ✗ Halt state exists but NO followups - treating as NEW query, clearing stale halt state")
-                            await HaltStateManager.delete_halt_state(session_id)
-                        else:
-                            logger.info(f"  ✓ Halt state has {len(followups)} followup(s) - RESUMING TO CLARIFIER")
-
-                            resume_update = {
-                                "policy_status": "allow",
-                                "sanitized_text": state.get("user_message"),
-                                "redaction_map": {},
-                                "current_agent": "safety",
-                                "next_agent": "clarifier",
-                            }
-
-                            if halt_state_data.get("intent"):
-                                resume_update["intent"] = halt_state_data["intent"]
-                                logger.info(f"  ✓ RESTORED INTENT: {halt_state_data['intent']}")
-
-                            if halt_state_data.get("slots"):
-                                resume_update["slots"] = halt_state_data["slots"]
-                                logger.info(f"  ✓ RESTORED SLOTS: {halt_state_data['slots']}")
-
-                            if halt_state_data.get("plan"):
-                                resume_update["plan"] = halt_state_data["plan"]
-                                num_steps = len(halt_state_data["plan"].get("steps", []))
-                                logger.info(f"  ✓ RESTORED PLAN: {num_steps} steps")
-
-                            return resume_update
-                else:
-                    logger.info("  No halt state found - routing to intent agent (normal flow)")
-            except Exception as e:
-                logger.error(f"Error checking halt state: {e}", exc_info=True)
-
+        # Moderation runs on EVERY message, resumed or not. The old code
+        # manufactured policy_status="allow" and returned before execute() on
+        # the resume path, so blockable content sent mid-clarification skipped
+        # safety (and detect_health_advisory) entirely (round-2 sweep,
+        # 2026-07-31). Moderate first, route second.
         result = await safety_agent_instance.execute(state)
 
         user_message = state.get("user_message")
@@ -123,6 +79,65 @@ async def safety_node(state: GraphState) -> Dict[str, Any]:
                 "content": user_message
             })
             logger.info("[SafetyAgent] Appending user message to conversation_history (delta)")
+
+        # The halt lookup now only decides ROUTING — a blocked message never
+        # resumes clarification. Gate on "block" alone (not on errors) so the
+        # safety agent's fail-open API-error result still resumes as before.
+        halt_state_data = None
+        if result["policy_status"] != "block" and session_id:
+            logger.info(f"  Checking for halt state with session_id: {session_id}")
+            try:
+                from app.services.halt_state_manager import HaltStateManager
+
+                halted_state_exists = await HaltStateManager.check_halt_exists(session_id)
+                logger.info(f"  Halt state exists: {halted_state_exists}")
+
+                if halted_state_exists:
+                    loaded = await HaltStateManager.load_halt_state(session_id)
+
+                    if loaded:
+                        logger.info(f"  Found halt state - intent: {loaded.get('intent')}, slots: {loaded.get('slots')}")
+
+                        followups = loaded.get("followups", [])
+
+                        if not followups or len(followups) == 0:
+                            logger.info("  ✗ Halt state exists but NO followups - treating as NEW query, clearing stale halt state")
+                            await HaltStateManager.delete_halt_state(session_id)
+                        else:
+                            logger.info(f"  ✓ Halt state has {len(followups)} followup(s) - RESUMING TO CLARIFIER")
+                            halt_state_data = loaded
+                else:
+                    logger.info("  No halt state found - routing to intent agent (normal flow)")
+            except Exception as e:
+                logger.error(f"Error checking halt state: {e}", exc_info=True)
+
+        if halt_state_data is not None:
+            resume_update = {
+                "policy_status": result["policy_status"],
+                "sanitized_text": result["sanitized_text"],
+                "redaction_map": result["redaction_map"],
+                "health_advisory": result.get("health_advisory", False),
+                "current_agent": "safety",
+                "next_agent": "clarifier",
+                # The old early return skipped the history append entirely —
+                # the resume path returns the same delta as the normal path.
+                "conversation_history": history_delta,
+            }
+
+            if halt_state_data.get("intent"):
+                resume_update["intent"] = halt_state_data["intent"]
+                logger.info(f"  ✓ RESTORED INTENT: {halt_state_data['intent']}")
+
+            if halt_state_data.get("slots"):
+                resume_update["slots"] = halt_state_data["slots"]
+                logger.info(f"  ✓ RESTORED SLOTS: {halt_state_data['slots']}")
+
+            if halt_state_data.get("plan"):
+                resume_update["plan"] = halt_state_data["plan"]
+                num_steps = len(halt_state_data["plan"].get("steps", []))
+                logger.info(f"  ✓ RESTORED PLAN: {num_steps} steps")
+
+            return resume_update
 
         update = {
             "policy_status": result["policy_status"],
