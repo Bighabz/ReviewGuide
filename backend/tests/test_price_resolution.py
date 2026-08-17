@@ -164,3 +164,54 @@ def test_title_only_renewed_source_cannot_launder():
     amazon = next(o for o in offers if o["merchant"] == "Amazon")
     assert amazon["price"] == 147.26
     assert _offer_condition_label(amazon) is not None
+
+
+# ---------------------------------------------------------------------------
+# Task 4 — deterministic election across ALL offers (not offers[0] per group).
+# Same query -> different provider ordering used to mean $668 vs $209.99.
+# ---------------------------------------------------------------------------
+
+import random
+
+from mcp_server.tools.product_compose import _assemble_offers_for_product
+
+
+def _groups():
+    """Two provider groups, multiple offers each, deliberately shuffled."""
+    return [
+        {"provider": "ebay", "product_name": "Breville Barista Express", "offers": [
+            make_offer("Breville Barista Express", 668.00, merchant="Marketplace", source="ebay"),
+            make_offer("Breville Barista Express", 209.99, merchant="Unknown", source="ebay"),
+        ]},
+        {"provider": "serper_shopping", "product_name": "Breville Barista Express", "offers": [
+            make_offer("Breville Barista Express", 699.95, merchant="Best Buy", source="serper_shopping"),
+        ]},
+    ]
+
+
+def test_assembly_is_order_independent():
+    baseline = _assemble_offers_for_product("Breville Barista Express", _groups())
+    base_prices = sorted(_extract_price(o) for o in baseline)
+    base_first = baseline[0]["merchant"]
+    rng = random.Random(42)
+    for _ in range(25):
+        groups = _groups()
+        rng.shuffle(groups)
+        for g in groups:
+            rng.shuffle(g["offers"])
+        shuffled = _assemble_offers_for_product("Breville Barista Express", groups)
+        assert sorted(_extract_price(o) for o in shuffled) == base_prices
+        assert shuffled[0]["merchant"] == base_first  # first-element reads stay stable
+
+
+def test_assembly_keeps_every_offer_not_just_first():
+    out = _assemble_offers_for_product("Breville Barista Express", _groups())
+    assert len(out) == 3  # not 2 (one-per-group)
+
+
+def test_assembly_survives_unpriced_offers():
+    groups = _groups()
+    groups[0]["offers"].append(make_offer("Breville Barista Express", 0,
+                                          merchant="MockAffiliate"))
+    out = _assemble_offers_for_product("Breville Barista Express", groups)
+    assert len(out) == 4  # no TypeError, unpriced offer retained (carries links)

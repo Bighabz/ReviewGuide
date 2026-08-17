@@ -831,6 +831,69 @@ _ACCESSORY_NOUN_RE = re.compile(
 _ACCESSORY_FOR_RE = re.compile(r"\b(?:for|fits|compatible with)\b", re.IGNORECASE)
 
 
+def _assemble_offers_for_product(product_name: str, all_affiliate_groups: list) -> list:
+    """Collect EVERY offer from every matched provider group, sanitized and in
+    deterministic order.
+
+    The old inline loop appended only offers[0] per group although
+    product_affiliate returns them all, and downstream first-element reads
+    (backfill source, headline election) were provider-order dependent — the
+    audit's $668-then-$209.99 swing between identical queries. Sorting by the
+    election key (new-condition first, serper next, then price, then merchant)
+    makes every first-element read stable; unpriced offers coalesce to +inf so
+    they sort last instead of raising TypeError."""
+    from app.core.centralized_logger import get_logger
+    _logger = get_logger(__name__)
+
+    assembled = []
+    for a in all_affiliate_groups:
+        if _fuzzy_product_match(product_name, a.get("product_name", "")) and a.get("offers"):
+            provider = a.get("provider", "")
+            for offer in a["offers"]:
+                # Sanitize provider text fields at the single entry point into
+                # card building. Scraped/marketplace APIs occasionally return
+                # structured values (a dict/list) where a plain string is
+                # expected — a dict url crashed every downstream `.lower()`
+                # call and killed the whole response (prod incident
+                # 2026-06-02). Blank the bad value, log which provider sent
+                # it, and let the card degrade gracefully instead.
+                for _field, _default in (("merchant", provider.title()), ("currency", "USD"), ("url", ""), ("image_url", "")):
+                    _raw = offer.get(_field, _default)
+                    if not isinstance(_raw, str):
+                        _logger.warning(
+                            f"[product_compose] Non-string '{_field}' from provider "
+                            f"'{provider}' for {product_name}: {type(_raw).__name__}({str(_raw)[:120]}) — blanked"
+                        )
+                assembled.append({
+                    "merchant": _str_or(offer.get("merchant"), provider.title()),
+                    "price": offer.get("price", 0),
+                    "currency": _str_or(offer.get("currency"), "USD"),
+                    "url": _str_or(offer.get("url"), ""),
+                    "image_url": _str_or(offer.get("image_url"), ""),
+                    "rating": offer.get("rating"),
+                    "review_count": offer.get("review_count"),
+                    # Condition honesty ($407-class): the provider's condition
+                    # field + the listing title are what _offer_condition_label
+                    # reads to tag Renewed/Used offers on the card.
+                    "condition": _str_or(offer.get("condition"), ""),
+                    "title": _str_or(offer.get("title"), ""),
+                    "source": provider,
+                })
+
+    def _election_key(o):
+        p = _extract_price(o)
+        return (
+            0 if _offer_condition_label(o) is None else 1,
+            0 if o.get("source") == "serper_shopping" else 1,
+            p if p is not None else float("inf"),
+            str(o.get("merchant") or ""),
+            str(o.get("title") or ""),
+        )
+
+    assembled.sort(key=_election_key)
+    return assembled
+
+
 def _select_backfill_source(offers: list) -> Optional[dict]:
     """Elect the offer whose price/image backfills unpriced siblings.
     Prefers serper_shopping, then any real-priced offer — but an UNLABELLED
@@ -1238,41 +1301,9 @@ async def product_compose(state: Dict[str, Any]) -> Dict[str, Any]:
                     logger.info(f"[product_compose] Suppressed accessory product: {product_name}")
                     continue
 
-            # Find matching affiliate links from ALL providers
-            all_offers_for_product = []
-            for a in all_affiliate_groups:
-                if _fuzzy_product_match(product_name, a.get("product_name", "")) and a.get("offers"):
-                    provider = a.get("provider", "")
-                    offer = a["offers"][0]
-                    # Sanitize provider text fields at the single entry point into card
-                    # building. Scraped/marketplace APIs occasionally return structured
-                    # values (a dict/list) where a plain string is expected — a dict url
-                    # crashed every downstream `.lower()` call and killed the whole
-                    # response (prod incident 2026-06-02: "'dict' object has no
-                    # attribute 'lower'"). Blank the bad value, log which provider sent
-                    # it, and let the card degrade gracefully instead.
-                    for _field, _default in (("merchant", provider.title()), ("currency", "USD"), ("url", ""), ("image_url", "")):
-                        _raw = offer.get(_field, _default)
-                        if not isinstance(_raw, str):
-                            logger.warning(
-                                f"[product_compose] Non-string '{_field}' from provider "
-                                f"'{provider}' for {product_name}: {type(_raw).__name__}({str(_raw)[:120]}) — blanked"
-                            )
-                    all_offers_for_product.append({
-                        "merchant": _str_or(offer.get("merchant"), provider.title()),
-                        "price": offer.get("price", 0),
-                        "currency": _str_or(offer.get("currency"), "USD"),
-                        "url": _str_or(offer.get("url"), ""),
-                        "image_url": _str_or(offer.get("image_url"), ""),
-                        "rating": offer.get("rating"),
-                        "review_count": offer.get("review_count"),
-                        # Condition honesty ($407-class): the provider's condition
-                        # field + the listing title are what _offer_condition_label
-                        # reads to tag Renewed/Used offers on the card.
-                        "condition": _str_or(offer.get("condition"), ""),
-                        "title": _str_or(offer.get("title"), ""),
-                        "source": provider
-                    })
+            # Find matching affiliate links from ALL providers — every offer,
+            # deterministically ordered (PLAN-1 T4; was offers[0] per group).
+            all_offers_for_product = _assemble_offers_for_product(product_name, all_affiliate_groups)
 
             if all_offers_for_product:
                 # Marketplace price hygiene: drop scraped-noise offers (accessory/scam
