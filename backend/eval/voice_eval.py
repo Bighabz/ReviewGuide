@@ -188,7 +188,8 @@ _BLOG_SCHEMA_TAIL = '''  "top_pick": "<the EXACT product name of your #1 pick, c
 
 _CONSOLIDATED_SCHEMA_TAIL = '''  "top_pick": "<the EXACT product name of your #1 pick, copied verbatim from the product list — the same product your body names first>",
   "consensus": {"<product name>": "<3-5 sentence review consensus summary>", "...": "..."},
-  "descriptions": {"<product name>": "<15-25 word factual description>", "...": "..."}
+  "descriptions": {"<product name>": "<15-25 word factual description>", "...": "..."},
+  "pros_cons": {"<product name>": {"pros": ["<short factual strength>", "..."], "cons": ["<short factual caveat>", "..."]}, "...": "..."}
 }'''
 
 _CONSOLIDATED_EXTRA_RULES = """
@@ -206,7 +207,16 @@ DESCRIPTIONS RULES (descriptions field):
 - Keys are the EXACT product names copied verbatim from the product list
 - Each value: a factual 15-25 word description — key features, best use case, who it's ideal for
 - NEVER invent or assume personal details; write objectively about the product's strengths
-- Vary the descriptions — don't repeat the same sentence pattern"""
+- Vary the descriptions — don't repeat the same sentence pattern
+
+PROS_CONS RULES (pros_cons field):
+- One entry for EACH of the top 3 products (all products if fewer than 3)
+- 2-3 pros and 1-2 cons per product, each a short factual phrase (max ~12 words)
+- Ground every item in the REVIEW SIGNAL you were given (ratings, volume,
+  consensus themes). If you have no review signal for a product, return empty
+  lists for it — NEVER invent from general knowledge
+- These are synthesis, not quotes: never quote, never attribute, never truncate
+  source text into an item"""
 
 CONSOLIDATED_ROLE = BLOG_ROLE.replace(_BLOG_SCHEMA_TAIL, _CONSOLIDATED_SCHEMA_TAIL) + _CONSOLIDATED_EXTRA_RULES
 
