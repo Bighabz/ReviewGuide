@@ -184,6 +184,59 @@ def capture_freetext_answer(
     return stripped or text
 
 
+# ── PLAN-5 T3: follow-up questions about the previous answer ────────────────
+# Interrogatives that refer back to an answer already given rather than
+# starting a new search. Requires prior context — with no previous answer
+# there is nothing to follow up on.
+_FOLLOWUP_LEAD_RE = re.compile(
+    r"^\s*(?:what|which|why|how|where|when|who|is|are|does|do|did|can|could|would|should)\b",
+    re.IGNORECASE,
+)
+# References that only make sense against a previous answer.
+_BACKREF_RE = re.compile(
+    r"\b(?:your|you)\b|\bthat one\b|\bthe pick\b|\byour pick\b|\bover the\b|"
+    r"\binstead of\b|\bthese\b|\bthose\b|\bit\b",
+    re.IGNORECASE,
+)
+
+
+def _mentions_known_entity(lowered: str, known_names: list) -> bool:
+    """True when the message names a product/category from the previous turn.
+    Token-level so "the GermGuardian" matches the stored "GermGuardian AC4825"."""
+    for name in known_names:
+        if not name:
+            continue
+        nl = str(name).lower()
+        if nl in lowered:
+            return True
+        for tok in nl.split():
+            if len(tok) > 3 and tok in lowered:
+                return True
+    return False
+
+
+def is_followup_question(message: str, last_search_context: dict) -> bool:
+    """True when the message asks about the previous answer.
+
+    Such a message must be answered directly. Re-running clarification on it is
+    the most visible frustration in the audit: asking "which reviews support
+    your pick?" and getting a budget questionnaire back.
+    """
+    if not message or not last_search_context:
+        return False
+    text = message.strip()
+    if not text.endswith("?") and not _FOLLOWUP_LEAD_RE.match(text):
+        return False
+
+    lowered = text.lower()
+    known = [str(last_search_context.get("category") or "")]
+    known += [str(n) for n in (last_search_context.get("product_names") or [])]
+
+    return bool(_FOLLOWUP_LEAD_RE.match(text)) and (
+        _mentions_known_entity(lowered, known) or bool(_BACKREF_RE.search(text))
+    )
+
+
 # After this many ask-more rounds the next click runs the search instead of
 # digging deeper — by then the remaining optional slots are bottom-of-barrel.
 _ASK_MORE_MAX_ROUNDS = 2

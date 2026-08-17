@@ -112,6 +112,45 @@ async def safety_node(state: GraphState) -> Dict[str, Any]:
                 logger.error(f"Error checking halt state: {e}", exc_info=True)
 
         if halt_state_data is not None:
+            # ── PLAN-5 T1×T3 composition (binding order) ──────────────────
+            # 1. When exactly ONE slot is open and the message plausibly fills
+            #    it, it is a slot answer — NEVER rerouted (T1 wins).
+            # 2. Otherwise, a question about the previous answer routes to
+            #    intent for a direct answer and the halt is cleared (T3).
+            # 3. Otherwise resume clarification as before.
+            from app.agents.clarifier_agent import (
+                capture_freetext_answer,
+                is_followup_question,
+            )
+
+            _resume_msg = result.get("sanitized_text") or user_message or ""
+            _halt_slots = halt_state_data.get("slots") or {}
+            _halt_followups = [
+                f for f in (halt_state_data.get("followups") or []) if isinstance(f, dict)
+            ]
+            _open_unanswered = [
+                f for f in _halt_followups if not _halt_slots.get(f.get("slot"))
+            ]
+            _plausibly_fills_slot = (
+                len(_open_unanswered) == 1
+                and capture_freetext_answer(
+                    _resume_msg, _open_unanswered[0].get("slot"), _halt_followups
+                ) is not None
+            )
+
+            # Clarification halts don't reliably carry last_search_context —
+            # fall back to the halt's own slots as context (validation catch).
+            _fu_context = (
+                halt_state_data.get("last_search_context")
+                or state.get("last_search_context")
+                or ({"category": _halt_slots["category"]} if _halt_slots.get("category") else {})
+            )
+
+            is_followup = (
+                not _plausibly_fills_slot
+                and is_followup_question(_resume_msg, _fu_context)
+            )
+
             resume_update = {
                 "policy_status": result["policy_status"],
                 "sanitized_text": result["sanitized_text"],
@@ -123,6 +162,16 @@ async def safety_node(state: GraphState) -> Dict[str, Any]:
                 # the resume path returns the same delta as the normal path.
                 "conversation_history": history_delta,
             }
+
+            if is_followup:
+                logger.info("  ✓ Follow-up question about the previous answer — answering, not re-clarifying")
+                resume_update["next_agent"] = "intent"
+                resume_update["followups"] = []
+                try:
+                    from app.services.halt_state_manager import HaltStateManager
+                    await HaltStateManager.delete_halt_state(session_id)
+                except Exception as e:
+                    logger.error(f"Error clearing halt state for follow-up: {e}")
 
             if halt_state_data.get("intent"):
                 resume_update["intent"] = halt_state_data["intent"]
