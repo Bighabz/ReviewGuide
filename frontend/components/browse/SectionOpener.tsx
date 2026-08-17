@@ -26,7 +26,7 @@ export default function SectionOpener({ category }: { category: BrowseCategory }
       <header className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-10 items-stretch px-4 pt-2">
         <div className="flex flex-col justify-center py-6 md:py-10 order-2 md:order-1">
           <p className="text-[11px] font-semibold uppercase tracking-[0.24em]" style={{ color: 'var(--accent)' }}>
-            The Guide · Nº {String(number).padStart(2, '0')}
+            The Guide · Nº {number}
           </p>
           <h1
             className="font-serif tracking-tight mt-3"

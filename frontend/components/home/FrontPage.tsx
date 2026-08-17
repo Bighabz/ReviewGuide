@@ -144,7 +144,8 @@ export function CategoryIndex() {
             style={{ borderBottom: '1px solid var(--border)' }}
           >
             <span className="font-serif italic text-xl w-8 shrink-0 text-right" style={{ color: 'var(--border-strong)' }}>
-              {String(i + 1).padStart(2, '0')}
+              {/* No leading zero — "01" reads as "0l" in italic serif (QA). */}
+              {i + 1}
             </span>
             <span className="w-12 h-12 rounded-md overflow-hidden shrink-0" style={{ background: 'var(--surface)' }}>
               <img src={cat.image} alt="" loading="lazy" className="w-full h-full object-cover" />

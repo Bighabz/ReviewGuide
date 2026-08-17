@@ -72,7 +72,9 @@ export default function ReviewConsensus({ data, title = 'How They Compare' }: Re
                 style={{ color: 'var(--terra)' }}
                 aria-hidden="true"
               >
-                {String(product.rank).padStart(2, '0')}
+                {/* No leading zero: none of the loaded faces has a slashed
+                    zero, and in italic display type "01" reads as "0l" (QA). */}
+                {product.rank}
               </span>
               {/* font-serif (Tailwind → Newsreader) rather than rg-serif: the
                   globals.css h1–h6 element rule assigns Instrument Serif and
