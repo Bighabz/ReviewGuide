@@ -193,3 +193,56 @@ def test_completeness_reflects_stage_timeouts_and_fatal_fallbacks():
     # moot (a fail-closed clarifier timeout re-asks instead of degrading).
     clarifier_only = [{"stage": "clarifier", "timeout_hit": True, "error_class": "transient"}]
     assert _derive_completeness(clarifier_only) == "full"
+
+
+# ---------------------------------------------------------------------------
+# DOCTRINE D5 flips (decided 2026-08-17): failed PROTECTIVE gates fail CLOSED.
+# A hung safety stage must never route content through "unchecked"; a timed-out
+# clarifier must re-ask, never silently skip clarification (the F6 regression).
+# ---------------------------------------------------------------------------
+
+import asyncio
+
+
+@pytest.mark.asyncio
+async def test_safety_timeout_fails_closed(monkeypatch):
+    from app.services import stage_telemetry as st
+
+    monkeypatch.setitem(st.STAGE_BUDGETS, "safety", (0.02, 0.05))
+
+    async def _hang(state):
+        await asyncio.sleep(2)
+
+    with patch.object(wf.safety_agent_instance, "execute", _hang):
+        update = await wf.safety_node({
+            "session_id": "s1",
+            "user_message": "best espresso machine",
+            "conversation_history": [],
+        })
+
+    assert update.get("next_agent") is None       # never proceeds unmoderated
+    assert update.get("status") == "error"
+    assert update.get("assistant_text")           # the user is told to retry
+
+
+@pytest.mark.asyncio
+async def test_clarifier_timeout_reasks_instead_of_skipping(monkeypatch):
+    from app.services import stage_telemetry as st
+
+    monkeypatch.setitem(st.STAGE_BUDGETS, "clarifier", (0.02, 0.05))
+
+    async def _hang(state):
+        await asyncio.sleep(2)
+
+    with patch.object(wf.clarifier_agent_instance, "execute", _hang):
+        update = await wf.clarifier_node({
+            "session_id": "s1",
+            "user_message": "best espresso machine",
+            "slots": {"category": "espresso machines"},
+            "plan": {"steps": []},
+            "conversation_history": [],
+        })
+
+    assert update.get("next_agent") is None       # never proceeds as-is
+    assert update.get("status") == "halted"
+    assert update.get("assistant_text")           # the user is re-asked

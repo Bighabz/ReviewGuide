@@ -214,16 +214,25 @@ async def safety_node(state: GraphState) -> Dict[str, Any]:
 
         return update
 
-    # RFC §1.1 — fallback on hard timeout: pass through with policy_status="unchecked"
+    # DOCTRINE D5 (decided 2026-08-17): a failed PROTECTIVE gate fails CLOSED.
+    # The old RFC §1.1 fallback routed content through as policy_status
+    # "unchecked" — a hung safety stage now blocks and asks for a retry,
+    # never proceeds unmoderated.
     fallback = {
         "policy_status": "unchecked",
         "sanitized_text": state.get("user_message"),
         "redaction_map": {},
-        # Classified locally so a timed-out safety stage still routes a medical
-        # query to the caveat — the detector is a regex and cannot itself hang.
+        # Classified locally so a timed-out safety stage still records a medical
+        # query correctly — the detector is a regex and cannot itself hang.
         "health_advisory": detect_health_advisory(state.get("user_message", "")),
         "current_agent": "safety",
-        "next_agent": "intent",
+        "next_agent": None,
+        "status": "error",
+        "assistant_text": (
+            "The safety check timed out before your message could be "
+            "processed. Please send it again."
+        ),
+        "errors": ["safety_stage_timeout"],
     }
 
     update, telemetry = await run_stage_with_budget(
@@ -437,14 +446,22 @@ async def clarifier_node(state: GraphState) -> Dict[str, Any]:
 
         return update
 
-    # RFC §1.1 — fallback on hard timeout: skip clarification and proceed as-is
+    # DOCTRINE D5 (decided 2026-08-17): the old silent-skip fallback already
+    # caused QA Round 4's F6 regression (stage_telemetry.py admits it). A
+    # timed-out clarification now RE-ASKS instead of proceeding with unfilled
+    # slots — the protective gate fails closed.
     fallback = {
         "slots": state.get("slots", {}),
-        "followups": [],
+        "followups": state.get("followups", []) or [],
         "current_agent": "clarifier",
-        "next_agent": "plan_executor",
-        "status": "running",
-        "_proceed": True,
+        "next_agent": None,
+        "status": "halted",
+        "halt": True,
+        "assistant_text": (
+            "That took longer than it should have — mind sending your last "
+            "message again?"
+        ),
+        "_proceed": False,
         "_next_question": None,
     }
 
