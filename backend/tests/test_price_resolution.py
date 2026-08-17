@@ -38,12 +38,12 @@ def test_cord_is_an_accessory_keyword():
     assert "cord" in ACCESSORY_KEYWORDS
 
 
-def test_cordless_query_disables_the_accessory_filter():
-    # BUG: `if kw in query_lower: return affiliate_products` substring-matches,
-    # so ANY "cordless X" query runs with the accessory filter entirely off.
-    # Verified root cause of the audit's $15.98 replacement-filter-as-vacuum.
-    # Inverted by Task 2.
-    assert any(kw in "cordless vacuum for pet hair" for kw in ACCESSORY_KEYWORDS)
+def test_cordless_query_no_longer_disables_the_filter():
+    # Inverted by Task 2: boundary matching. (The raw substring overlap that
+    # caused the bypass — "cordless" ⊃ "cord" — still exists in the keyword
+    # set; the matcher's word boundaries are what neutralize it.)
+    from mcp_server.tools.product_compose import _matches_accessory_keyword
+    assert _matches_accessory_keyword("cordless vacuum for pet hair") is False
 
 
 def test_single_priced_offer_gets_no_hygiene():
@@ -68,3 +68,53 @@ def test_backfill_price_laundering():
     # inline); inverted by Task 3's assembly-level tests.
     unpriced_new = make_offer("Sony WH-1000XM5", 0, merchant="Amazon", condition="")
     assert _offer_condition_label(unpriced_new) is None  # looks new pre-backfill
+
+
+# ---------------------------------------------------------------------------
+# Task 2 — boundary-aware accessory matching at every consumer site.
+# ---------------------------------------------------------------------------
+
+from mcp_server.tools.product_compose import (
+    _matches_accessory_keyword,
+    _filter_relevant_products,
+)
+
+
+@pytest.mark.parametrize("text,expected", [
+    # Boundary correctness — the bug class:
+    ("cordless vacuum for pet hair", False),      # "cord" must NOT match inside "cordless"
+    ("best suitcase for travel", False),          # "case" must NOT match inside "suitcase"
+    ("standing desk with hutch", False),          # "stand" must NOT match inside "standing"
+    # Legitimate accessory intent — must still match:
+    ("replacement filter for my Shark ION", True),
+    ("power cord for LG monitor", True),
+    ("laptop case 15 inch", True),
+    ("hepa filter cartridge 2-pack", True),
+])
+def test_boundary_aware_keyword_matching(text, expected):
+    assert _matches_accessory_keyword(text) is expected
+
+
+def test_cordless_vacuum_offers_survive_the_title_filter():
+    """End goal: a cordless-vacuum query keeps the vacuum and drops the filter."""
+    affiliate = {"amazon": [{
+        "product_name": "Shark ION Robot Vacuum RV750",
+        "offers": [
+            make_offer("Shark ION Robot Vacuum RV750, Cordless", 249.00),
+            make_offer("Shark RV750 Replacement Filter 2-Pack", 15.98),
+        ],
+    }]}
+    out = _filter_relevant_products(affiliate, "cordless vacuum for pet hair")
+    titles = [o["title"] for g in out["amazon"] for o in g["offers"]]
+    assert any("Robot Vacuum RV750, Cordless" in t for t in titles)
+    assert not any("Replacement Filter" in t for t in titles)
+
+
+def test_accessory_intent_query_still_gets_accessories():
+    """Collateral guard: someone shopping FOR a filter must not lose it."""
+    affiliate = {"amazon": [{
+        "product_name": "Shark RV750 Replacement Filter",
+        "offers": [make_offer("Shark RV750 Replacement Filter 2-Pack", 15.98)],
+    }]}
+    out = _filter_relevant_products(affiliate, "replacement filter for my Shark ION")
+    assert out == affiliate  # accessory intent → filter stays disabled

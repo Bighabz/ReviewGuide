@@ -359,6 +359,25 @@ ACCESSORY_KEYWORDS = {
 }
 
 
+# Accessory keywords were substring-matched at four sites; "cordless" contains
+# "cord", so every cordless query DISABLED the filter at the query site while
+# the same substring rule would suppress legitimate products at the title/name
+# sites. One boundary-aware matcher, used everywhere (QA sweep 2026-07-31).
+_ACCESSORY_KEYWORD_RES = [
+    re.compile(r"(?<![\w-])" + re.escape(kw) + r"(?![\w-])", re.IGNORECASE)
+    for kw in ACCESSORY_KEYWORDS
+]
+
+
+def _matches_accessory_keyword(text: str) -> bool:
+    """True when text contains an ACCESSORY_KEYWORDS entry as a whole
+    word/phrase. `(?<![\\w-])`/`(?![\\w-])` boundaries stop "cord" matching
+    inside "cordless" and "case" inside "suitcase"."""
+    if not text:
+        return False
+    return any(rx.search(text) for rx in _ACCESSORY_KEYWORD_RES)
+
+
 def _fuzzy_product_match(query_name: str, candidate_name: str, threshold: float = 0.35) -> bool:
     """Token-overlap Jaccard similarity for fuzzy product matching."""
     # Defensive: scraped provider data can put non-strings (dicts) where product
@@ -649,10 +668,10 @@ def _filter_relevant_products(
     """
     query_lower = user_query.lower()
 
-    # If user is searching for accessories, don't filter
-    for kw in ACCESSORY_KEYWORDS:
-        if kw in query_lower:
-            return affiliate_products
+    # If user is searching for accessories, don't filter (boundary-aware:
+    # "cordless" must not disable the filter via its "cord" substring)
+    if _matches_accessory_keyword(query_lower):
+        return affiliate_products
 
     filtered = {}
     total_before = 0
@@ -669,7 +688,7 @@ def _filter_relevant_products(
                 # _str_or: a scraped title can arrive as a dict — treat as no title
                 # rather than crash (same bug class as the dict-url prod incident).
                 title_lower = _str_or(offer.get("title"), "").lower()
-                is_accessory = any(kw in title_lower for kw in ACCESSORY_KEYWORDS)
+                is_accessory = _matches_accessory_keyword(title_lower)
                 if not is_accessory:
                     clean_offers.append(offer)
 
@@ -1164,9 +1183,9 @@ async def product_compose(state: Dict[str, Any]) -> Dict[str, Any]:
 
             # Skip products whose name matches an accessory keyword
             # (supplements _filter_relevant_products which only checks offer titles)
-            if not any(kw in user_message_lower for kw in ACCESSORY_KEYWORDS):
+            if not _matches_accessory_keyword(user_message_lower):
                 product_name_lower = product_name.lower()
-                if any(kw in product_name_lower for kw in ACCESSORY_KEYWORDS):
+                if _matches_accessory_keyword(product_name_lower):
                     logger.info(f"[product_compose] Suppressed accessory product: {product_name}")
                     continue
 
@@ -1725,8 +1744,8 @@ Products to describe:
                 _bundle_items.sort(key=lambda kv: _value_rank_of(kv[0]))
             for pname, bundle in _bundle_items:
                 # Skip accessory products from the blog data (unless user is asking for accessories)
-                if not any(kw in user_message_lower for kw in ACCESSORY_KEYWORDS):
-                    if any(kw in pname.lower() for kw in ACCESSORY_KEYWORDS):
+                if not _matches_accessory_keyword(user_message_lower):
+                    if _matches_accessory_keyword(pname.lower()):
                         logger.info(f"[product_compose] Suppressed accessory from blog: {pname}")
                         continue
                 # Skip products the budget filter pruned — they must not re-enter via reviews
