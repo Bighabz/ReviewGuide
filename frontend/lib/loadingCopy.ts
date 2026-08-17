@@ -17,20 +17,26 @@ import { useEffect, useState, useRef } from 'react'
  * The full §10.1 vocabulary. Ambiguous, curious, no competitor sites.
  * Order matches the tone.md list. Frontend rotates linearly — random
  * shuffling would feel skittish and is not on-voice.
+ *
+ * Every phrase must describe a stage that ACTUALLY runs: shortlist generation
+ * (product_search), ranking (product_ranking), offer assembly and price election
+ * (product_compose), composition. Nothing here may claim web search, review
+ * reading, or citation — QA 2026-07-31 found users asking for the sources these
+ * labels implied, and there are none. Guarded by tests/honestCopy.test.ts.
  */
 export const LOADING_COPY: readonly string[] = [
-  'Searching the web…',
-  'Looking through partner reviews…',
-  'Digging for answers…',
+  'Lining up the contenders…',
   'Seeing what others are saying…',
+  'Digging for answers…',
   'Comparing the contenders…',
   'Reading the room…',
   'Weighing the tradeoffs…',
-  'Pulling the receipts…',
+  'Checking prices…',
   'Sorting the contenders…',
   'Cross-checking the specs…',
   'Hunting for the catch…',
   'Asking around…',
+  'Putting it together…',
 ] as const
 
 /**

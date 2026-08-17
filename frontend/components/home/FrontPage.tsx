@@ -69,7 +69,7 @@ export function MastheadHero() {
     // the page had content at all.
     <header className="pt-[56px] md:pt-6 pb-6 sm:pb-8 text-center px-4">
       <p className="text-[11px] font-semibold uppercase tracking-[0.24em] mb-3" style={{ color: 'var(--accent)' }}>
-        Independent buying advice · Researched live
+        Independent buying advice · Updated continuously
       </p>
 
       {/* The brand mark IS the masthead — the existing animated hero logo */}
@@ -77,8 +77,13 @@ export function MastheadHero() {
         <DiscoverHeroLogo width={280} />
       </div>
 
+      {/* Says what the system actually does: aggregates expert and owner rating
+          signal into one ranked pick. It does not read individual reviews and
+          cannot cite sources — claiming otherwise sent QA users looking for
+          receipts that do not exist. Guarded by tests/honestCopy.test.ts. */}
       <p className="text-base sm:text-lg mt-3 max-w-xl mx-auto" style={{ color: 'var(--text-secondary)' }}>
-        We read thousands of expert and owner reviews, so you get a straight answer with receipts.
+        We weigh expert and owner sentiment across the market, so you get one clear
+        pick instead of forty tabs and a maybe.
       </p>
 
       {/* Real input, terracotta submit */}

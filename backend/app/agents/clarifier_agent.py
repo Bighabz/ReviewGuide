@@ -32,6 +32,47 @@ from app.lib.toon_python import encode
 logger = get_logger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Health-advisory caveat (QA audit 2026-07-31)
+# ---------------------------------------------------------------------------
+# SafetyAgent.detect_health_advisory flags a query that asks a product to treat,
+# cure, or replace treatment for a medical condition. The final-answer composer
+# already pushes back correctly, but it fires at the very END of the turn — a
+# user who abandons at the clarifier gets room-size and budget questions and no
+# correction at all.
+#
+# Deliberately NOT a refusal. The caveat corrects the premise and then keeps
+# helping: an air purifier for a home with asthma is a legitimate purchase.
+HEALTH_CAVEAT = (
+    "Before anything else: no product here can treat a medical condition or "
+    "replace a prescribed treatment, and nothing I suggest should change how "
+    "anyone uses their medication — that's a conversation for a doctor. What I "
+    "can do is help you find something that makes the environment more "
+    "comfortable alongside proper treatment.\n\n"
+)
+
+
+def apply_health_caveat(followups_data: Any, health_advisory: bool) -> Any:
+    """Prepend the medical caveat to a clarifier payload's intro.
+
+    ``followups_data`` is the structured dict the frontend renders ({"intro":
+    str, "questions": [...]}), NOT a string — the caveat goes on the intro so the
+    question chips are left exactly as they were.
+
+    Idempotent, and a no-op when the flag is false or the payload is not a dict.
+    """
+    if not health_advisory or not isinstance(followups_data, dict):
+        return followups_data
+
+    intro = followups_data.get("intro") or ""
+    if HEALTH_CAVEAT in intro:
+        return followups_data
+
+    updated = dict(followups_data)
+    updated["intro"] = HEALTH_CAVEAT + intro
+    return updated
+
+
 # ── Outcome 2: post-results refinement chips ────────────────────────────────
 # After a shortlist renders, next_step_suggestion emits deterministic refinement
 # chips ("Show cheaper options", "Only Sony", "More premium picks", "Different

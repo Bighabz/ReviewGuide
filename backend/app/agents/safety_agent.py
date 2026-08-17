@@ -17,6 +17,57 @@ from app.services.chat_history_manager import chat_history_manager
 logger = get_logger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Health-advisory classification (QA audit 2026-07-31)
+# ---------------------------------------------------------------------------
+# Moderation covers violence / self-harm / sexual-minors / hate-threatening, so a
+# medical query reads as "allow" and flows to the clarifier, which opens with room
+# size and budget. The composer's medical pushback is correct but fires at the very
+# end — a user who abandons at the clarifier never sees it.
+#
+# This is NOT a refusal signal. An air purifier for a home with asthma is a
+# legitimate purchase; the flag only tells the clarifier to lead with a caveat.
+#
+# Deliberately narrow: it requires a TREATMENT claim near a CONDITION or MEDICATION
+# term. "Running shoes for flat feet" and "mattress for a side sleeper" are comfort
+# and fit, not treatment, and must never trip it — a false positive puts a medical
+# disclaimer on ordinary shopping.
+
+_TREATMENT_VERB = (
+    r"cure|treat|heal|fix|reverse|replace|stop(?:\s+\w+){0,2}\s+(?:using|taking)|"
+    r"get\s+off|wean\s+off|come\s+off"
+)
+_CONDITION_TERM = (
+    r"asthma|eczema|psoriasis|diabetes|arthritis|migraines?|depression|anxiety|"
+    r"blood\s+pressure|cholesterol|chronic\s+\w+|back\s+pain|insomnia|apnea|"
+    r"infections?|cancer|adhd|autism|vertigo|reflux"
+)
+_MEDICATION_TERM = (
+    r"inhalers?|insulin|medications?|medicines?|prescriptions?|antibiotics?|"
+    r"steroids?|pills?"
+)
+
+# A treatment verb within ~60 characters of a condition or medication term, in
+# either order ("cure my asthma" / "my inhaler ... stop using").
+_HEALTH_ADVISORY_RE = re.compile(
+    rf"(?:{_TREATMENT_VERB})\b[^.?!]{{0,60}}?\b(?:{_CONDITION_TERM}|{_MEDICATION_TERM})"
+    rf"|\b(?:{_CONDITION_TERM}|{_MEDICATION_TERM})\b[^.?!]{{0,60}}?(?:{_TREATMENT_VERB})",
+    re.IGNORECASE,
+)
+
+
+def detect_health_advisory(text: str) -> bool:
+    """True when a product query asks the product to treat, cure, or replace
+    treatment for a medical condition.
+
+    Not a block signal — see the module note above. Returns False for empty input
+    so callers never need to guard.
+    """
+    if not text or not text.strip():
+        return False
+    return bool(_HEALTH_ADVISORY_RE.search(text))
+
+
 class SafetyAgent:
     """Safety and Policy enforcement agent"""
 
@@ -52,11 +103,20 @@ class SafetyAgent:
                 "policy_status": "allow",
                 "sanitized_text": state["user_message"],
                 "redaction_map": {},
+                # Classified on the raw message so the caveat still fires when the
+                # rest of the safety pipeline failed open.
+                "health_advisory": detect_health_advisory(state.get("user_message", "")),
                 "errors": [f"Safety check error: {str(e)}"]
             }
 
     async def _execute_safety_checks(self, user_text: str) -> Dict[str, Any]:
         """Internal safety check execution"""
+        # Classified up front and attached to every return path, so downstream
+        # stages never have to care which branch produced the result.
+        health_advisory = detect_health_advisory(user_text)
+        if health_advisory:
+            logger.info("[SafetyAgent] Health-advisory query — clarifier will lead with a caveat")
+
         # Step 1: Content Moderation using OpenAI
         moderation_result = await self._moderate_content(user_text)
 
@@ -70,6 +130,7 @@ class SafetyAgent:
                 "policy_status": "block",
                 "sanitized_text": user_text,
                 "redaction_map": {},
+                "health_advisory": health_advisory,
                 "errors": [f"Content flagged for: {', '.join(flagged_harmful)}"]
             }
 
@@ -86,6 +147,7 @@ class SafetyAgent:
                 "policy_status": "block",
                 "sanitized_text": sanitized_text,
                 "redaction_map": redaction_map,
+                "health_advisory": health_advisory,
                 "errors": ["Potential jailbreak attempt detected"]
             }
 
@@ -98,6 +160,7 @@ class SafetyAgent:
             "policy_status": policy_status,
             "sanitized_text": sanitized_text,
             "redaction_map": redaction_map,
+            "health_advisory": health_advisory,
             "errors": []
         }
 

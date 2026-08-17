@@ -37,6 +37,7 @@ class GraphState(TypedDict):
     policy_status: str  # "allow", "block", "needs_clarification"
     sanitized_text: Optional[str]
     redaction_map: Dict[str, str]
+    health_advisory: bool  # Query asks a product to treat/cure/replace treatment — clarifier leads with a caveat (NOT a block)
 
     # Intent
     intent: Optional[str]  # "product", "service", "travel", "general", "comparison"

@@ -347,6 +347,7 @@ async def generate_chat_stream(
             "extended_search_confirmed": extended_search_confirmed,  # Flag for tiered executor
             "sanitized_text": None,
             "redaction_map": {},
+            "health_advisory": False,  # Set by safety_node; needs a default or LangGraph channels crash
             "intent": halt_state_data.get("intent") if halt_state_data else None,
             "intro_text": None,
             # Restore partial_items if resuming from consent halt

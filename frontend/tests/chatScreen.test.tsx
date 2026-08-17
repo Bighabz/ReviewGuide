@@ -65,6 +65,7 @@ vi.mock('lucide-react', () => ({
 
 import Message from '@/components/Message'
 import MessageList from '@/components/MessageList'
+import { LOADING_COPY } from '@/lib/loadingCopy'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -268,16 +269,19 @@ describe('CHAT-03 — Status display', () => {
   })
 
   it('renders a §10.1 loading phrase when isThinking=true but statusText is empty', () => {
-    // B.1: 'Thinking...' fallback removed. The empty-statusText path now
-    // shows the first phrase from tone.md §10.1 — "Searching the web…" —
-    // and the useRotatingLoadingCopy hook cycles thereafter.
+    // B.1: 'Thinking...' fallback removed. The empty-statusText path shows the
+    // first phrase of the §10.1 vocabulary and useRotatingLoadingCopy cycles
+    // thereafter. Asserted against LOADING_COPY[0] rather than a literal — the
+    // behaviour under test is "a §10.1 phrase renders", not which phrase leads.
+    // (Pinning the literal broke when QA 2026-07-31 removed the retrieval claims
+    // from the vocabulary; see tests/honestCopy.test.ts.)
     const message = makeAssistantMessage({
       content: '',
       isThinking: true,
       statusText: '',
     })
     render(<Message message={message} />)
-    expect(screen.getByText('Searching the web…')).toBeTruthy()
+    expect(screen.getByText(LOADING_COPY[0])).toBeTruthy()
   })
 
   it('does NOT render status text when isThinking=false', () => {

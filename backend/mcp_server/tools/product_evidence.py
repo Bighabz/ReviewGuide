@@ -26,7 +26,10 @@ TOOL_CONTRACT = {
         "post": ["product_normalize"]  # Compose is auto-added at end of intent
     },
     "produces": ["review_aspects"],
-    "citation_message": "Pulling the receipts…",
+    # This tool asks the model to analyse products from its own knowledge — it
+    # performs no retrieval, so it must not claim to. QA 2026-07-31: users read
+    # "Pulling the receipts…" and then asked for sources that never existed.
+    "citation_message": "Weighing the tradeoffs…",
     "is_default": True
 }
 

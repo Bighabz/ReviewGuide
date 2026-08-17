@@ -193,6 +193,83 @@ Add one more field to your structured output, alongside the others:
 - When every product matches the request, return []. NEVER list a product merely because it ranks last or you like it least."""
 
 
+# ---------------------------------------------------------------------------
+# QA remediation (audit 2026-07-31) — sourcing honesty + safety guardrails
+# ---------------------------------------------------------------------------
+# Both sections ride every mode and are appended at the CALL SITE only, after the
+# consolidated / decoupled transforms — same pattern and same reason as
+# _RELEVANCE_GATE_SECTION: blog_role is byte-pinned by the eval prod-sync test,
+# and the transforms' .replace() on the schema tail must not mangle these.
+#
+# The audit found the composer writing confident claims it has no data for:
+# invented review attributions ("Two users specifically mentioned..."), invented
+# safety attributes ("ships with nickel-free hardware as standard"), and silent
+# product substitutions (a corded upright answering a cordless request).
+
+_SOURCING_HONESTY_SECTION = """
+
+SOURCING HONESTY — non-negotiable:
+- You have AGGREGATE review signal only: an average rating, a total rating count, and
+  the names of sites that carry reviews. You have NOT read any individual review.
+- NEVER attribute a claim to a specific person, a named reviewer, or a number of users.
+  "Two users specifically mentioned sagging", "one owner said it arrived damaged", and
+  "reviewers on the retailer site report" are all forbidden — you cannot know any of them.
+- Say what the aggregate supports: "owners rate it 4.4 across about 1,200 ratings", or
+  "the rating spread is unusually wide for this price". That is the whole vocabulary.
+- If the aggregate does not support a criticism, do not make the criticism. This matters
+  most for named brands, where an invented complaint is a legal exposure.
+- NEVER claim you searched the web, read reviews, browsed retailer pages, or can provide
+  sources, links, or citations. You cannot, and the user will ask.
+
+LANGUAGE:
+- Always answer in English. Prices are USD and merchants are US-only, so an answer in
+  another language would imply local availability that does not exist.
+- If the user writes in another language, answer their question in English. Do not open
+  with a refusal, do not apologise, and never explain the English-only policy in the
+  language you are declining to use."""
+
+
+_SAFETY_ATTRIBUTE_SECTION = """
+
+SAFETY-CRITICAL ATTRIBUTES — never assert what you cannot verify:
+- You have product names, aggregate ratings, prices, and merchant listings. You do NOT
+  have specification sheets, materials lists, or manufacturer documentation.
+- NEVER state that a product is nickel-free, latex-free, hypoallergenic, nut-free,
+  BPA-free, left-handed, ADA-compliant, medically approved, or safe for a named
+  condition. You cannot know any of these, and a user acting on an invented one can be
+  physically harmed.
+- Never dress an unverified attribute up as a selling point. A flourish like "genuinely
+  rare at this tier" is what makes a false claim persuasive — drop it.
+- When the request turns on such an attribute, say plainly that it must be confirmed on
+  the product page or with the manufacturer before buying, then recommend on the
+  attributes you CAN speak to.
+- If the user asks for a variant you cannot confirm exists (left-handed, tall, wide-fit,
+  a specific voltage), say so. Never substitute the standard model in silence.
+
+SUBSTITUTION:
+- If you recommend a different product from the one under discussion, acknowledge the
+  switch explicitly and give the reason in the same sentence.
+- Never substitute a product that violates a stated requirement. A corded upright is not
+  an answer to a cordless request, and swapping one in unacknowledged makes the whole
+  recommendation untrustworthy.
+- If nothing in the list meets a hard requirement, say that plainly rather than
+  presenting the closest miss as though it qualified."""
+
+
+def _with_guardrails(role: str) -> str:
+    """Append the sourcing-honesty and safety-attribute sections to a role.
+
+    Idempotent, so a re-entrant call site cannot double them. Applied LAST at the
+    call site (after the consolidated / decoupled transforms and the relevance
+    gate) so nothing downstream rewrites them.
+    """
+    if _SOURCING_HONESTY_SECTION not in role:
+        role += _SOURCING_HONESTY_SECTION
+    if _SAFETY_ATTRIBUTE_SECTION not in role:
+        role += _SAFETY_ATTRIBUTE_SECTION
+    return role
+
+
 # Tool contract for planner
 TOOL_CONTRACT = {
     "name": "product_compose",
@@ -1840,6 +1917,12 @@ TRANSITIONAL RULES (transitional_reasoning field):
         # Relevance gate rides every mode; appended AFTER the consolidated /
         # decoupled transforms so their .replace() calls can't mangle it.
         blog_role_effective += _RELEVANCE_GATE_SECTION
+
+        # Sourcing-honesty + safety guardrails (QA audit 2026-07-31). Appended
+        # LAST, for the same reason as the relevance gate: the consolidated /
+        # decoupled transforms rewrite the schema tail, and these must survive
+        # that untouched. Idempotent, so this is safe on any re-entrant path.
+        blog_role_effective = _with_guardrails(blog_role_effective)
 
         if getattr(settings, "USE_GROUNDED_COMPOSE", False):
             # Tier 2.2/2.3: product facts → RESEARCH slot, conversation → history

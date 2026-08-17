@@ -11,10 +11,10 @@ from app.core.config import settings
 from app.core.colored_logging import get_colored_logger
 
 # Import the 5 main agent classes
-from app.agents.safety_agent import SafetyAgent
+from app.agents.safety_agent import SafetyAgent, detect_health_advisory
 from app.agents.intent_agent import IntentAgent
 from app.agents.planner_agent import PlannerAgent
-from app.agents.clarifier_agent import ClarifierAgent
+from app.agents.clarifier_agent import ClarifierAgent, apply_health_caveat
 from app.services.plan_executor import PlanExecutor
 
 # Import tiered routing nodes
@@ -124,6 +124,11 @@ async def safety_node(state: GraphState) -> Dict[str, Any]:
             "policy_status": result["policy_status"],
             "sanitized_text": result["sanitized_text"],
             "redaction_map": result["redaction_map"],
+            # QA 2026-07-31 — the clarifier reads this to lead a medical query
+            # with a caveat instead of a budget question. LangGraph merges only
+            # what the node RETURNS, so omitting it here drops it silently at the
+            # node boundary (same trap as follow_up_question below).
+            "health_advisory": result.get("health_advisory", False),
             "current_agent": "safety",
             "conversation_history": conversation_history,
         }
@@ -146,6 +151,9 @@ async def safety_node(state: GraphState) -> Dict[str, Any]:
         "policy_status": "unchecked",
         "sanitized_text": state.get("user_message"),
         "redaction_map": {},
+        # Classified locally so a timed-out safety stage still routes a medical
+        # query to the caveat — the detector is a regex and cannot itself hang.
+        "health_advisory": detect_health_advisory(state.get("user_message", "")),
         "current_agent": "safety",
         "next_agent": "intent",
     }
@@ -325,6 +333,15 @@ async def clarifier_node(state: GraphState) -> Dict[str, Any]:
     async def _run_clarifier(state: GraphState) -> Dict[str, Any]:
         """Inner coroutine wrapped by run_stage_with_budget."""
         result = await clarifier_agent_instance.execute(state)
+
+        # QA 2026-07-31 — a medical query must be corrected BEFORE slot-filling,
+        # not only in the final answer. execute() returns from many branches, so
+        # the caveat is applied here: the one place every clarifier result passes
+        # through on its way to the user.
+        if state.get("health_advisory") and result.get("next_question"):
+            result = dict(result)
+            result["next_question"] = apply_health_caveat(result["next_question"], True)
+            logger.info("[Clarifier] Health-advisory caveat prepended to clarifier intro")
 
         update = {
             "slots": result.get("slots", state.get("slots", {})),
