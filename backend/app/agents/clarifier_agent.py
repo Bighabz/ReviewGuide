@@ -137,6 +137,53 @@ def _is_ask_more(message: str) -> bool:
     return msg in _ASK_MORE_PHRASES
 
 
+# ── PLAN-5 T1: deterministic free-text slot capture ─────────────────────────
+# Lead-ins users type before the answer itself. Stripped so "I'm flying from
+# Manchester" fills the slot with "Manchester", not the whole sentence.
+_ANSWER_LEADIN_RE = re.compile(
+    r"^\s*(?:i'?m\s+)?(?:flying\s+|departing\s+|travelling\s+|traveling\s+|leaving\s+)?"
+    r"(?:from|out of|in|it'?s|its|that'?s)\s+",
+    re.IGNORECASE,
+)
+
+
+def capture_freetext_answer(
+    message: str, open_slot: str, followups: list
+) -> Optional[str]:
+    """Map a free-text message onto the slot the clarifier is waiting on.
+
+    Returns the value to store, or None when the message is not an answer —
+    a control phrase, a question, or empty. Without this the clarifier
+    re-classifies every typed reply from scratch and re-asks the same question,
+    which is what the audit hit three times in a row ("Manchester, UK").
+    Generalizes the F2 budget guard: deterministic assignment when the reply
+    plainly answers the one open question; the LLM extractor stays for
+    genuinely ambiguous multi-slot parses.
+    """
+    if not message or not message.strip() or not open_slot:
+        return None
+
+    text = _strip_suggestion_prefix(message).strip()
+    if not text:
+        return None
+
+    # Control phrases are contracts handled elsewhere (_is_skip_all / _is_ask_more).
+    if _is_skip_all(text) or _is_ask_more(text):
+        return None
+
+    # A question is a follow-up, not a slot answer. Routed by is_followup_question.
+    if text.endswith("?"):
+        return None
+
+    # Only capture when this slot is genuinely open.
+    open_slots = {f.get("slot") for f in followups if isinstance(f, dict)}
+    if open_slot not in open_slots:
+        return None
+
+    stripped = _ANSWER_LEADIN_RE.sub("", text).strip()
+    return stripped or text
+
+
 # After this many ask-more rounds the next click runs the search instead of
 # digging deeper — by then the remaining optional slots are bottom-of-barrel.
 _ASK_MORE_MAX_ROUNDS = 2
@@ -1065,12 +1112,31 @@ class ClarifierAgent(BaseAgent):
         slot_names = list(dict.fromkeys(required_slot_names + optional_slot_names))
         logger.info(f"[Clarifier Agent] Extracting {len(slot_names)} slots from user answer: {slot_names} (required: {required_slot_names}, optional: {optional_slot_names})")
 
+        # PLAN-5 T1 — deterministic single-slot capture (generalizes the F2
+        # budget guard below _extract_all_slots_from_answer): when exactly ONE
+        # question is open and the reply reads as a plain answer, assign it
+        # directly and keep the LLM extractor away from that slot. One LLM null
+        # (or an exception -> all-null) used to send the slot to
+        # still_missing_required and regenerate the same question — the
+        # audit's "Manchester, UK" asked three times.
+        open_unanswered = [f for f in followups if not current_slots.get(f.get("slot"))]
+        if len(open_unanswered) == 1:
+            _single_slot = open_unanswered[0].get("slot")
+            captured = capture_freetext_answer(user_message, _single_slot, followups)
+            if captured is not None:
+                current_slots[_single_slot] = captured
+                slot_names = [s for s in slot_names if s != _single_slot]
+                logger.info(
+                    f"[Clarifier Agent] ✅ Deterministic capture for single open slot "
+                    f"'{_single_slot}': {captured!r}"
+                )
+
         extracted_slots = await self._extract_all_slots_from_answer(
             slot_names=slot_names,
             user_message=user_message,
             followups=followups,
             optional_slots=optional_slot_names
-        )
+        ) if slot_names else {}
 
         # Update current_slots with extracted values
         still_missing_required = []
