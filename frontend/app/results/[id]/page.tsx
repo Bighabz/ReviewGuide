@@ -7,6 +7,7 @@ import type { ResultsData } from '@/lib/extractResultsData'
 import ResultsProductCard from '@/components/ResultsProductCard'
 import ResultsQuickActions from '@/components/ResultsQuickActions'
 import { HeaderBrand } from '@/components/Brand'
+import AffiliateDisclosure from '@/components/AffiliateDisclosure'
 
 interface ResultsPageProps {
   params: { id: string }
@@ -117,6 +118,10 @@ export default function ResultsPage({ params }: ResultsPageProps) {
         {/* NOTE: the "Sources analyzed" section was removed — tone.md mandates
             "No source citations. Synthesize." (no client-facing citation
             surface; competitor review-site names never render). */}
+
+        <div className="mt-8">
+          <AffiliateDisclosure />
+        </div>
       </div>
 
       {/* Toast */}

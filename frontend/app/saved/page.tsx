@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation'
 import { Bookmark, Check, ShoppingCart } from 'lucide-react'
 import { HeaderBrand } from '@/components/Brand'
+import AffiliateDisclosure from '@/components/AffiliateDisclosure'
 import { useSavedItems, toggleCompare, removeSaved } from '@/lib/savedItems'
 
 export default function SavedPage() {
@@ -118,6 +119,8 @@ export default function SavedPage() {
       <p className="text-[11px] mt-5" style={{ color: 'var(--ink-3)' }}>
         Tap two cards to compare · saved only on this device.
       </p>
+
+      <AffiliateDisclosure />
     </div>
   )
 }

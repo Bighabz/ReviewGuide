@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation'
 import { ShoppingCart } from 'lucide-react'
 import { HeaderBrand } from '@/components/Brand'
+import AffiliateDisclosure from '@/components/AffiliateDisclosure'
 import { useSavedItems, type SavedItem } from '@/lib/savedItems'
 
 function HeaderCard({ item }: { item: SavedItem }) {
@@ -138,6 +139,8 @@ export default function ComparePage() {
           Go with {b.name.split(' ').slice(0, 2).join(' ')} →
         </a>
       </div>
+
+      <AffiliateDisclosure />
     </div>
   )
 }

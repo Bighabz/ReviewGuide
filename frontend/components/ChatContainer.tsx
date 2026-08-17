@@ -16,6 +16,7 @@ import { useStreamReducer } from '@/hooks/useStreamReducer'
 import { TOOL_BLOCK_MAP, BLOCK_SKELETON_CONFIG } from '@/lib/skeletonMap'
 import type { SkeletonBlockType } from '@/components/BlockSkeleton'
 import { useChatStatus } from '@/lib/chatStatusContext'
+import AffiliateDisclosure from '@/components/AffiliateDisclosure'
 
 export interface FollowupQuestion {
   slot: string
@@ -833,6 +834,10 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
     )
   }
 
+  // PLAN-7 T3: rendered beneath the composer in both chat states — chat is
+  // where the affiliate links appear, and NavLayout hides the Footer here.
+  const affiliateDisclosure = <AffiliateDisclosure />
+
   return (
     <div id="chat-container" className="flex-1 flex flex-col overflow-hidden relative min-h-0" style={{ background: 'var(--background)' }}>
       {/* Welcome Screen (no messages) */}
@@ -853,6 +858,7 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
                   disabled={isStreaming}
                   placeholder="Ask anything — best headphones, Tokyo trip, laptop deals..."
                 />
+                {affiliateDisclosure}
               </div>
 
               <div className="flex flex-wrap justify-center gap-2 mt-4">
@@ -959,7 +965,7 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
                 disabled={isStreaming}
                 placeholder={UI_TEXT.PLACEHOLDER_TEXT}
               />
-
+              {affiliateDisclosure}
             </div>
           </div>
         </>
