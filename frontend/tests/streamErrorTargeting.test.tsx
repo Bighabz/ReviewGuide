@@ -46,7 +46,7 @@ describe('stream error targeting + supersede abort', () => {
 
     // The thinking assistant bubble exists — its DOM id carries the message id.
     const bubbles = Array.from(document.querySelectorAll('[id^="message-"]'))
-      .filter((el) => /^message-\d+$/.test(el.id))
+      .filter((el) => /^message-[0-9a-f-]{36}$/i.test(el.id))
     const assistantDomId = bubbles[bubbles.length - 1].id.replace('message-', '')
 
     await act(async () => { capturedOnError('Hit a wall pulling info on this one') })

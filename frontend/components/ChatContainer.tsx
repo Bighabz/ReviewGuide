@@ -231,7 +231,7 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
                 // Convert database messages to frontend format
                 const messagesWithDates = response.messages.map((msg: any, index: number) => {
                   const baseMessage = {
-                    id: (Date.now() + index).toString(),
+                    id: crypto.randomUUID(),
                     role: msg.role,
                     content: msg.content,
                     timestamp: new Date(msg.created_at || Date.now()),
@@ -293,7 +293,7 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
 
       // Add user message
       const userMessage: Message = {
-        id: Date.now().toString(),
+        id: crypto.randomUUID(),
         role: 'user',
         content: initialQuery,
         timestamp: new Date(),
@@ -344,7 +344,7 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
           if (response.success && response.messages && response.messages.length > 0) {
             const messagesWithDates = response.messages.map((msg: any, index: number) => {
               const baseMessage = {
-                id: (Date.now() + index).toString(),
+                id: crypto.randomUUID(),
                 role: msg.role,
                 content: msg.content,
                 timestamp: new Date(msg.created_at || Date.now()),
@@ -405,9 +405,16 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
 
   // Persist messages to localStorage whenever they change
   // Don't persist if there's an error banner showing (wait for user to retry or send new message)
+  // PLAN-6 T4b: debounced (the old version stringified on EVERY token), and
+  // transient stream state is stripped — a message persisted mid-stream used
+  // to reload with isThinking: true, a spinner frozen forever.
   useEffect(() => {
     if (messages.length > 0 && !isLoadingHistory && !showErrorBanner) {
-      localStorage.setItem(CHAT_CONFIG.MESSAGES_STORAGE_KEY, JSON.stringify(messages))
+      const timer = setTimeout(() => {
+        const sanitized = messages.map(({ isThinking, statusText, ...rest }) => rest)
+        localStorage.setItem(CHAT_CONFIG.MESSAGES_STORAGE_KEY, JSON.stringify(sanitized))
+      }, 500)
+      return () => clearTimeout(timer)
     }
   }, [messages, isLoadingHistory, showErrorBanner])
 
@@ -466,7 +473,7 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
     }
 
     // Create assistant message placeholder with thinking state
-    const assistantMessageId = (Date.now() + 1).toString()
+    const assistantMessageId = crypto.randomUUID()
     const assistantMessage: Message = {
       id: assistantMessageId,
       role: 'assistant',
@@ -584,7 +591,7 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
             )
           }
 
-          const followupMessageId = (Date.now() + 2).toString()
+          const followupMessageId = crypto.randomUUID()
           const followupMessage: Message = {
             id: followupMessageId,
             role: 'assistant',
@@ -760,7 +767,7 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
 
     // Add a fresh user message bubble so the conversation makes sense
     const userMessage: Message = {
-      id: Date.now().toString(),
+      id: crypto.randomUUID(),
       role: 'user',
       content: query,
       timestamp: new Date(),
@@ -780,7 +787,7 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
       const messageToSend = `${SUGGESTION_CLICK_PREFIX} ${question}`
 
       const userMessage: Message = {
-        id: Date.now().toString(),
+        id: crypto.randomUUID(),
         role: 'user',
         content: messageToSend,
         timestamp: new Date(),
@@ -825,7 +832,7 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
       setPendingUserMessage('')
 
       const userMessage: Message = {
-        id: Date.now().toString(),
+        id: crypto.randomUUID(),
         role: 'user',
         content: messageToSend,
         timestamp: new Date(),
