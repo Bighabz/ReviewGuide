@@ -662,9 +662,19 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
     }
   }
 
-  // Handle retry button click
+  // Handle retry button click. The guards used to return in silence — during
+  // the QA audit a hung stream kept isStreaming true, so every Regenerate
+  // click did nothing with no feedback (the banner's disabled prop now shows
+  // the state; the warns leave a trace if a click slips through anyway).
   const handleRetry = async () => {
-    if (!pendingUserMessage || isStreaming) return
+    if (isStreaming) {
+      console.warn('[retry] ignored — a stream is still in flight')
+      return
+    }
+    if (!pendingUserMessage) {
+      console.warn('[retry] ignored — no pending message to retry')
+      return
+    }
 
     setIsRetrying(true)
     setShowErrorBanner(false)
@@ -906,6 +916,7 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
             <ErrorBanner
               message={errorMessage}
               onRetry={handleRetry}
+              disabled={isStreaming || !pendingUserMessage}
             />
           )}
 

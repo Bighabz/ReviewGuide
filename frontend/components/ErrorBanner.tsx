@@ -3,9 +3,10 @@
 interface ErrorBannerProps {
   message: string
   onRetry: () => void
+  disabled?: boolean
 }
 
-export default function ErrorBanner({ message, onRetry }: ErrorBannerProps) {
+export default function ErrorBanner({ message, onRetry, disabled }: ErrorBannerProps) {
   return (
     <div
       className="flex flex-col items-center justify-center py-3 px-4 mx-auto my-3 rounded-lg"
@@ -46,15 +47,17 @@ export default function ErrorBanner({ message, onRetry }: ErrorBannerProps) {
 
       <button
         onClick={onRetry}
-        className="mt-3 px-4 py-2 rounded-md text-sm font-medium transition-all"
+        disabled={disabled}
+        title={disabled ? 'Still finishing the last request…' : undefined}
+        className="mt-3 px-4 py-2 rounded-md text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
         style={{
           background: 'transparent',
           border: '1px solid rgba(217, 45, 32, 0.5)',
           color: '#d92d20',
-          cursor: 'pointer',
+          cursor: disabled ? 'not-allowed' : 'pointer',
         }}
         onMouseEnter={(e) => {
-          e.currentTarget.style.background = 'rgba(217, 45, 32, 0.1)'
+          if (!disabled) e.currentTarget.style.background = 'rgba(217, 45, 32, 0.1)'
         }}
         onMouseLeave={(e) => {
           e.currentTarget.style.background = 'transparent'
