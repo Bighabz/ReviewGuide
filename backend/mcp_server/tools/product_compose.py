@@ -831,6 +831,55 @@ _ACCESSORY_NOUN_RE = re.compile(
 _ACCESSORY_FOR_RE = re.compile(r"\b(?:for|fits|compatible with)\b", re.IGNORECASE)
 
 
+def _select_backfill_source(offers: list) -> Optional[dict]:
+    """Elect the offer whose price/image backfills unpriced siblings.
+    Prefers serper_shopping, then any real-priced offer — but an UNLABELLED
+    (new-condition) source always beats a condition-labelled one, so a renewed
+    price is never the silent default."""
+    def _real(o):
+        return _extract_price(o) is not None and "placehold.co" not in (o.get("image_url") or "")
+    ranked = sorted(
+        (o for o in offers if _real(o)),
+        key=lambda o: (
+            0 if _offer_condition_label(o) is None else 1,
+            0 if o.get("source") == "serper_shopping" else 1,
+            _extract_price(o),
+            str(o.get("merchant") or ""),
+        ),
+    )
+    return ranked[0] if ranked else None
+
+
+def _apply_backfill(offers: list) -> None:
+    """Stamp the elected source's price/image onto unpriced offers. The
+    CONDITION travels with the price: a renewed price on a card must be
+    labelled renewed wherever it lands (anti-laundering, QA sweep 2026-07-31).
+
+    Final-validation catch: _offer_condition_label derives from the condition
+    field OR the title — a source titled "… Renewed" with an empty condition
+    field still labels. Copying the raw field would copy "" and launder anyway,
+    so we copy the DERIVED label."""
+    src = _select_backfill_source(offers)
+    if not src:
+        return
+    src_label = _offer_condition_label(src)  # field- OR title-derived
+    src_image = src.get("image_url", "")
+    for o in offers:
+        if o is src:
+            continue
+        if _extract_price(o) is None:
+            o["price"] = _extract_price(src)
+            if src_label is not None and _offer_condition_label(o) is None:
+                # Write the label into the field so downstream label checks and
+                # the card badge both see it, whatever the target's title says.
+                o["condition"] = src.get("condition") or src_label
+        # Only fill EMPTY images (Amazon mock). eBay mock offers keep their
+        # placehold.co image so the downstream real-offer filter still drops
+        # them — their synthetic prices must never surface.
+        if src_image and not o.get("image_url"):
+            o["image_url"] = src_image
+
+
 def _looks_like_accessory(offer: dict) -> bool:
     title = offer.get("title") or ""
     return bool(_ACCESSORY_NOUN_RE.search(title)) and bool(_ACCESSORY_FOR_RE.search(title))
@@ -1251,38 +1300,11 @@ async def product_compose(state: Dict[str, Any]) -> Dict[str, Any]:
                 # onto unpriced offers makes the card look as it would with PA-API,
                 # while preserving the Amazon affiliate buy-link. The serper_shopping
                 # offer also remains as its own (true-merchant) retailer line.
-                # A "real" price comes from an offer that has both a price and a
-                # trustworthy (non-placeholder) image. Prefer Serper Google Shopping;
-                # otherwise fall back to any such offer — this picks up a live eBay
-                # Browse-API offer while still EXCLUDING eBay's mock placeholder-image
-                # offers, whose synthetic prices must never surface.
-                def _is_real_priced(o):
-                    return (
-                        _extract_price(o) is not None
-                        and "placehold.co" not in (o.get("image_url") or "")
-                    )
-
-                real_src = next(
-                    (o for o in all_offers_for_product
-                     if o.get("source") == "serper_shopping" and _is_real_priced(o)),
-                    None,
-                ) or next(
-                    (o for o in all_offers_for_product if _is_real_priced(o)),
-                    None,
-                )
-                if real_src:
-                    real_price = _extract_price(real_src)
-                    real_image = real_src.get("image_url", "")
-                    for o in all_offers_for_product:
-                        if o is real_src:
-                            continue
-                        if _extract_price(o) is None:
-                            o["price"] = real_price
-                        # Only fill EMPTY images (Amazon mock). eBay mock offers keep
-                        # their placehold.co image so the downstream real-offer filter
-                        # still drops them — their synthetic prices must never surface.
-                        if real_image and not o.get("image_url"):
-                            o["image_url"] = real_image
+                # PLAN-1 T3: the election + stamping live in _select_backfill_source /
+                # _apply_backfill — an unlabelled (new-condition) source beats a
+                # condition-labelled one, and when only a labelled source exists its
+                # condition travels with the price (no laundered renewed headlines).
+                _apply_backfill(all_offers_for_product)
 
                 # Budget enforcement on offers (F2 final design, QA Round 6):
                 #  - CEILING is always a hard filter — an over-budget offer must

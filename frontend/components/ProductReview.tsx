@@ -166,12 +166,17 @@ function parseRating(rating: string): number | undefined {
   return Number.isFinite(value) && value > 0 ? value : undefined
 }
 
-/** Lowest real price wins the CTA; unpriced offers fall back to first. */
+/** New-condition offers win the CTA; a labeled non-new offer leads only when
+ *  no new option exists (it keeps its badge). Lowest price within each tier.
+ *  (PLAN-1 T3: the old lowest-price-wins rule let a Used $407 headline a
+ *  product with a New $999 option — condition-honesty end to end.) */
 function pickBestOffer(offers: AffiliateLink[]): AffiliateLink | undefined {
   if (!offers || offers.length === 0) return undefined
   const priced = offers.filter((o) => o.price > 0)
   if (priced.length === 0) return offers[0]
-  return priced.reduce((best, o) => (o.price < best.price ? o : best))
+  const newPriced = priced.filter((o) => !o.condition_label)
+  const pool = newPriced.length > 0 ? newPriced : priced
+  return pool.reduce((best, o) => (o.price < best.price ? o : best))
 }
 
 function OfferBadges({ offer }: { offer: AffiliateLink }) {

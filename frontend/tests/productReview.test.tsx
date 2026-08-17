@@ -140,11 +140,66 @@ describe('ProductReview - condition badges ($407-class honesty)', () => {
     expect(badges).toHaveLength(1)
     expect(badges[0]).toHaveTextContent('Used')
 
-    // The badge belongs to the $407 eBay offer (the lead money row), not the
-    // $999 Amazon ledger row.
-    expect(screen.getByText('$407.00')).toBeInTheDocument()
-    const amazonLink = screen.getByText('$999.00').closest('a')
-    expect(amazonLink).not.toContainElement(badges[0])
+    // PLAN-1 T3 (flipped — the old assertion pinned the bug): the NEW $999
+    // offer leads the money row; the Used $407 is a labeled ledger row.
+    expect(screen.getByText('$999.00')).toBeInTheDocument()
+    const usedRow = screen.getByText('$407.00').closest('a')
+    expect(usedRow).toContainElement(badges[0])
+  })
+
+  it('a new-condition offer beats a cheaper renewed offer for the CTA', () => {
+    const product = makeProduct({
+      affiliate_links: [
+        {
+          product_id: 'amazon-renewed',
+          title: 'Amazon - Sony WH-1000XM5 Renewed',
+          price: 147.26,
+          currency: 'USD',
+          affiliate_link: 'https://www.amazon.com/dp/renewed',
+          merchant: 'Amazon',
+          condition_label: 'Renewed',
+        },
+        {
+          product_id: 'bestbuy-new',
+          title: 'Best Buy - Sony WH-1000XM5',
+          price: 398.0,
+          currency: 'USD',
+          affiliate_link: 'https://www.bestbuy.com/site/xm5',
+          merchant: 'Best Buy',
+          condition_label: null,
+        },
+      ],
+    })
+    render(<ProductReview product={product} />)
+
+    // New $398 leads; Renewed $147 stays as a labeled ledger row.
+    const badge = screen.getByTestId('condition-badge')
+    const renewedRow = screen.getByText('$147.26').closest('a')
+    expect(renewedRow).toContainElement(badge)
+    expect(screen.getByText('$398.00')).toBeInTheDocument()
+    expect(screen.getByText('via Best Buy')).toBeInTheDocument()
+  })
+
+  it('a renewed offer leads only when no new-condition offer is priced', () => {
+    const product = makeProduct({
+      affiliate_links: [
+        {
+          product_id: 'amazon-renewed',
+          title: 'Amazon - Sony WH-1000XM5 Renewed',
+          price: 147.26,
+          currency: 'USD',
+          affiliate_link: 'https://www.amazon.com/dp/renewed',
+          merchant: 'Amazon',
+          condition_label: 'Renewed',
+        },
+      ],
+    })
+    render(<ProductReview product={product} />)
+
+    // Renewed-only product: renewed leads WITH its badge (condition-honesty).
+    expect(screen.getByText('$147.26')).toBeInTheDocument()
+    expect(screen.getByText('via Amazon')).toBeInTheDocument()
+    expect(screen.getByTestId('condition-badge')).toHaveTextContent('Renewed')
   })
 
   it('renders Renewed and Open box labels verbatim', () => {

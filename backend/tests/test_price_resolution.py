@@ -118,3 +118,49 @@ def test_accessory_intent_query_still_gets_accessories():
     }]}
     out = _filter_relevant_products(affiliate, "replacement filter for my Shark ION")
     assert out == affiliate  # accessory intent → filter stays disabled
+
+
+# ---------------------------------------------------------------------------
+# Task 3 — the headline honours condition: no laundered renewed prices.
+# ---------------------------------------------------------------------------
+
+from mcp_server.tools.product_compose import _select_backfill_source, _apply_backfill
+
+
+def test_backfill_source_prefers_unlabelled_new():
+    offers = [
+        make_offer("Sony WH-1000XM5 Renewed", 147.26, condition="Renewed"),
+        make_offer("Sony WH-1000XM5", 398.00, merchant="Best Buy"),
+    ]
+    src = _select_backfill_source(offers)
+    assert _offer_condition_label(src) is None
+    assert _extract_price(src) == 398.00
+
+
+def test_renewed_source_backfills_with_its_condition_attached():
+    """When ONLY a renewed source exists, its price may backfill — but the
+    condition must travel with it so the card labels it (never launder)."""
+    offers = [
+        make_offer("Sony WH-1000XM5 Renewed", 147.26, condition="Renewed"),
+        make_offer("Sony WH-1000XM5", 0, merchant="Amazon"),  # unpriced new
+    ]
+    _apply_backfill(offers)
+    amazon = next(o for o in offers if o["merchant"] == "Amazon")
+    assert amazon["price"] == 147.26
+    assert _offer_condition_label(amazon) is not None  # condition travelled
+
+
+def test_title_only_renewed_source_cannot_launder():
+    """Final-validation blocker: the source's condition FIELD is empty but its
+    TITLE says Renewed — _offer_condition_label derives from either. The
+    backfilled target must still end up labelled."""
+    offers = [
+        make_offer("Sony WH-1000XM5 (Renewed)", 147.26, condition=""),  # title-only
+        make_offer("Sony WH-1000XM5", 0, merchant="Amazon"),
+    ]
+    # Precondition: the source labels via title alone, or this test is vacuous.
+    assert _offer_condition_label(offers[0]) is not None
+    _apply_backfill(offers)
+    amazon = next(o for o in offers if o["merchant"] == "Amazon")
+    assert amazon["price"] == 147.26
+    assert _offer_condition_label(amazon) is not None
