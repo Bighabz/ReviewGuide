@@ -1,11 +1,14 @@
 'use client'
 
+import { useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import UnifiedTopbar from './UnifiedTopbar'
 import MobileHeader from './MobileHeader'
 import MobileTabBar from './MobileTabBar'
+import ConversationSidebar from './ConversationSidebar'
 import Footer from './Footer'
 import { ChatStatusProvider } from '@/lib/chatStatusContext'
+import { CHAT_CONFIG } from '@/lib/constants'
 
 const EXCLUDED_PREFIXES = ['/admin', '/privacy', '/terms', '/affiliate-disclosure', '/login']
 
@@ -16,6 +19,8 @@ interface NavLayoutProps {
 export default function NavLayout({ children }: NavLayoutProps) {
   const pathname = usePathname()
   const router = useRouter()
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [currentSessionId, setCurrentSessionId] = useState('')
 
   const isExcluded = EXCLUDED_PREFIXES.some((prefix) => pathname?.startsWith(prefix))
 
@@ -39,8 +44,24 @@ export default function NavLayout({ children }: NavLayoutProps) {
     router.push('/chat?new=1')
   }
 
+  // The History button opens the conversation drawer. It used to
+  // router.push('/chat'), which navigated without ever opening the drawer —
+  // ten conversations were created during QA and none were reachable.
   const handleHistory = () => {
-    router.push('/chat')
+    setCurrentSessionId(localStorage.getItem(CHAT_CONFIG.SESSION_STORAGE_KEY) ?? '')
+    setHistoryOpen((open) => !open)
+  }
+
+  const handleSelectConversation = (sessionId: string) => {
+    setHistoryOpen(false)
+    // The chat page's ?session= handler does the actual switch, so selecting
+    // works from any route, not only when a chat page instance is mounted.
+    router.push(`/chat?session=${encodeURIComponent(sessionId)}`)
+  }
+
+  const handleNewConversationFromDrawer = () => {
+    setHistoryOpen(false)
+    handleNewChat()
   }
 
   return (
@@ -57,7 +78,7 @@ export default function NavLayout({ children }: NavLayoutProps) {
 
         {/* Mobile: MobileHeader (hidden on desktop) */}
         <div className="block md:hidden">
-          <MobileHeader />
+          <MobileHeader onHistoryClick={handleHistory} />
         </div>
 
         {/* Content area — padded bottom on mobile for 64px tab bar + safe area.
@@ -70,17 +91,31 @@ export default function NavLayout({ children }: NavLayoutProps) {
             instead of staying pinned to the viewport. This pairs with app/template.tsx
             using min-h-full on non-chat routes: the page wrapper fills the screen on short
             pages but grows on long ones, keeping the footer at the true bottom. */}
-        <main className="flex-1 min-h-0 overflow-y-auto pb-[calc(64px+env(safe-area-inset-bottom))] md:pb-0">
-          {children}
+        {/* Row wrapper (PLAN-7 T1): hosts the conversation drawer to main's
+            right. The drawer renders null when closed, so this row changes
+            nothing until History is opened; on lg the open drawer is static
+            and docks here instead of overlaying. */}
+        <div className="flex-1 min-h-0 flex overflow-hidden">
+          <main className="flex-1 min-w-0 overflow-y-auto pb-[calc(64px+env(safe-area-inset-bottom))] md:pb-0">
+            {children}
 
-          {/* Desktop: Footer (hidden on mobile, and hidden on /chat so the chat
-              welcome screen + input can fill the viewport). */}
-          {!isChat && (
-            <div className="hidden md:block">
-              <Footer />
-            </div>
-          )}
-        </main>
+            {/* Desktop: Footer (hidden on mobile, and hidden on /chat so the chat
+                welcome screen + input can fill the viewport). */}
+            {!isChat && (
+              <div className="hidden md:block">
+                <Footer />
+              </div>
+            )}
+          </main>
+
+          <ConversationSidebar
+            isOpen={historyOpen}
+            onClose={() => setHistoryOpen(false)}
+            currentSessionId={currentSessionId}
+            onSelectConversation={handleSelectConversation}
+            onNewConversation={handleNewConversationFromDrawer}
+          />
+        </div>
 
         {/* Mobile: MobileTabBar (hidden on desktop) */}
         <div className="block md:hidden">

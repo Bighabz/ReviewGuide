@@ -94,6 +94,11 @@ export default function ConversationSidebar({
     }
   }
 
+  // Render nothing when closed (PLAN-7 T1): the old always-rendered node hid
+  // behind CSS (translate-x-full lg:hidden), which made "is the drawer open?"
+  // untestable and left a hidden interactive subtree in the DOM.
+  if (!isOpen) return null
+
   const formatDate = (dateString: string) => {
     const date = new Date(dateString)
     const now = new Date()
@@ -125,11 +130,11 @@ export default function ConversationSidebar({
       <div
         className={`
           fixed lg:static inset-y-0 right-0 z-[70]
-          w-72 lg:w-64 flex flex-col h-screen
+          w-72 lg:w-64 flex flex-col h-full
           transform transition-transform duration-300 ease-out
           lg:transform-none shadow-xl lg:shadow-none
           border-l border-[var(--border)]
-          ${isOpen ? 'translate-x-0' : 'translate-x-full lg:translate-x-0 lg:hidden'}
+          translate-x-0
         `}
         style={{ background: 'var(--surface)' }}
       >

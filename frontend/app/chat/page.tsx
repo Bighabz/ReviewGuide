@@ -42,6 +42,7 @@ function ChatPageContent() {
     // Check for query parameters (from sticky chat bar on browse page)
     const query = searchParams.get('q')
     const draft = searchParams.get('draft')
+    const sessionParam = searchParams.get('session')
     const isNewSession = searchParams.get('new') === '1'
 
     console.log('[ChatPage] URL params:', { query, draft, isNewSession, alreadyProcessed: processedQueryRef.current })
@@ -111,6 +112,18 @@ function ChatPageContent() {
       setTimeout(() => {
         router.replace('/chat', { scroll: false })
       }, 100)
+    } else if (!isNewSession && sessionParam && processedQueryRef.current !== `session:${sessionParam}`) {
+      // PLAN-7 T1 — the history drawer now lives in NavLayout and selects a
+      // conversation by navigating to /chat?session=<id>, so switching works
+      // from any route. Mirrors handleSelectConversation, plus persisting the
+      // id so a reload stays on the selected conversation.
+      processedQueryRef.current = `session:${sessionParam}`
+      localStorage.setItem(CHAT_CONFIG.SESSION_STORAGE_KEY, sessionParam)
+      setSwitchToSessionId(sessionParam)
+      setSwitchToSessionIsNew(false)
+      setCurrentSessionId(sessionParam)
+      setInitialQuery(undefined)
+      setTimeout(() => router.replace('/chat', { scroll: false }), 100)
     } else if (!isNewSession && !query) {
       // Normal page load - load current session ID
       const storedSessionId = localStorage.getItem(CHAT_CONFIG.SESSION_STORAGE_KEY)
@@ -125,6 +138,11 @@ function ChatPageContent() {
       // what the user thought was a fresh chat. The sentinel's double-fire protection
       // is preserved — it stays set for the whole window where ?new=1 is in the URL.
       if (processedQueryRef.current === NEW_EMPTY_SESSION) {
+        processedQueryRef.current = null
+      }
+      // Same re-arm for ?session= selections: once the URL is clean again,
+      // picking the SAME conversation from the drawer must work a second time.
+      if (processedQueryRef.current?.startsWith('session:')) {
         processedQueryRef.current = null
       }
     }

@@ -1,14 +1,20 @@
 'use client'
 
 import { usePathname, useRouter } from 'next/navigation'
-import { ArrowLeft, User, Maximize2 } from 'lucide-react'
+import { ArrowLeft, User, Maximize2, History } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { useChatStatus } from '@/lib/chatStatusContext'
 import { CHAT_CONFIG } from '@/lib/constants'
 import LoadingStatusText from './LoadingStatusText'
 import { Wordmark } from './Brand'
 
-export default function MobileHeader() {
+interface MobileHeaderProps {
+  // PLAN-7 T1 (Habib, 2026-08-17): mobile previously had NO history entry
+  // point anywhere — the drawer was unreachable even after the desktop fix.
+  onHistoryClick?: () => void
+}
+
+export default function MobileHeader({ onHistoryClick }: MobileHeaderProps) {
   const pathname = usePathname()
   const router = useRouter()
   const [theme, setTheme] = useState<'light' | 'dark'>('light')
@@ -67,6 +73,19 @@ export default function MobileHeader() {
               </div>
             )}
           </div>
+
+          {/* History — opens the conversation drawer */}
+          {onHistoryClick && (
+            <button
+              data-testid="mobile-history-button"
+              className="flex items-center justify-center w-10 h-10 rounded-lg"
+              style={{ color: 'var(--text-muted)' }}
+              aria-label="Chat history"
+              onClick={onHistoryClick}
+            >
+              <History size={16} strokeWidth={1.5} />
+            </button>
+          )}
 
           {/* Expand icon — hidden on /results (already on results page) */}
           {!isResultsRoute && (

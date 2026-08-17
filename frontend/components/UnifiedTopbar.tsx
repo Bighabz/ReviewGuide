@@ -184,6 +184,7 @@ export default function UnifiedTopbar({
 
             {/* History */}
             <button
+              data-testid="topbar-history-button"
               onClick={() => onHistoryClick ? onHistoryClick() : router.push('/chat')}
               className="p-2 rounded-lg text-[var(--text-secondary)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)]"
               aria-label="Chat history"
