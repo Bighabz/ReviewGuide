@@ -589,7 +589,10 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
               msg.id === currentMessageIdRef.current
                 ? {
                     ...msg,
-                    completeness: 'full',
+                    // PLAN-8 T4: thread the backend's derived completeness —
+                    // the literal 'full' here silently discarded degraded
+                    // states the done payload now reports honestly.
+                    completeness: ((data as any).completeness as Message['completeness']) ?? 'full',
                     ...(data.next_suggestions && data.next_suggestions.length > 0
                       ? { next_suggestions: data.next_suggestions }
                       : {}),

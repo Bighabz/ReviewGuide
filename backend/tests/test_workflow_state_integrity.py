@@ -162,3 +162,34 @@ async def test_resumed_message_returns_history_delta_too():
     assert update["conversation_history"] == [
         {"role": "user", "content": "under $800"}
     ]
+
+
+# ---------------------------------------------------------------------------
+# Task 4 — the completeness flag must tell the truth. chat.py:909 hardcoded
+# "full" ("degraded logic deferred to a later phase") while the executor-
+# timeout fallback said "partial results" in prose. Derived from the stage
+# telemetry that already records what actually happened.
+# ---------------------------------------------------------------------------
+
+def test_completeness_reflects_stage_timeouts_and_fatal_fallbacks():
+    from app.api.v1.chat import _derive_completeness
+
+    full = [{"stage": "safety", "timeout_hit": False, "error_class": None},
+            {"stage": "plan_exec", "timeout_hit": False, "error_class": None}]
+    timed_out = [{"stage": "plan_exec", "timeout_hit": True, "error_class": "transient"}]
+    # Validation catch: a stage can fail fatally WITHOUT a timeout — its
+    # fallback ran, so the answer is degraded (stage_telemetry.py: any
+    # non-timeout exception stamps error_class="fatal", timeout_hit=False).
+    fatal = [{"stage": "plan_exec", "timeout_hit": False, "error_class": "fatal"}]
+
+    assert _derive_completeness(full) == "full"
+    assert _derive_completeness(timed_out) == "degraded"
+    assert _derive_completeness(fatal) == "degraded"
+    assert _derive_completeness([]) == "full"
+    assert _derive_completeness(None) == "full"
+    # D5 guard: a clarifier timeout alone must NOT degrade the response.
+    # D5 is DECIDED (2026-08-17: flip to fail-closed) but the clarifier flip
+    # has not landed yet — the exclusion stays until it does, then becomes
+    # moot (a fail-closed clarifier timeout re-asks instead of degrading).
+    clarifier_only = [{"stage": "clarifier", "timeout_hit": True, "error_class": "transient"}]
+    assert _derive_completeness(clarifier_only) == "full"

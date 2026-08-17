@@ -171,6 +171,26 @@ def is_consent_confirmation(request) -> bool:
 
 
 
+def _derive_completeness(stage_telemetry) -> str:
+    """The done payload's completeness, derived from what actually happened.
+
+    Was hardcoded "full" — so the executor-timeout path told the user "partial
+    results" in prose while telling the UI the answer was complete. A stage
+    degrades the answer when it hit its hard timeout OR failed fatally into its
+    fallback (validation catch: fatal fallbacks carry timeout_hit=False).
+    """
+    for entry in stage_telemetry or []:
+        # D5 guard: the clarifier's timeout-fallback (silent skip) still exists
+        # until the decided fail-closed flip lands (DOCTRINE D5, 2026-08-17) —
+        # flagging it here would surface a degraded badge on a path that will
+        # shortly re-ask instead. Excluded until the flip ships.
+        if entry.get("stage") == "clarifier":
+            continue
+        if entry.get("timeout_hit") or entry.get("error_class") == "fatal":
+            return "degraded"
+    return "full"
+
+
 def _build_qos_log(
     request_id: str,
     session_id: str,
@@ -896,6 +916,12 @@ async def generate_chat_stream(
             "web_context_cache_age_s": None,
         }
 
+        # RFC §1.8 — completeness derived from stage telemetry (was hardcoded
+        # "full"). Written back into result_state so the QoS log line and the
+        # request_metrics row report the same truth as the done payload.
+        _completeness = _derive_completeness(result_state.get("stage_telemetry"))
+        result_state["completeness"] = _completeness
+
         final_done_payload = {
             "session_id": session_id,
             "request_id": request_id,  # RFC §4.1 correlation ID for frontend trace lookup
@@ -906,7 +932,7 @@ async def generate_chat_stream(
             "followups": followups_to_send,  # Pass through structured data from clarifier agent
             "next_suggestions": next_suggestions,  # Follow-up questions from next_step_suggestion tool
             "user_id": user_id,
-            "completeness": "full",  # RFC §1.8: degraded logic deferred to a later phase
+            "completeness": _completeness,
             "response_metadata": _response_metadata,  # RFC §2.5 content trust metadata
             # B-phase 3: the user's own interest keywords, to personalize the
             # chat empty-state starter on their next visit (privacy-safe — own stream).
