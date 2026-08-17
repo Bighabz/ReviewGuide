@@ -1649,40 +1649,13 @@ Return ONLY valid JSON:
                 + [q for q in questions if q["slot"] == "budget"]
             )
 
-            # ── Outcome 7: preference-biased chips for returning users ──
-            # product_compose stores the user's answers after every completed search
-            # (PR #76, preference_service): use_cases/brands/categories as counts,
-            # budget_ranges newest-first, features as a list. When a stored answer is
-            # ALREADY one of this question's options, move it to the front and tag the
-            # question so the frontend renders "(like last time)" on that chip.
-            # Option membership is the safety check — preferences are global, not per
-            # category, so a mattress answer ("Side sleeper") can never surface on a
-            # laptop question: it isn't one of the laptop options.
-            prefs = user_preferences or {}
-            if prefs:
-                use_case_history = sorted(
-                    (prefs.get("use_cases") or {}).items(), key=lambda kv: -kv[1]
-                )
-                pref_candidates = {
-                    "use_case": [name for name, _ in use_case_history],  # most-used first
-                    "budget": list(prefs.get("budget_ranges") or []),    # newest first
-                    "features": list(prefs.get("features") or []),
-                }
-                for q in questions:
-                    options = q.get("options")
-                    if not options:
-                        continue
-                    past = next(
-                        (c for c in pref_candidates.get(q["slot"], []) if c in options),
-                        None,
-                    )
-                    if past:
-                        q["options"] = [past] + [o for o in options if o != past]
-                        q["preference_chip"] = past
-                        logger.info(
-                            f"[Clarifier Agent] Preference chip: '{past}' leads the "
-                            f"{q['slot']} options (like last time)"
-                        )
+            # ── Outcome 7 REMOVED (DOCTRINE D4, Habib 2026-08-17) ──────────
+            # Cross-session preference injection ("(like last time)" chips)
+            # was intentional but undisclosed, unscoped, and unresettable —
+            # the QA audit read it as leakage. Decision: preferences are
+            # SESSION-scoped; stored user_preferences never reorder or tag a
+            # fresh chat's options. product_compose may keep writing the
+            # preference rows (harmless, unused); the injection is what's gone.
 
             return {
                 "intro": result.get("intro", "I need a few more details:"),

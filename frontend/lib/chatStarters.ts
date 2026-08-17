@@ -106,10 +106,15 @@ function readUserSignal(): string {
  * returning user's interests (cold-start = random). Mirrors HeroSubline.tsx —
  * never call Math.random() during render.
  */
-export function useChatStarter(): StarterSet {
+export function useChatStarter(options?: { freshChat?: boolean }): StarterSet {
+  const freshChat = options?.freshChat ?? false
   const [set, setSet] = useState<StarterSet>(STARTER_SETS[0])
   useEffect(() => {
-    setSet(pickStarter(STARTER_SETS, readUserSignal()))
-  }, [])
+    // PLAN-5 T6 / DOCTRINE D4: a brand-new chat starts unbiased — the stored
+    // signal (recents / saved / rg_pref_summary) is ignored until the user
+    // acts, so gibberish in a "fresh" chat can't be answered with the prior
+    // chat's topic.
+    setSet(pickStarter(STARTER_SETS, freshChat ? '' : readUserSignal()))
+  }, [freshChat])
   return set
 }

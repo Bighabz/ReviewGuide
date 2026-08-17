@@ -19,6 +19,16 @@ export function cachePreferenceSummary(summary: unknown): void {
   }
 }
 
+/** DOCTRINE D4 (2026-08-17): preferences are session-scoped — New Chat clears
+ *  the invisible aggregate so a fresh chat carries no prior-chat interests. */
+export function clearPreferenceSummary(): void {
+  try {
+    localStorage.removeItem(KEY)
+  } catch {
+    /* localStorage unavailable */
+  }
+}
+
 /** Read the cached interest keywords (empty array if none / unavailable). */
 export function getPreferenceSummary(): string[] {
   if (typeof window === 'undefined') return []

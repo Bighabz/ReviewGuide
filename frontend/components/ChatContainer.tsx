@@ -18,6 +18,7 @@ import type { SkeletonBlockType } from '@/components/BlockSkeleton'
 import { useChatStatus } from '@/lib/chatStatusContext'
 import AffiliateDisclosure from '@/components/AffiliateDisclosure'
 import { isLikelyTruncated } from '@/lib/isTruncated'
+import { clearPreferenceSummary } from '@/lib/userPreferences'
 
 export interface FollowupQuestion {
   slot: string
@@ -120,7 +121,9 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
   const [verbVisible, setVerbVisible] = useState(true)
 
   // Group B: dynamic chat starter content — SSR-stable set 0, random on mount.
-  const starter = useChatStarter()
+  // PLAN-5 T6 / D4: brand-new chats (New Chat / ?new=1) start unbiased —
+  // the starter ignores the stored interest signal until the user acts.
+  const starter = useChatStarter({ freshChat: !!externalSessionIsNew })
 
   // Track which message ID is currently being updated (can change if create_new_message is sent)
   const currentMessageIdRef = useRef<string>('')
@@ -331,6 +334,8 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
         setSessionId(externalSessionId)
         localStorage.setItem(CHAT_CONFIG.SESSION_STORAGE_KEY, externalSessionId)
         localStorage.setItem(CHAT_CONFIG.MESSAGES_STORAGE_KEY, JSON.stringify([]))
+        // D4: preferences are session-scoped — drop the invisible aggregate.
+        clearPreferenceSummary()
         setIsLoadingHistory(false)
         return
       }
@@ -884,6 +889,8 @@ export default function ChatContainer({ clearHistoryTrigger, externalSessionId, 
       // Only clear session_id and messages, KEEP user_id for reuse
       localStorage.removeItem('chat_session_id')
       localStorage.removeItem(CHAT_CONFIG.MESSAGES_STORAGE_KEY)
+      // D4: preferences are session-scoped — drop the invisible aggregate.
+      clearPreferenceSummary()
       // DO NOT remove 'chat_user_id' - keep it so same user is reused
       console.log('Cleared chat history, keeping user_id:', userId)
     }

@@ -2,8 +2,9 @@
  * Group B — dynamic chat starter content. Locks the pool invariants that keep
  * the chat empty state hydration-safe and well-formed.
  */
-import { describe, it, expect } from 'vitest'
-import { STARTER_SETS, pickStarter } from '@/lib/chatStarters'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { renderHook, waitFor } from '@testing-library/react'
+import { STARTER_SETS, pickStarter, useChatStarter } from '@/lib/chatStarters'
 
 describe('STARTER_SETS', () => {
   it('has a non-trivial pool', () => {
@@ -64,5 +65,48 @@ describe('pickStarter (phase 2 personalization)', () => {
     const pick = pickStarter(STARTER_SETS, 'espresso machine and a new mattress', firstPick)
     expect(pick).not.toBe(STARTER_SETS[0])
     expect(pick.greeting).toBe('What’s on your mind?')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// PLAN-5 T6 / DOCTRINE D4 — a brand-new chat starts unbiased.
+// "Gibberish answered with headphones": the starter was biased by
+// readUserSignal() from localStorage keys New Chat never cleared. The hook
+// now ignores the stored signal in a fresh chat; pickStarter stays pure.
+// ---------------------------------------------------------------------------
+
+describe('starter personalization in a fresh chat', () => {
+  let randomSpy: ReturnType<typeof vi.spyOn>
+
+  beforeEach(() => {
+    // rng -> 0 makes the cold pool deterministic (set 0); the warm pool for a
+    // headphones signal contains only the audio set, so both cases are stable.
+    randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0)
+    ;(localStorage.getItem as any).mockImplementation((key: string) => {
+      if (key === 'rg_pref_summary') return JSON.stringify(['headphones', 'sony'])
+      if (key === 'reviewguide_recent_searches') return JSON.stringify([
+        { query: 'best headphones', category: 'audio', productNames: ['Sony XM5'] },
+      ])
+      return null
+    })
+  })
+
+  afterEach(() => {
+    randomSpy.mockRestore()
+  })
+
+  it('ignores stored signal when the chat is brand-new', async () => {
+    const { result } = renderHook(() => useChatStarter({ freshChat: true }))
+    await waitFor(() => {
+      // Cold pool with rng=0 -> the neutral set 0, never the biased audio set.
+      expect(result.current.greeting).toBe(STARTER_SETS[0].greeting)
+    })
+  })
+
+  it('uses stored signal in an ongoing session', async () => {
+    const { result } = renderHook(() => useChatStarter({ freshChat: false }))
+    await waitFor(() => {
+      expect(result.current.greeting).toBe('What are you shopping for?')
+    })
   })
 })
