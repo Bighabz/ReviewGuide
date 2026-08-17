@@ -214,6 +214,26 @@ async def strain_search(state: Dict[str, Any]) -> Dict[str, Any]:
                 results.append(_strain_to_result(rec.strain, rec.score, rec.match_reasons))
     else:
         mode = "recommend"
+        # PLAN-9 T1 (prod incident 2026-07-21): the extractor SUCCEEDED and
+        # found nothing — no strains, no feelings, no conditions, no type. If
+        # the raw message carries no cannabis vocabulary either, the intent
+        # classifier misrouted; recommending strains anyway is how a Whoop
+        # question got answered with GG4. Abort instead of broad-recommend.
+        # (A transport failure still broad-recommends — its fallback params
+        # carry default feelings, so this branch never sees it.)
+        from app.agents.intent_agent import _CANNABIS_LEXICON_RE
+        if (not feelings and not conditions and not strain_type
+                and not _CANNABIS_LEXICON_RE.search(message)):
+            logger.warning(
+                "[strain_search] MISROUTE: zero cannabis signal in extraction "
+                f"AND message — aborting strain plan for: {message[:120]!r}"
+            )
+            return {
+                "strain_results": [],
+                "strain_mode": "recommend",
+                "strain_misroute": True,
+                "success": True,
+            }
         if not feelings and not conditions:
             feelings = ["Happy", "Relaxed"]  # sensible default ask
         recs = engine.advanced_recommend(

@@ -7,6 +7,7 @@ Responsibilities:
 from app.core.centralized_logger import get_logger
 import hashlib
 import json
+import re
 import time
 from typing import Dict, Any, Tuple
 from ..schemas.graph_state import GraphState
@@ -17,6 +18,54 @@ logger = get_logger(__name__)
 # Intent classification cache: key -> (result_dict, timestamp)
 _intent_cache: Dict[str, Tuple[Dict, float]] = {}
 _INTENT_CACHE_TTL = 300  # 5 minutes
+
+
+# ── PLAN-9: zero-evidence veto on the strain intent ─────────────────────────
+# Words that make a message a plausible cannabis ask. Deliberately broad on
+# cannabis slang, zero overlap with product terms. Shared with strain_search
+# (this module is its one home — import from here).
+_CANNABIS_LEXICON_RE = re.compile(
+    r"\b(?:weed|cannabis|marijuana|strains?|indica|sativa|hybrid|terpenes?|"
+    r"thc|cbd|smoke|smoking|toke|kush|edibles?|dispensary|joint|blunt|bud)\b",
+    re.IGNORECASE,
+)
+
+
+def _strain_name_evidence(text: str) -> bool:
+    """True when the message contains something that matches a known strain
+    name ("sour d" ⊂ "Sour Diesel"). Bigrams only for common words — a single
+    ordinary word ("blue") is not evidence; distinctive single tokens (digits,
+    e.g. "gg4", or long words) are checked too."""
+    try:
+        from app.services.smartvape import get_engine
+        engine = get_engine()
+    except Exception:
+        return False
+    tokens = re.findall(r"[a-z0-9']+", (text or "").lower())
+    grams = {" ".join(tokens[i:i + 2]) for i in range(len(tokens) - 1)}
+    grams |= {t for t in tokens if any(c.isdigit() for c in t) or len(t) >= 8}
+    for gram in grams:
+        try:
+            if engine.search_strains(gram, limit=1):
+                return True
+        except Exception:
+            return False
+    return False
+
+
+def veto_strain_intent(user_message: str, conversation_history: list) -> bool:
+    """True when the LLM classified 'strain' but NO cannabis evidence exists in
+    the message or recent history. Not a keyword router (the AI still owns
+    detection, per Habib 2026-06-10) — a veto that fires only on zero evidence,
+    which is exactly the prod misroute: a Whoop question classified 'strain'
+    (session 96e11c6f, 2026-07-21 — answered with GG4)."""
+    recent = " ".join(m.get("content", "") for m in (conversation_history or [])[-6:])
+    blob = f"{user_message} {recent}"
+    if _CANNABIS_LEXICON_RE.search(blob):
+        return False
+    if _strain_name_evidence(user_message) or _strain_name_evidence(recent):
+        return False
+    return True
 
 
 class IntentAgent(BaseAgent):
@@ -57,6 +106,16 @@ class IntentAgent(BaseAgent):
             # Call LLM for intent classification with history context
             intent_result = await self._quick_intent_classification(text, conversation_history, last_search_context)
             intent = intent_result["intent"]
+
+            # PLAN-9 T3: zero-evidence veto. The AI owns detection; this fires
+            # only when a 'strain' classification has NO cannabis evidence in
+            # the message or recent history — the prod misroute shape.
+            if intent == "strain" and veto_strain_intent(text, conversation_history):
+                logger.warning(
+                    "[Intent Agent] Strain veto: classified 'strain' with zero "
+                    "cannabis evidence — downgrading to 'product' (prod incident 2026-07-21)"
+                )
+                intent = "product"
 
             return {"intent": intent}
 

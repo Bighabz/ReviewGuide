@@ -144,6 +144,21 @@ async def strain_compose(state: Dict[str, Any]) -> Dict[str, Any]:
     mode = state.get("strain_mode", "recommend")
     user_message = state.get("user_message", "")
 
+    # PLAN-9 T2a: strain_search flagged a misroute (zero cannabis evidence
+    # anywhere) — the honest move is a short redirect, never strain cards.
+    if state.get("strain_misroute"):
+        logger.warning("[strain_compose] Misroute flag set — emitting redirect, no cards")
+        return {
+            "assistant_text": (
+                "That routed to my cannabis-strain lane by mistake — your "
+                "question isn't about cannabis. Ask it again in a fresh "
+                "message and I'll answer the actual question properly."
+            ),
+            "ui_blocks": [],
+            "citations": [],
+            "success": True,
+        }
+
     if not strains:
         return {
             "assistant_text": (
@@ -179,6 +194,7 @@ async def strain_compose(state: Dict[str, Any]) -> Dict[str, Any]:
     follow_up = ""
     top_pick = ""
     llm_image_prompt = ""
+    raw = None
     try:
         raw = await model_service.generate_compose(
             messages=[
@@ -198,6 +214,31 @@ async def strain_compose(state: Dict[str, Any]) -> Dict[str, Any]:
             llm_image_prompt = (parsed.get("image_prompt") or "").strip()
     except Exception as e:
         logger.warning(f"[strain_compose] verdict LLM failed, using deterministic fallback: {e}")
+
+    # PLAN-9 T2b (DOCTRINE D5, protective gates fail closed): the model
+    # RESPONDED but produced no usable verdict body. If its output names NONE
+    # of the result strains, it declined the request (the prod incident's
+    # refusal) — that refusal is FINAL. The deterministic fallback exists for
+    # transport failures only; it must never resurrect a refused pick.
+    if not body and raw:
+        _raw_lower = str(raw).lower()
+        _names = [str(s.get("name", "")).lower() for s in strains]
+        if not any(n and n in _raw_lower for n in _names):
+            logger.warning(
+                "[strain_compose] Verdict declined the request — honoring the "
+                "refusal; no fallback, no cards"
+            )
+            return {
+                "assistant_text": (
+                    "I stopped short of a strain recommendation here — this "
+                    "doesn't look like a cannabis question, and forcing a pick "
+                    "would be wrong. Ask the actual question again in a fresh "
+                    "message and I'll answer it directly."
+                ),
+                "ui_blocks": [],
+                "citations": [],
+                "success": True,
+            }
 
     if not body:
         body = _fallback_body(strains, mode)
