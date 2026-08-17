@@ -77,6 +77,29 @@ def _consolidated_blog_role(base_role: str) -> str:
     return base_role.replace(_BLOG_SCHEMA_TAIL, _CONSOLIDATED_SCHEMA_TAIL) + _CONSOLIDATED_EXTRA_RULES
 
 
+def _card_pros_cons(pname: str, blog_pros_cons: dict, review_data: dict) -> tuple:
+    """Card pros/cons from the consolidated payload, honesty-gated.
+
+    Double gate: the product must have a parsed pros_cons entry AND real review
+    signal (review_data) backing it. Either missing -> ([], []) — an empty
+    section beats an invented one. Items are validated, never truncated: the
+    old builder's snippet[:150] is exactly what produced mid-word garbage."""
+    entry = (blog_pros_cons or {}).get(pname) or {}
+    bundle = (review_data or {}).get(pname) or {}
+    if not entry or not (bundle.get("avg_rating") or bundle.get("total_reviews")):
+        return [], []
+
+    def _items(values):
+        out = []
+        for v in (values or [])[:3]:
+            text = str(v).strip()
+            if text and len(text) <= 140:
+                out.append({"description": text, "citations": []})
+        return out
+
+    return _items(entry.get("pros")), _items(entry.get("cons"))
+
+
 # Tier 3b: the draft→revise voice pass (formerly a second LLM round-trip in
 # _voice_revise_body) folded into the single call as a self-edit directive. It
 # carries the same instructions as the revise prompt, reframed as "edit your own
@@ -2080,6 +2103,17 @@ TRANSITIONAL RULES (transitional_reasoning field):
                 result_map['descriptions'] = json.dumps({"descriptions": _blog_descriptions})
                 logger.info(f"[product_compose] Consolidated: injected {len(_blog_descriptions)} descriptions from blog JSON")
 
+        # PLAN-3: per-product pros/cons from the same consolidated payload.
+        # Card assembly consumes these via _card_pros_cons (honesty-gated).
+        # Non-consolidated runs leave this empty — cards degrade to [] rather
+        # than fall back to the old raw-snippet filler.
+        _blog_pros_cons: dict = {}
+        if _consolidated and isinstance(_blog_parsed_early, dict):
+            _pc = _blog_parsed_early.get("pros_cons")
+            if isinstance(_pc, dict):
+                _blog_pros_cons = _pc
+                logger.info(f"[product_compose] Consolidated: parsed pros_cons for {len(_pc)} products")
+
         # ── Phase 4: Assemble blog-style article ──
 
         ui_blocks = []
@@ -2468,19 +2502,11 @@ TRANSITIONAL RULES (transitional_reasoning field):
             total_reviews = review_bundle.get("total_reviews", 0)
             label = editorial_labels.get(pname, "")
 
-            # Build sources list for citations
-            sources = review_bundle.get("sources", [])
-            pros = []
-            cons = []
-            for s in sources[:3]:
-                snippet = s.get("snippet", "")
-                site = s.get("site_name", "")
-                url = s.get("url", "")
-                if snippet:
-                    pros.append({
-                        "description": snippet[:150],
-                        "citations": [{"id": 1, "url": url, "title": site}] if url else []
-                    })
+            # PLAN-3: pros/cons are grounded synthesis from the consolidated
+            # payload — snippets remain model INPUT only and never render.
+            # (The old loop filed snippet[:150] under pros: raw forum text,
+            # mid-word truncation, and never any cons.)
+            pros, cons = _card_pros_cons(pname, _blog_pros_cons, review_data)
 
             card_data = {
                 "product_name": pname,
@@ -2555,14 +2581,18 @@ TRANSITIONAL RULES (transitional_reasoning field):
                 "review_count": None,
             }]
 
+            # PLAN-3: fallback cards get the same grounded pros/cons instead of
+            # hardcoded empties (still empty when grounding is absent).
+            fb_pros, fb_cons = _card_pros_cons(pname, _blog_pros_cons, review_data)
+
             card_data = {
                 "product_name": pname,
                 "image_url": fallback_image,
                 "rating": f"{avg_rating}/5" if avg_rating else "",
                 "summary": consensus if consensus else "",
                 "features": [label] if label else [],
-                "pros": [],
-                "cons": [],
+                "pros": fb_pros,
+                "cons": fb_cons,
                 "affiliate_links": fallback_links,
                 "rank": review_card_count + fallback_card_count + 1,
             }
