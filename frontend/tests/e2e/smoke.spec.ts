@@ -87,6 +87,49 @@ test.describe('smoke', () => {
     await expect(done).toBeVisible({ timeout: 30_000 })
   })
 
+  test('last line of a long answer clears the composer at 1440px and 390px', async ({ page }) => {
+    // PLAN-7 T7 (QA audit: "text clipped behind composer"). The defect does
+    // NOT reproduce in the current layout — measured 2026-08-17: the last
+    // message bottom clears the composer top by 43px (desktop) / 28px (390px)
+    // at full scroll. This pins that geometry so it stays true.
+    const seed = [
+      { id: 'u1', role: 'user', content: 'best espresso machine under $500', timestamp: 1735689600000 },
+      {
+        id: 'a1',
+        role: 'assistant',
+        content:
+          'Long verdict. ' +
+          Array.from({ length: 60 }, (_, i) => `Sentence ${i + 1} carries real content.`).join(' ') +
+          ' FINAL LINE MARKER.',
+        timestamp: 1735689601000,
+      },
+    ]
+    await page.goto(BASE_URL)
+    await page.evaluate((messages) => {
+      localStorage.setItem('chat_messages', JSON.stringify(messages))
+      localStorage.setItem('chat_session_id', '11111111-2222-4333-8444-555555555555')
+    }, seed)
+
+    for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+      await page.setViewportSize(viewport)
+      await page.goto(`${BASE_URL}/chat`)
+      await page.waitForSelector('[id^="message-"]')
+      const overlap = await page.evaluate(() => {
+        const msgs = document.querySelectorAll('[id^="message-"]')
+        const last = msgs[msgs.length - 1] as HTMLElement
+        const composer = document.getElementById('chat-input-wrapper')
+        const scroller = last?.closest('.overflow-y-auto') as HTMLElement | null
+        if (!last || !composer || !scroller) return { error: true }
+        scroller.scrollTop = scroller.scrollHeight
+        const lastBottom = last.getBoundingClientRect().bottom
+        const composerTop = composer.getBoundingClientRect().top
+        return { error: false, overlapPx: Math.max(0, lastBottom - composerTop) }
+      })
+      expect(overlap.error).toBeFalsy()
+      expect(overlap.overlapPx).toBe(0)
+    }
+  })
+
   test('/browse/nonexistent renders the custom editorial 404, not the Next.js default', async ({ page }) => {
     const response = await page.goto(`${BASE_URL}/browse/nonexistent-slug-xyz`)
     expect(response?.status()).toBe(404)
