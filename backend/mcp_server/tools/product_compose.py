@@ -2700,6 +2700,11 @@ TRANSITIONAL RULES (transitional_reasoning field):
         # ── Fallback cards for blog-mentioned products without product_review blocks ──
         # Every product mentioned in the blog article must have a clickable card
         fallback_card_count = 0
+        # PLAN-10 T2: fallback cards exist for buy-link coverage of the
+        # prose's mentions — an IMAGELESS one (always priceless: Amazon search
+        # link, price 0) renders as a bare text box, so at most ONE per
+        # response; the rest are suppressed with a log line.
+        imageless_fallback_count = 0
         # F4: fallback cards must not reintroduce a near-duplicate of a card that
         # already exists under a slightly different name — model codes are the
         # identity check here too (exact-name matching alone misses variants).
@@ -2737,6 +2742,15 @@ TRANSITIONAL RULES (transitional_reasoning field):
                             fallback_image = o["image_url"]
                             break
                     break
+
+            if not fallback_image:
+                if imageless_fallback_count >= 1:
+                    logger.info(
+                        f"[product_compose] PLAN-10 T2: suppressed imageless "
+                        f"fallback card for '{pname}' (cap 1 per response)"
+                    )
+                    continue
+                imageless_fallback_count += 1
 
             fallback_links = [{
                 "product_id": f"amazon-search-{fallback_card_count + 1}",

@@ -360,3 +360,17 @@ describe('ProductReview - price provenance (PLAN-10 T1)', () => {
     expect(screen.getByText(/See price at Best Buy/)).toBeInTheDocument()
   })
 })
+
+describe('ProductReview - imageless cards (PLAN-10 T2)', () => {
+  it('renders text-only (no empty image panel) when image_url is empty', () => {
+    const { container } = render(<ProductReview product={makeProduct({ image_url: '' })} />)
+    expect(container.querySelector('img')).toBeNull()
+    // Body still renders fully.
+    expect(screen.getByText('New Balance Fresh Foam 1080v13')).toBeInTheDocument()
+  })
+
+  it('renders the image panel when an image exists', () => {
+    const { container } = render(<ProductReview product={makeProduct()} />)
+    expect(container.querySelector('img')).not.toBeNull()
+  })
+})

@@ -290,7 +290,12 @@ export default function ProductReview({ product, showRefine = false }: ProductRe
     setTimeout(() => setImgRetry(attempt + 1), (attempt + 1) * 5000)
   }
 
-  const productImage = (
+  // PLAN-10 T2: no image -> no empty image panel. The card renders text-only
+  // (full-width body); the bookmark affordance moves inline so saving still
+  // works without the panel.
+  const hasImage = Boolean(image_url && image_url.trim())
+
+  const productImage = hasImage && (
     <div
       className={`relative overflow-hidden shrink-0 ${
         isFeature ? 'md:w-[38%] aspect-[4/3] md:aspect-auto md:min-h-[300px]' : 'w-28 sm:w-40 self-stretch min-h-[9rem]'
@@ -320,7 +325,12 @@ export default function ProductReview({ product, showRefine = false }: ProductRe
       <div className={`flex ${isFeature ? 'flex-col md:flex-row' : ''}`}>
         {productImage}
 
-        <div className={`flex-1 min-w-0 flex flex-col ${isFeature ? 'p-5 sm:p-7 gap-4' : 'p-4 sm:p-5 gap-3'}`}>
+        <div className={`flex-1 min-w-0 flex flex-col ${isFeature ? 'p-5 sm:p-7 gap-4' : 'p-4 sm:p-5 gap-3'} ${hasImage ? '' : 'relative'}`}>
+          {/* PLAN-10 T2: imageless cards keep the bookmark — it anchors to the
+              body instead of the (absent) image panel. */}
+          {!hasImage && (
+            <SaveToggle item={{ id: slug, name: product_name, price: bestOffer?.price, imageUrl: image_url, url: bestOffer?.affiliate_link, role: roleLabel }} />
+          )}
           {/* Kicker + title + rating */}
           <div>
             {roleLabel && (

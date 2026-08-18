@@ -469,3 +469,56 @@ async def test_projection_carries_price_source(monkeypatch):
     for link in links:
         assert link.get("price_source") in ("native", "market", None)
     assert any(link.get("price_source") == "native" for link in links)
+
+
+# ---------------------------------------------------------------------------
+# PLAN-10 T2 — at most one imageless (priceless) fallback card per response.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_imageless_fallback_cards_capped_at_one(monkeypatch):
+    _pin_simple_path(monkeypatch)
+    blog = json.dumps({
+        "body": "The Alpha One leads; Beta Two, Gamma Three and Delta Four also rate.",
+        "follow_up_question": "Which matters most?",
+        "transitional_reasoning": "",
+        "top_pick": "Alpha One",
+    })
+    fake = MagicMock()
+
+    async def _generate_compose(*args, **kwargs):
+        if kwargs.get("agent_name") == "blog_article_composer":
+            return blog
+        return "x"
+
+    fake.generate_compose = AsyncMock(side_effect=_generate_compose)
+
+    state = {
+        "user_message": "best widgets",
+        "intent": "product",
+        "slots": {"category": "widgets"},
+        # One real product with offers; three blog-only mentions -> fallback
+        # candidates with no image and no price.
+        "normalized_products": [
+            {"name": "Alpha One", "price": 100, "url": "https://e.com/a"},
+            {"name": "Beta Two", "price": 0, "url": ""},
+            {"name": "Gamma Three", "price": 0, "url": ""},
+            {"name": "Delta Four", "price": 0, "url": ""},
+        ],
+        "affiliate_products": {
+            "amazon": [{
+                "product_name": "Alpha One",
+                "offers": [_real_offer("Alpha One", 100.00)],
+            }],
+        },
+        "review_data": {},
+        "comparison_html": None, "comparison_data": None,
+        "general_product_info": "", "conversation_history": [],
+        "last_search_context": {}, "search_history": [],
+    }
+    with patch("app.services.model_service.model_service", fake):
+        result = await product_compose(state)
+
+    cards = [b["data"] for b in result["ui_blocks"] if b.get("type") == "product_review"]
+    imageless = [c for c in cards if not c.get("image_url")]
+    assert len(imageless) <= 1, [c.get("product_name") for c in imageless]
