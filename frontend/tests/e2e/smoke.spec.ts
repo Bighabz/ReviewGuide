@@ -145,3 +145,48 @@ test.describe('smoke', () => {
     expect(isDefaultOnly).toBeFalsy()
   })
 })
+
+  test('no horizontal body scroll on a seeded product answer at 390px', async ({ page }) => {
+    // PLAN-10 T3: the response surface (cards, badges, ledger rows, chips)
+    // must scroll wide content inside its own containers, never the body.
+    const seed = [
+      { id: 'u1', role: 'user', content: 'best robot vacuums for pet hair', timestamp: 1735689600000 },
+      {
+        id: 'a1', role: 'assistant', timestamp: 1735689601000,
+        content: 'The iRobot Roomba j7+ is the pick for pet hair households.',
+        ui_blocks: [{
+          type: 'product_review',
+          data: {
+            product_name: 'iRobot Roomba j7+ Self-Emptying Robot Vacuum Extended Name',
+            rating: '4.4/5',
+            summary: 'Smart navigation and reliable pet-hair pickup across carpet and hardwood floors.',
+            image_url: 'https://img.example/roomba.jpg',
+            features: ['Best Overall'],
+            pros: [{ description: 'Obstacle avoidance that actually works' }],
+            cons: [{ description: 'Bags cost money over time' }],
+            rank: 1,
+            affiliate_links: [
+              { product_id: 'a', title: 'Amazon - Roomba', price: 398.55, currency: 'USD', affiliate_link: 'https://amazon.example/r', merchant: 'Amazon', condition_label: null, price_source: 'native', over_budget: true },
+              { product_id: 'b', title: 'eBay - Roomba', price: 156.55, currency: 'USD', affiliate_link: 'https://ebay.example/r', merchant: 'eBay', condition_label: 'Open box', price_source: 'native', below_budget_floor: true },
+            ],
+          },
+        }],
+        next_suggestions: [
+          { id: 's1', question: 'Which one handles long-haired shedding breeds best over hardwood?' },
+        ],
+      },
+    ]
+    await page.goto(BASE_URL)
+    await page.evaluate((messages) => {
+      localStorage.setItem('chat_messages', JSON.stringify(messages))
+      localStorage.setItem('chat_session_id', '11111111-2222-4333-8444-555555555555')
+    }, seed)
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto(`${BASE_URL}/chat`)
+    await page.waitForSelector('[id^="message-"]')
+    const widths = await page.evaluate(() => ({
+      body: document.body.scrollWidth,
+      viewport: window.innerWidth,
+    }))
+    expect(widths.body).toBeLessThanOrEqual(widths.viewport + 1)
+  })

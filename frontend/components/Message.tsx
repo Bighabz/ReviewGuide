@@ -672,7 +672,7 @@ export default function Message({ message, isLast = false, isStale = false }: Me
                       key={suggestion.id}
                       data-testid={`suggestion-chip-${idx}`}
                       data-category={suggestion.category}
-                      className="inline-flex items-center gap-2 rounded-[12px] border border-[var(--line-2)] bg-[var(--paper-hi)] text-[var(--ink)] px-3.5 py-2.5 text-[14px] leading-[20px] font-medium text-left transition-all hover:border-[var(--terra)] hover:bg-[var(--terra-soft)]"
+                      className="inline-flex min-h-[44px] items-center gap-2 rounded-[12px] border border-[var(--line-2)] bg-[var(--paper-hi)] text-[var(--ink)] px-3.5 py-2.5 text-[14px] leading-[20px] font-medium text-left transition-all hover:border-[var(--terra)] hover:bg-[var(--terra-soft)]"
                       onClick={() => {
                         trackSuggestionClick(suggestion, message.id, idx)
                         const event = new CustomEvent('sendSuggestion', {
