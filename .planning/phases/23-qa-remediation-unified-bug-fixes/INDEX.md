@@ -17,7 +17,9 @@ Session run-down (backend 952 / frontend 390 tests green at close):
 | PLAN-9 | Shipped (all three layers) |
 | DOCTRINE D4 | DECIDED + EXECUTED: session-scoped preferences |
 | DOCTRINE D5 | DECIDED + EXECUTED: safety timeout blocks, clarifier timeout re-asks |
-| DOCTRINE D1/D2/D3 | Open (D2 proposed as the next refactor) |
+| DOCTRINE D2 | EXECUTED 2026-08-18 (`3595f64`) — ComposeResult envelope + golden test |
+| DOCTRINE D1/D3 | Open |
+| **PLAN-10** | NEW 2026-08-18 (Habib's manual QA): merchant-honest prices (backfill stamps one price onto every merchant row), graceful imageless/$0 cards, mobile 390px pass — [PLAN-10](PLAN-10-price-image-mobile-honesty.md), not executed |
 
 ---
 
