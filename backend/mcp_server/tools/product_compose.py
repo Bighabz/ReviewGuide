@@ -922,6 +922,13 @@ def _apply_backfill(offers: list) -> None:
     field OR the title — a source titled "… Renewed" with an empty condition
     field still labels. Copying the raw field would copy "" and launder anyway,
     so we copy the DERIVED label."""
+    # PLAN-10 T1: provenance travels with every price. A merchant row may
+    # only RENDER a number its merchant actually quoted ("native"); borrowed
+    # prices are market context ("market") and the frontend labels them so.
+    for o in offers:
+        if _extract_price(o) is not None:
+            o["price_source"] = "native"
+
     src = _select_backfill_source(offers)
     if not src:
         return
@@ -932,6 +939,7 @@ def _apply_backfill(offers: list) -> None:
             continue
         if _extract_price(o) is None:
             o["price"] = _extract_price(src)
+            o["price_source"] = "market"
             if src_label is not None and _offer_condition_label(o) is None:
                 # Write the label into the field so downstream label checks and
                 # the card badge both see it, whatever the target's title says.
@@ -941,6 +949,19 @@ def _apply_backfill(offers: list) -> None:
         # them — their synthetic prices must never surface.
         if src_image and not o.get("image_url"):
             o["image_url"] = src_image
+
+
+def _best_offer(all_offers: list) -> Optional[dict]:
+    """Headline election: first NEW offer with a real price ($407-class
+    honesty), then any priced offer, then just first. PLAN-10 T1 tie-break:
+    within the winning tier, a NATIVE-priced offer beats a market-priced one —
+    a borrowed number must not headline over a merchant's own quote."""
+    priced = [o for o in all_offers if o.get("price", 0) > 0]
+    new_priced = [o for o in priced if not _offer_condition_label(o)]
+    pool = new_priced or priced or all_offers
+    if not pool:
+        return None
+    return sorted(pool, key=lambda o: 0 if o.get("price_source") == "native" else 1)[0]
 
 
 def _looks_like_accessory(offer: dict) -> bool:
@@ -1420,12 +1441,9 @@ async def product_compose(state: Dict[str, Any]) -> Dict[str, Any]:
                             if _p is not None and _p < budget_min:
                                 o["below_budget_floor"] = True
 
-                # Best offer = first NEW offer with a real price ($407-class honesty:
-                # a renewed/used listing can't set the product's headline price when a
-                # new-condition offer exists), then any priced offer, then just first.
-                priced = [o for o in all_offers_for_product if o.get("price", 0) > 0]
-                new_priced = [o for o in priced if not _offer_condition_label(o)]
-                product_copy["best_offer"] = (new_priced or priced or all_offers_for_product)[0]
+                # Headline election lives in _best_offer (condition honesty +
+                # PLAN-10 native-beats-market tie-break).
+                product_copy["best_offer"] = _best_offer(all_offers_for_product)
                 product_copy["all_offers"] = all_offers_for_product
 
             products_with_offers.append(product_copy)
@@ -2633,6 +2651,10 @@ TRANSITIONAL RULES (transitional_reasoning field):
                         budget_max is not None
                         and _link_price is not None and _link_price > budget_max
                     ),
+                    # PLAN-10 T1: where this row's price came from. "market"
+                    # = borrowed via backfill -> the frontend renders it as
+                    # labeled context, never as this merchant's quote.
+                    "price_source": o.get("price_source"),
                     # $407-class honesty: "Renewed" / "Used" / "Open box" badge for
                     # non-new listings (eBay condition field or title keywords) —
                     # the price is real, the user just deserves to know why it's low.

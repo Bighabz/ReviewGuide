@@ -394,3 +394,78 @@ async def test_comparison_followup_rows_carry_offer_data():
     assert by_title["Breville Barista Express"]["merchant"] == "Best Buy"
     assert by_title["Breville Barista Express"]["image_url"] == "https://img.example/bbe.jpg"
     assert by_title["De'Longhi Dedica"]["price"] == 249.0
+
+
+# ---------------------------------------------------------------------------
+# PLAN-10 T1 — merchant-honest pricing: a borrowed price is market context.
+# ---------------------------------------------------------------------------
+
+from mcp_server.tools.product_compose import _best_offer
+
+
+def test_backfill_stamps_price_source_provenance():
+    offers = [
+        make_offer("Sony WH-1000XM5", 398.00, merchant="Best Buy"),
+        make_offer("Sony WH-1000XM5", 0, merchant="Amazon"),
+    ]
+    _apply_backfill(offers)
+    bb = next(o for o in offers if o["merchant"] == "Best Buy")
+    az = next(o for o in offers if o["merchant"] == "Amazon")
+    assert bb["price_source"] == "native"
+    assert az["price_source"] == "market"
+    assert az["price"] == 398.00
+
+
+def test_native_priced_beats_market_priced_for_best_offer():
+    offers = [
+        make_offer("Sony WH-1000XM5", 0, merchant="Amazon", source="amazon"),
+        make_offer("Sony WH-1000XM5", 398.00, merchant="Best Buy"),
+    ]
+    _apply_backfill(offers)
+    # Amazon sorts first in assembly order scenarios; the native Best Buy
+    # quote must still win the headline over Amazon's borrowed copy.
+    best = _best_offer(offers)
+    assert best["merchant"] == "Best Buy"
+    assert best["price_source"] == "native"
+
+
+@pytest.mark.asyncio
+async def test_projection_carries_price_source(monkeypatch):
+    """End to end: every projected card link declares where its price came
+    from, so the frontend can refuse to render borrowed numbers as quotes."""
+    _pin_simple_path(monkeypatch)
+    fake = _fake_service("Shark ION Robot Vacuum RV750",
+                         "The Shark ION Robot Vacuum RV750 is the pick.")
+    state = {
+        "user_message": "robot vacuum for pet hair",
+        "intent": "product",
+        "slots": {"category": "vacuums"},
+        "normalized_products": [
+            {"name": "Shark ION Robot Vacuum RV750", "price": 249, "url": "https://e.com/rv750"},
+        ],
+        "affiliate_products": {
+            "amazon": [{
+                "product_name": "Shark ION Robot Vacuum RV750",
+                "offers": [
+                    _real_offer("Shark ION Robot Vacuum RV750", 249.00),
+                    {**_real_offer("Shark ION Robot Vacuum RV750", 0, merchant="MockAmazon"), "source": "amazon"},
+                ],
+            }],
+        },
+        "review_data": {},
+        "comparison_html": None, "comparison_data": None,
+        "general_product_info": "", "conversation_history": [],
+        "last_search_context": {}, "search_history": [],
+    }
+    with patch("app.services.model_service.model_service", fake):
+        result = await product_compose(state)
+
+    links = [
+        link
+        for b in result["ui_blocks"] if b.get("type") == "product_review"
+        for link in b["data"]["affiliate_links"]
+    ]
+    assert links
+    for link in links:
+        assert link.get("price_source") in ("native", "market", None)
+    assert any(link.get("price_source") == "native" for link in links)

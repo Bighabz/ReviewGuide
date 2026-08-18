@@ -134,6 +134,9 @@ interface AffiliateLink {
   // PLAN-1 T5 / DOCTRINE D5: offer exceeds the user's stated budget ceiling —
   // retained only because nothing fits; must be visibly marked, never silent.
   over_budget?: boolean
+  // PLAN-10 T1: "native" = this merchant quoted the price; "market" = borrowed
+  // via backfill — rendered as labeled market context, never a merchant quote.
+  price_source?: 'native' | 'market' | null
 }
 
 interface ProductReviewProps {
@@ -179,7 +182,10 @@ function pickBestOffer(offers: AffiliateLink[]): AffiliateLink | undefined {
   if (priced.length === 0) return offers[0]
   const newPriced = priced.filter((o) => !o.condition_label)
   const pool = newPriced.length > 0 ? newPriced : priced
-  return pool.reduce((best, o) => (o.price < best.price ? o : best))
+  // PLAN-10 T1 tie-break: a merchant's own quote beats a borrowed market price.
+  const native = pool.filter((o) => o.price_source !== 'market')
+  const finalPool = native.length > 0 ? native : pool
+  return finalPool.reduce((best, o) => (o.price < best.price ? o : best))
 }
 
 function OfferBadges({ offer }: { offer: AffiliateLink }) {
@@ -385,12 +391,17 @@ export default function ProductReview({ product, showRefine = false }: ProductRe
               <p className="flex items-baseline gap-2 flex-wrap">
                 {bestOffer.price > 0 && (
                   <span className={`font-serif ${isFeature ? 'text-3xl' : 'text-2xl'}`} style={{ color: 'var(--ink)' }}>
+                    {bestOffer.price_source === 'market' ? 'from ' : ''}
                     {bestOffer.currency === 'USD' ? '$' : `${bestOffer.currency} `}
                     {bestOffer.price.toFixed(2)}
                   </span>
                 )}
                 <span className="text-xs" style={{ color: 'var(--ink-3)' }}>
-                  via {bestOffer.merchant}
+                  {/* PLAN-10 T1: a borrowed price is market context, not this
+                      merchant's quote — say so instead of "via X". */}
+                  {bestOffer.price > 0 && bestOffer.price_source === 'market'
+                    ? 'market price'
+                    : `via ${bestOffer.merchant}`}
                 </span>
                 <OfferBadges offer={bestOffer} />
               </p>
@@ -403,7 +414,7 @@ export default function ProductReview({ product, showRefine = false }: ProductRe
                   className={`inline-flex items-center justify-center gap-1.5 min-h-[44px] px-5 py-2 rounded-md text-sm font-semibold whitespace-nowrap shrink-0 transition-colors ${isFeature ? 'w-full sm:w-auto' : ''}`}
                   style={{ background: 'var(--terra)', color: 'var(--paper-hi)' }}
                 >
-                  {bestOffer.price > 0 ? 'See price' : 'Check price'} at {bestOffer.merchant}
+                  {bestOffer.price > 0 && bestOffer.price_source !== 'market' ? 'See price' : 'Check price'} at {bestOffer.merchant}
                   <ArrowUpRight size={15} strokeWidth={2.25} className="shrink-0" />
                 </a>
               </div>
@@ -431,7 +442,9 @@ export default function ProductReview({ product, showRefine = false }: ProductRe
                   {/* QA #2: prices were wrapping one character per line in the
                       squeezed mobile column — never let a price break. */}
                   <span className="font-serif text-base whitespace-nowrap shrink-0" style={{ color: 'var(--ink)' }}>
-                    {offer.price > 0
+                    {/* PLAN-10 T1: only a NATIVE price renders as this
+                        merchant's number — borrowed prices say Check price. */}
+                    {offer.price > 0 && offer.price_source !== 'market'
                       ? `${offer.currency === 'USD' ? '$' : `${offer.currency} `}${offer.price.toFixed(2)}`
                       : 'Check price'}
                   </span>

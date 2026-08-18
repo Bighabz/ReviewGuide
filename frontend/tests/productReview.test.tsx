@@ -302,3 +302,61 @@ describe('ProductReview — image load retry (generated images)', () => {
     }
   })
 })
+
+// ---------------------------------------------------------------------------
+// PLAN-10 T1 — merchant-honest pricing: borrowed prices are labeled market
+// context, never rendered as another merchant's quote.
+// ---------------------------------------------------------------------------
+
+describe('ProductReview - price provenance (PLAN-10 T1)', () => {
+  const nativeOffer = {
+    product_id: 'bestbuy-1',
+    title: 'Best Buy - Sony WH-1000XM5',
+    price: 398.0,
+    currency: 'USD',
+    affiliate_link: 'https://www.bestbuy.com/site/xm5',
+    merchant: 'Best Buy',
+    condition_label: null,
+    price_source: 'native' as const,
+  }
+  const marketOffer = {
+    product_id: 'amazon-1',
+    title: 'Amazon - Sony WH-1000XM5',
+    price: 398.0,
+    currency: 'USD',
+    affiliate_link: 'https://www.amazon.com/s?k=xm5&tag=revguide-20',
+    merchant: 'Amazon',
+    condition_label: null,
+    price_source: 'market' as const,
+  }
+
+  it('a market-priced ledger row shows Check price, not the borrowed number', () => {
+    render(<ProductReview product={makeProduct({
+      affiliate_links: [nativeOffer, marketOffer],
+    })} />)
+    // Native Best Buy quote leads the money row with its real number…
+    expect(screen.getByText('via Best Buy')).toBeInTheDocument()
+    // …and the borrowed Amazon copy of the same number is NOT rendered as an
+    // Amazon quote: exactly one $398.00 on the card.
+    expect(screen.getAllByText(/398\.00/)).toHaveLength(1)
+    expect(screen.getByText('Check price')).toBeInTheDocument()
+  })
+
+  it('a market-priced money row is labeled as market context', () => {
+    render(<ProductReview product={makeProduct({
+      affiliate_links: [marketOffer],
+    })} />)
+    expect(screen.getByText('market price')).toBeInTheDocument()
+    expect(screen.queryByText('via Amazon')).toBeNull()
+    // CTA never claims the merchant will show this price.
+    expect(screen.getByText(/Check price at Amazon/)).toBeInTheDocument()
+  })
+
+  it('native-priced rows keep today\'s behavior', () => {
+    render(<ProductReview product={makeProduct({
+      affiliate_links: [nativeOffer],
+    })} />)
+    expect(screen.getByText('via Best Buy')).toBeInTheDocument()
+    expect(screen.getByText(/See price at Best Buy/)).toBeInTheDocument()
+  })
+})
