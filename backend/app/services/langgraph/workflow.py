@@ -7,6 +7,7 @@ from app.core.centralized_logger import get_logger
 from typing import Dict, Any
 from langgraph.graph import StateGraph, END
 from app.schemas.graph_state import GraphState
+from app.schemas.compose_result import ComposeResult
 from app.core.config import settings
 from app.core.colored_logging import get_colored_logger
 
@@ -513,37 +514,21 @@ async def plan_executor_node(state: GraphState) -> Dict[str, Any]:
         # The old module-level singleton shared self.context/self.state across concurrent requests.
         executor = PlanExecutor()
         results = await executor.execute(plan, state)
+        # DOCTRINE D2 (2026-08-18): the composer's content share of this
+        # update comes MECHANICALLY from the ComposeResult envelope — the
+        # hand-copied field list that dropped follow_up_question at this
+        # exact boundary (2026-05-25) is gone. LangGraph merges only what a
+        # node returns, so state_update() is the one place that decides what
+        # crosses; adding a ComposeResult field crosses automatically.
         inner_update = {
-            "assistant_text": results.get("assistant_text", ""),
-            "ui_blocks": results.get("ui_blocks", []),
-            "citations": results.get("citations", []),
+            **ComposeResult.model_validate(results).state_update(state),
+            # Non-composer results: produced by other tools/executor internals.
             "next_suggestions": results.get("next_suggestions", []),
             "tool_citations": results.get("tool_citations", []),
-            # B.3 follow-up — propagate the structured follow_up_question
-            # from plan_executor's results into the LangGraph state update.
-            # Without this, PR #13's _extract_results fix is silently dropped
-            # at the node boundary: LangGraph only merges what the node
-            # returns, so a field present in `results` but missing from
-            # `inner_update` never lands in GraphState. chat.py then reads
-            # result_state.get("follow_up_question") as None and skips the
-            # SSE event. Detected 2026-05-25 post-PR #13 prod verification.
-            "follow_up_question": results.get("follow_up_question"),
-            # Quiz-path transitional reasoning — propagate at the node boundary
-            # (same reason as follow_up_question: LangGraph only merges what the
-            # node returns).
-            "transitional_reasoning": results.get("transitional_reasoning"),
-            # affiliate_products is written to self.state by product_affiliate
-            # via _write_tool_outputs_to_state, then lifted into results by
-            # _extract_results. Without this entry, chat.py never sees it and
-            # always reports amazon/ebay as "unavailable".
+            # affiliate_products is written to executor state by
+            # product_affiliate and lifted by _extract_results. Without this
+            # entry chat.py reports amazon/ebay as "unavailable".
             "affiliate_products": results.get("affiliate_products", {}),
-            # Outcome 2 (refinement chips) — propagate the search context built
-            # by product_compose so chat.py can persist it across turns (same
-            # node-boundary silent-drop as follow_up_question above). Fall back
-            # to the incoming state's value so a non-product turn doesn't wipe
-            # the context a previous product turn established.
-            "last_search_context": results.get("last_search_context") or state.get("last_search_context", {}),
-            "search_history": results.get("search_history") or state.get("search_history", []),
             "current_agent": "plan_executor",
             "status": "halted" if results.get("halt") else "completed",
             "next_agent": None,
@@ -553,18 +538,16 @@ async def plan_executor_node(state: GraphState) -> Dict[str, Any]:
         }
         return inner_update
 
-    # RFC §1.1 — fallback on hard timeout: partial results with degraded flag
+    # RFC §1.1 — fallback on hard timeout: partial results with degraded flag.
+    # Derived from the same envelope as the live path so the two shapes can
+    # never drift apart (DOCTRINE D2).
     fallback = {
-        "assistant_text": "I was only able to gather partial results. Please try again for a complete response.",
-        "ui_blocks": [],
-        "citations": [],
+        **ComposeResult(
+            assistant_text="I was only able to gather partial results. Please try again for a complete response.",
+        ).state_update(state),
         "next_suggestions": [],
         "tool_citations": [],
-        "follow_up_question": None,
-        "transitional_reasoning": None,
         "affiliate_products": {},
-        "last_search_context": {},
-        "search_history": [],
         "current_agent": "plan_executor",
         "status": "completed",
         "next_agent": None,

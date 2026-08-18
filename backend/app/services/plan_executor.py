@@ -12,6 +12,7 @@ import os
 from typing import Dict, Any, List, Tuple, Set
 from collections import defaultdict
 
+from app.schemas.compose_result import ComposeResult
 from app.services.tool_validator import ToolOutputValidator
 
 # Add MCP server to path for tool contract imports
@@ -877,37 +878,20 @@ class PlanExecutor:
         logger.debug(f"🔍 Extracting results from context keys: {list(self.context.keys())}")
         for key, value in self.context.items():
             if "compose" in key and isinstance(value, dict):
-                # This is likely the final composed response
+                # DOCTRINE D2 (2026-08-18): the composer's content fields are
+                # copied MECHANICALLY from the ComposeResult envelope — the
+                # per-field hand-copy that silently dropped follow_up_question
+                # (2026-05-25), transitional_reasoning, and last_search_context
+                # is gone. Add a field to ComposeResult and it flows from here
+                # without touching this function.
                 logger.info(f"✓ Found compose tool result in key '{key}'")
-                logger.debug(f"  - assistant_text: {len(value.get('assistant_text', ''))} chars")
-                logger.debug(f"  - ui_blocks: {len(value.get('ui_blocks', []))} blocks")
-                logger.debug(f"  - citations: {len(value.get('citations', []))} citations")
-                results["assistant_text"] = value.get("assistant_text", "")
-                results["ui_blocks"] = value.get("ui_blocks", [])
-                results["citations"] = value.get("citations", [])
-                # B.3 follow-up — extract structured follow_up_question so it
-                # reaches chat.py's SSE generator. Without this, product_compose
-                # writes follow_up_question to its return dict but this
-                # extractor only copied the three fields above, silently
-                # dropping the value before it propagated into GraphState.
-                # Detected 2026-05-25 in B verification: LLM emitted a
-                # 130-char follow_up, parse succeeded, plan_executor dropped
-                # it, chat.py read empty, no SSE event fired.
-                if value.get("follow_up_question"):
-                    results["follow_up_question"] = value.get("follow_up_question")
-                # Quiz-path transitional reasoning — same extraction as the
-                # follow-up; without this the composer's value is dropped here.
-                if value.get("transitional_reasoning"):
-                    results["transitional_reasoning"] = value.get("transitional_reasoning")
-                # Outcome 2 (refinement chips) — extract the search context that
-                # product_compose builds (category, budget, top_prices, product
-                # names, ...) so chat.py can persist it across turns. Without
-                # this, post-results refinement ("Show cheaper options") has no
-                # context to adjust: the field is silently dropped right here.
-                if value.get("last_search_context"):
-                    results["last_search_context"] = value.get("last_search_context")
-                if value.get("search_history"):
-                    results["search_history"] = value.get("search_history")
+                compose = ComposeResult.model_validate(value)
+                for field, field_value in compose.content_items().items():
+                    # Always carry the core trio (empty is meaningful there);
+                    # optional fields only overwrite when truthy, so a second
+                    # compose entry can't blank an earlier real value.
+                    if field in ("assistant_text", "ui_blocks", "citations") or field_value:
+                        results[field] = field_value
 
         # Lift affiliate_products from self.state — product_affiliate writes it
         # there via _write_tool_outputs_to_state (in-place mutation) but never

@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, ValidationError
 
 from app.core.centralized_logger import get_logger
+from app.schemas.compose_result import ComposeResult
 
 logger = get_logger(__name__)
 
@@ -46,39 +47,11 @@ class ProductSearchOutput(BaseModel):
     timed_out: Optional[bool] = None
 
 
-class ProductComposeOutput(BaseModel):
-    """Schema for product_compose tool output.
-
-    The tool returns:
-        assistant_text:      str
-        follow_up_question:  Optional[str]  — B.3 curious follow-up emitted as
-                             its own SSE event by chat.py after the body finishes
-        ui_blocks:           List[Any]  — list of UI block dicts
-        citations:           List[Any]  — list of citation URL strings
-        last_search_context: dict       — optional context dict for follow-ups
-        search_history:      List[Any]  — optional search history list
-        success:             bool
-        error:               Optional[str]
-
-    Any field not declared here is silently dropped by ``model_dump()`` at
-    ``validate()`` (line ~163). PRs #13 and #14 fixed the lower layers
-    (_extract_results, plan_executor_node wrapper) but the validator was
-    quietly stripping ``follow_up_question`` upstream of both, so the
-    end-to-end SSE event never fired in prod despite the composer emitting
-    100+ char follow-ups (per ``[product_compose] LLM blog article: ...``
-    log line). Declaring the field here unblocks the chain.
-    """
-    assistant_text: Optional[str] = ""
-    follow_up_question: Optional[str] = None
-    # Quiz-path transitional reasoning — declared here or model_dump() silently
-    # drops it (same trap that hid follow_up_question pre-PR #15). See graph_state.py.
-    transitional_reasoning: Optional[str] = None
-    ui_blocks: Optional[List[Any]] = []
-    citations: Optional[List[Any]] = []
-    last_search_context: Optional[Dict[str, Any]] = {}
-    search_history: Optional[List[Any]] = []
-    success: Optional[bool] = False
-    error: Optional[str] = None
+# ProductComposeOutput was replaced by the canonical ComposeResult envelope
+# (DOCTRINE D2, 2026-08-18). ComposeResult allows extra fields, so the
+# validator can no longer silently strip an undeclared composer field — the
+# model_dump() trap that hid follow_up_question and transitional_reasoning.
+ProductComposeOutput = ComposeResult
 
 
 class TravelSearchHotelsOutput(BaseModel):
@@ -147,7 +120,7 @@ class ToolOutputValidator:
 
     _schemas: Dict[str, type[BaseModel]] = {
         "product_search": ProductSearchOutput,
-        "product_compose": ProductComposeOutput,
+        "product_compose": ComposeResult,
         "travel_search_hotels": TravelSearchHotelsOutput,
         "travel_search_flights": TravelSearchFlightsOutput,
         "product_normalize": ProductNormalizeOutput,
