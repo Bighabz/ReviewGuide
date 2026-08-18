@@ -13,8 +13,11 @@
   prod flip.
 - **PLAN-7 T1 — extended:** add a mobile history entry point (mobile currently
   has none), beyond the validated desktop-only scope.
-- D1 (retrieval-first), D2 (typed envelope), D3 (clarification state) remain
-  open — D2 is proposed to ride immediately after PLAN-8.
+- **D2 — EXECUTED 2026-08-18** (Habib: "do D2"): `app/schemas/compose_result.py`
+  is the single composer-output envelope; validator/extract/node consume it
+  mechanically; golden test `test_compose_result_golden.py` makes any future
+  silent drop a red test. Commit `3595f64`.
+- D1 (retrieval-first) and D3 (clarification state) remain open.
 
 Five milestone-scale calls surfaced by the 2026-07-31 two-round debug sweep.
 None of these are bug fixes; each changes what the product IS or how it is built.
