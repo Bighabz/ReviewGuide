@@ -108,6 +108,10 @@ async def review_search(state: Dict[str, Any]) -> Dict[str, Any]:
         product_names = state.get("product_names", [])
         slots = state.get("slots", {})
         category = slots.get("category", "")
+        # Fix A (2026-07-05): carry the use case into the review query so ratings/
+        # snippets reflect sport/gaming/travel suitability — the signal product_ranking
+        # matches against. Capped to keep the query and cache key sane.
+        use_case = str(slots.get("use_case") or "").strip()[:40]
 
         if not product_names:
             logger.warning("[review_search] No product names in state — skipping")
@@ -136,14 +140,14 @@ async def review_search(state: Dict[str, Any]) -> Dict[str, Any]:
         client = SerpAPIClient()
 
         # Run parallel searches for all products with per-product timeout
-        async def _search_with_timeout(name: str, cat: str):
+        async def _search_with_timeout(name: str, cat: str, uc: str):
             return await asyncio.wait_for(
-                client.search_reviews(name, cat),
+                client.search_reviews(name, cat, uc),
                 timeout=PER_PRODUCT_TIMEOUT_S,
             )
 
         tasks = [
-            _search_with_timeout(name, category)
+            _search_with_timeout(name, category, use_case)
             for name in products_to_search
         ]
         bundles = await asyncio.gather(*tasks, return_exceptions=True)

@@ -510,12 +510,17 @@ async def generate_chat_stream(
                 event_type = event.get("event")
                 event_name = event.get("name", "")
 
-                # Detect when agents START (on_chain_start) - log only
+                # Fix 3 (Defect B-b): detect when agents START (on_chain_start)
+                # and emit the stage message as a real SSE status event, so the
+                # frontend narrates the ACTUAL current stage instead of rotating
+                # canned loadingCopy strings. The stage strings are on-voice; the
+                # frontend resets its rotation on each new server string.
                 if event_type == "on_chain_start":
                     agent_instance = AGENT_NAME_TO_INSTANCE.get(event_name)
                     if agent_instance and hasattr(agent_instance, 'on_chain_start_message') and agent_instance.on_chain_start_message:
                         agent_short_name = event_name.split("_")[-1] if "_" in event_name else event_name
-                        logger.info(f"Agent status (suppressed): {event_name} - {agent_instance.on_chain_start_message}")
+                        yield _sse_event("status", {"text": agent_instance.on_chain_start_message, "agent": event_name})
+                        logger.info(f"Streamed agent status: {event_name} - {agent_instance.on_chain_start_message}")
                         last_node_name = agent_short_name
 
                 # Detect when nodes complete
@@ -570,6 +575,15 @@ async def generate_chat_stream(
                             yield _sse_event("artifact", {"clear": True})
                             prose_streamed = True
                         yield _sse_event("content", {"token": token})
+
+                # Fix 3 (Defect B-b): per-tool progress. plan_executor dispatches a
+                # request-scoped `tool_status` custom event as each tool starts;
+                # forward its message as an SSE status so the wait narrates real
+                # work ("Reading reviews…") instead of canned rotation.
+                elif event_type == "on_custom_event" and event_name == "tool_status":
+                    msg = (event.get("data") or {}).get("message", "")
+                    if msg:
+                        yield _sse_event("status", {"text": msg})
 
         try:
             # RFC §1.1 — drain; the 60-second hard cap fires inside _drain_event_loop

@@ -376,6 +376,17 @@ class PlanExecutor:
         self.tool_citations.append(citation)
         logger.info(f"📤 Tool citation: {tool_name} - {citation_message}")
 
+        # Fix 3 (Defect B-b): dispatch a request-scoped LangChain custom event so
+        # chat.py's astream_events consumer can forward the REAL stage as an SSE
+        # status. This rides contextvars (automatic on Python 3.11), so each
+        # request sees only its own tool_status — no global callback registration,
+        # no cross-user contamination. Best-effort: never let it break tool flow.
+        try:
+            from langchain_core.callbacks.manager import adispatch_custom_event
+            await adispatch_custom_event("tool_status", citation)
+        except Exception:
+            pass
+
         # Write citation to state's stream_chunk_data for immediate streaming
         # This triggers LangGraph to emit an event
         if self.state is not None:

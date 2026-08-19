@@ -393,6 +393,39 @@ def _fuzzy_product_match(query_name: str, candidate_name: str, threshold: float 
     return len(intersection) / len(union) >= threshold
 
 
+# ── Fix 2 (Defect C): classified pros/cons + word-boundary truncation ───────
+# The old card loop pushed EVERY review snippet into `pros` and left `cons`
+# empty, then hard-sliced at [:150] mid-word ("...noise cancellati"). Cards now
+# prefer the classified pros/cons from product_evidence's `review_aspects`; when
+# a product has none, snippets are routed by sentiment (a negative cue → "cons")
+# so the frontend's "The catch" section finally receives content — and every
+# blurb is truncated on a word boundary.
+
+_NEGATIVE_CUES = re.compile(
+    r"\b(?:not|isn'?t|aren'?t|don'?t|doesn'?t|won'?t|can'?t|lacks?|lacking|"
+    r"missing|problem|issues?|complaints?|disappoint\w*|uncomfortable|poor|"
+    r"worse|worst|avoid|however|unfortunately|downside|drawback)\b",
+    re.IGNORECASE,
+)
+
+
+def _reads_negative(text: str) -> bool:
+    """True when a review snippet carries a negative cue — routes it to `cons`."""
+    return bool(_NEGATIVE_CUES.search(text or ""))
+
+
+def _truncate_at_word(text: str, limit: int = 150) -> str:
+    """Trim to <= limit chars on a word boundary, appending an ellipsis. Never
+    splits a word mid-character the way a bare `text[:150]` slice did."""
+    text = (text or "").strip()
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    if " " in cut:
+        cut = cut[:cut.rfind(" ")]
+    return cut.rstrip(" ,;:.–—-") + "…"
+
+
 # ── F4: model-code identity for near-duplicate dedup ────────────────────────
 # Search providers return the same physical product under slightly different
 # names ("Sony WH-1000XM5 Wireless Headphones" vs "Sony WH1000XM5/B Noise
@@ -1568,6 +1601,53 @@ async def product_compose(state: Dict[str, Any]) -> Dict[str, Any]:
                 + ", ".join(p.get("name", "?") for p in products_with_offers[:5])
             )
 
+        # ── Fix 1d: use-case contradiction guardrail ──
+        # Card #1 must never be a product whose own review text negates the stated
+        # use (the Sony "aren't the best choice for sports use" case). After value
+        # sort, if the top product's fuzzy-matched review text explicitly says it's
+        # NOT for the use-case, swap in the first non-contradicting product from
+        # index 1–2. Runs before prose composition so the writer sees the corrected
+        # order; the #93 top-pick pinning still overrides card/consensus #1 after.
+        # Inert (never fires) when use_case is empty — protects every existing test.
+        _uc_raw = str((slots or {}).get("use_case") or "").strip()
+        _uc_tok = next(
+            (t for t in re.findall(r"[a-z0-9]+", _uc_raw.lower())
+             if len(t) >= 4 and t not in {
+                 "everyday", "general", "daily", "using", "with", "your"}),
+            "",
+        )
+        if _uc_tok and len(products_with_offers) > 1:
+            _neg_re = re.compile(
+                r"\b(?:not|isn'?t|aren'?t|won'?t|avoid|poor|bad)\W+"
+                r"(?:\w+\W+){0,4}for\W+(?:\w+\W+){0,2}"
+                + re.escape(_uc_tok[:4]) + r"\w*",
+                re.IGNORECASE,
+            )
+
+            def _review_text_for(_name: str) -> str:
+                parts = []
+                for _rname, _bundle in (review_data or {}).items():
+                    if not _fuzzy_product_match(_name, _rname):
+                        continue
+                    for _s in (_bundle or {}).get("sources", [])[:5]:
+                        parts.append(f"{_s.get('title', '')} {_s.get('snippet', '')}")
+                return " ".join(parts)
+
+            def _contradicts(_name: str) -> bool:
+                return bool(_neg_re.search(_review_text_for(_name)))
+
+            if _contradicts(products_with_offers[0].get("name", "")):
+                for _i in range(1, min(3, len(products_with_offers))):
+                    if not _contradicts(products_with_offers[_i].get("name", "")):
+                        _swapped = products_with_offers.pop(_i)
+                        products_with_offers.insert(0, _swapped)
+                        logger.info(
+                            "[product_compose] Fix 1d: swapped in '%s' as card #1 — "
+                            "prior top negated use-case '%s'",
+                            _swapped.get("name", "?"), _uc_raw,
+                        )
+                        break
+
         # Assign editorial labels based on review quality + price
         editorial_labels = _assign_editorial_labels(review_data, products_with_offers)
         if editorial_labels:
@@ -2671,11 +2751,31 @@ TRANSITIONAL RULES (transitional_reasoning field):
             total_reviews = review_bundle.get("total_reviews", 0)
             label = editorial_labels.get(pname, "")
 
-            # PLAN-3: pros/cons are grounded synthesis from the consolidated
-            # payload — snippets remain model INPUT only and never render.
-            # (The old loop filed snippet[:150] under pros: raw forum text,
-            # mid-word truncation, and never any cons.)
-            pros, cons = _card_pros_cons(pname, _blog_pros_cons, review_data)
+            # Merged doctrine (Fix 2 × PLAN-3): prefer the classified pros/cons
+            # product_evidence already extracted into review_aspects — a real
+            # "pro" vs "con" split grounded in actual review content, so the
+            # frontend's "The catch" section receives honest downsides. When a
+            # product has no aspects, fall back to PLAN-3's grounded synthesis
+            # from the consolidated payload (_card_pros_cons, honesty-gated:
+            # no grounding -> empty, an empty section beats an invented one).
+            # Raw snippets remain model INPUT only and never render on cards —
+            # Fix 2's sentiment-routed snippet fallback is retired by PLAN-3.
+            review_aspects = state.get("review_aspects") or []
+            aspect = next(
+                (a for a in review_aspects
+                 if _fuzzy_product_match(pname, a.get("product", ""))),
+                None,
+            )
+            pros, cons = [], []
+            if aspect and (aspect.get("pros") or aspect.get("cons")):
+                for p in (aspect.get("pros") or [])[:3]:
+                    if str(p).strip():
+                        pros.append({"description": _truncate_at_word(str(p)), "citations": []})
+                for c in (aspect.get("cons") or [])[:2]:
+                    if str(c).strip():
+                        cons.append({"description": _truncate_at_word(str(c)), "citations": []})
+            else:
+                pros, cons = _card_pros_cons(pname, _blog_pros_cons, review_data)
 
             card_data = {
                 "product_name": pname,

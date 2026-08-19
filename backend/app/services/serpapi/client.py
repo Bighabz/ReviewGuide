@@ -19,6 +19,7 @@ import asyncio
 import hashlib
 import json
 import math
+import re
 from dataclasses import dataclass, field, asdict
 from typing import List, Optional, Dict, Any
 from datetime import datetime
@@ -157,9 +158,28 @@ def _get_favicon_url(url: str) -> str:
         return ""
 
 
-def _cache_key(product_name: str, category: str) -> str:
-    """Generate Redis cache key for a product search."""
-    raw = f"{product_name.lower().strip()}:{category.lower().strip()}"
+# Fix 6 (Defect C bug 3): model-code identity for review-source filtering.
+# Search engines happily return a WH-1000XM4 (over-ear) review for a WF-1000XM4
+# (earbud) query — same family, wrong product. A source that carries its own
+# model code sharing NONE with the queried product is reviewing the wrong thing.
+_MODEL_CODE_RE = re.compile(r"\b[A-Z]{1,4}-?\d{3,}\w*\b")
+
+
+def _model_codes(text: str) -> set:
+    """Normalized model codes in a string ('WH-1000XM4' → 'WH1000XM4')."""
+    if not isinstance(text, str):
+        return set()
+    return {m.replace("-", "").upper() for m in _MODEL_CODE_RE.findall(text)}
+
+
+def _cache_key(product_name: str, category: str, use_case: str = "") -> str:
+    """Generate Redis cache key for a product search.
+
+    use_case is part of the key (Fix A 2026-07-05): the review query now varies by
+    use case, so a "running" bundle must NOT be served for a plain lookup — that
+    would poison every other ask for the 24h TTL.
+    """
+    raw = f"{product_name.lower().strip()}:{category.lower().strip()}:{use_case.lower().strip()}"
     h = hashlib.sha256(raw.encode()).hexdigest()[:16]
     return f"serpapi:{h}"
 
@@ -185,6 +205,7 @@ class SerpAPIClient:
         self,
         product_name: str,
         category: str = "",
+        use_case: str = "",
     ) -> ReviewBundle:
         """
         Search for real product reviews from trusted sources.
@@ -193,9 +214,13 @@ class SerpAPIClient:
         1. Google Search: editorial review sites
         2. Google Search: Reddit discussions
         3. Google Shopping: ratings and review counts
+
+        use_case (Fix A) sharpens the editorial/reddit queries toward the intended
+        use (e.g. "for running") so ratings/snippets reflect suitability; the
+        shopping (model-identity price/rating) leg is left untouched.
         """
         # Check cache first
-        cached = await self._get_cached(product_name, category)
+        cached = await self._get_cached(product_name, category, use_case)
         if cached:
             logger.info(f"[serper] Cache hit for '{product_name}'")
             return cached
@@ -204,8 +229,8 @@ class SerpAPIClient:
 
         try:
             # Run parallel searches
-            editorial_task = self._search_editorial(product_name, category)
-            reddit_task = self._search_reddit(product_name, category)
+            editorial_task = self._search_editorial(product_name, category, use_case)
+            reddit_task = self._search_reddit(product_name, category, use_case)
             shopping_task = self._search_shopping(product_name)
 
             results = await asyncio.gather(
@@ -236,6 +261,28 @@ class SerpAPIClient:
                 if source.url not in seen_urls:
                     seen_urls.add(source.url)
                     unique_sources.append(source)
+
+            # Fix 6 (Defect C bug 3): drop review sources about a DIFFERENT model.
+            # A source carrying its own model code(s) that shares NONE with the
+            # queried product (WF-1000XM4 vs WH-1000XM4 → ∅) is reviewing the wrong
+            # product — drop it. Code-less sources are ambiguous and always kept.
+            # Never filter to empty: if every coded source mismatches, keep them
+            # all rather than return a bundle with no evidence.
+            query_codes = _model_codes(product_name)
+            if query_codes:
+                kept = []
+                for s in unique_sources:
+                    src_codes = _model_codes(f"{s.title} {s.snippet}")
+                    if src_codes and not (src_codes & query_codes):
+                        logger.info(
+                            f"[serper] Fix 6: dropped off-model source "
+                            f"'{(s.title or '')[:60]}' (codes {src_codes} ∩ "
+                            f"query {query_codes} = ∅)"
+                        )
+                        continue
+                    kept.append(s)
+                if kept:
+                    unique_sources = kept
 
             # Sort by authority score (highest first)
             unique_sources.sort(key=lambda s: s.authority_score, reverse=True)
@@ -274,7 +321,7 @@ class SerpAPIClient:
             # genuinely-empty result (searches succeeded, just no reviews) is still
             # cached to avoid re-querying obscure products.
             if unique_sources or not had_provider_error:
-                await self._set_cached(product_name, category, bundle)
+                await self._set_cached(product_name, category, bundle, use_case)
             else:
                 logger.warning(
                     f"[serper] Not caching empty bundle for '{product_name}' — provider error "
@@ -291,21 +338,23 @@ class SerpAPIClient:
             logger.error(f"[serper] Search failed for '{product_name}': {e}", exc_info=True)
             return ReviewBundle(product_name=product_name)
 
-    async def _search_editorial(self, product_name: str, category: str) -> List[ReviewSource]:
+    async def _search_editorial(self, product_name: str, category: str, use_case: str = "") -> List[ReviewSource]:
         """Search editorial review sites via Google."""
         site_filter = " OR ".join(f"site:{site}" for site in EDITORIAL_SITES)
-        query = f"{product_name} review {site_filter}"
+        uc = f" for {use_case}" if use_case else ""
+        query = f"{product_name} review{uc} {site_filter}"
         if category:
-            query = f"{product_name} {category} review {site_filter}"
+            query = f"{product_name} {category} review{uc} {site_filter}"
 
         results = await self._serper_search(query, num=10)
         return self._parse_organic_results(results)
 
-    async def _search_reddit(self, product_name: str, category: str) -> List[ReviewSource]:
+    async def _search_reddit(self, product_name: str, category: str, use_case: str = "") -> List[ReviewSource]:
         """Search Reddit discussions via Google."""
-        query = f"{product_name} review site:reddit.com"
+        uc = f" for {use_case}" if use_case else ""
+        query = f"{product_name} review{uc} site:reddit.com"
         if category:
-            query = f"{product_name} {category} review site:reddit.com"
+            query = f"{product_name} {category} review{uc} site:reddit.com"
 
         results = await self._serper_search(query, num=10)
         return self._parse_organic_results(results)
@@ -631,11 +680,11 @@ class SerpAPIClient:
 
         return sources
 
-    async def _get_cached(self, product_name: str, category: str) -> Optional[ReviewBundle]:
+    async def _get_cached(self, product_name: str, category: str, use_case: str = "") -> Optional[ReviewBundle]:
         """Get cached review bundle from Redis."""
         try:
             from app.core.redis_client import redis_get_with_retry
-            key = _cache_key(product_name, category)
+            key = _cache_key(product_name, category, use_case)
             data = await redis_get_with_retry(key)
             if data:
                 return ReviewBundle.from_dict(json.loads(data))
@@ -643,11 +692,11 @@ class SerpAPIClient:
             logger.warning(f"[serper] Cache read failed: {e}")
         return None
 
-    async def _set_cached(self, product_name: str, category: str, bundle: ReviewBundle) -> None:
+    async def _set_cached(self, product_name: str, category: str, bundle: ReviewBundle, use_case: str = "") -> None:
         """Cache review bundle in Redis."""
         try:
             from app.core.redis_client import redis_set_with_retry
-            key = _cache_key(product_name, category)
+            key = _cache_key(product_name, category, use_case)
             data = json.dumps(bundle.to_dict())
             await redis_set_with_retry(key, data, ex=self.cache_ttl)
         except Exception as e:

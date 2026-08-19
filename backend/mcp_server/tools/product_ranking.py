@@ -43,6 +43,46 @@ def _fuzzy_name_match(name_a: str, name_b: str, threshold: float = 0.35) -> bool
     return len(intersection) / len(union) >= threshold
 
 
+# ── Fix A (2026-07-05): use-case relevance signal ──────────────────────────
+# The use case ("running", "gaming", "travel") never reached ranking, so a pure
+# rating-per-dollar value band promoted famous commuter flagships over sport-fit
+# picks. This adds a BOUNDED relevance term (deterministic, no LLM). It is inert
+# when no use_case is set (relevance 0 → multiplier 1.0 → identical scores), which
+# is exactly what keeps the existing value-ranking tests byte-identical.
+_USE_CASE_STOPWORDS = {
+    "for", "the", "a", "an", "my", "and", "or", "of", "to",
+    "use", "using", "with", "daily", "general", "everyday",
+}
+UC_VALUE_WEIGHT = 0.5   # value-band multiplier ∈ [1.0, 1.5]
+UC_LEGACY_WEIGHT = 0.3  # legacy additive ∈ [0.0, 0.3] (stays below the 2.0 band floor)
+
+
+def _use_case_tokens(use_case: str) -> set:
+    toks = re.findall(r"[a-z0-9]+", (use_case or "").lower())
+    return {t for t in toks if len(t) >= 3 and t not in _USE_CASE_STOPWORDS}
+
+
+def _token_hit(uc: str, text_tokens: set) -> bool:
+    # exact, or shared 4-char prefix ("running" ~ "runners" ~ "run-friendly")
+    return uc in text_tokens or (len(uc) >= 4 and any(t.startswith(uc[:4]) for t in text_tokens))
+
+
+def _use_case_relevance(product_name: str, use_case: str, review_data: dict) -> float:
+    """0.0–1.0: fraction of use-case tokens evidenced in the product NAME or its
+    fuzzy-matched review bundle text (titles + snippets, first 5 sources)."""
+    uc = _use_case_tokens(use_case)
+    if not uc:
+        return 0.0
+    text = product_name + " " + " ".join(
+        f"{s.get('title', '')} {s.get('snippet', '')}"
+        for rname, rb in (review_data or {}).items()
+        if _fuzzy_name_match(product_name, rname)
+        for s in (rb or {}).get("sources", [])[:5]
+    )
+    text_tokens = set(re.findall(r"[a-z0-9]+", text.lower()))
+    return sum(1 for t in uc if _token_hit(t, text_tokens)) / len(uc)
+
+
 def _comparison_side_matcher(side: str):
     """Build a matcher for one side of an 'X vs Y' pair.
 
@@ -191,6 +231,7 @@ async def product_ranking(state: Dict[str, Any]) -> Dict[str, Any]:
 
         # Outcome 9: budget bounds from the conversation slots.
         slots = state.get("slots", {}) or {}
+        use_case = str(slots.get("use_case") or "").strip()  # Fix A: use-case relevance
         budget_min, budget_max = _parse_budget(slots.get("budget"))
         has_budget = budget_min is not None or budget_max is not None
         # F2 semantics (shared with compose): ceiling is always hard; the floor is
@@ -273,11 +314,23 @@ async def product_ranking(state: Dict[str, Any]) -> Dict[str, Any]:
             # Normalize legacy score
             score = min(1.0, score)
 
+            # Fix A: bounded use-case relevance. Inert (0.0) when no use_case is set,
+            # so no-budget legacy scores stay identical. When set, it nudges the
+            # legacy score (capped at 1.3, still below the 2.0 value-band floor) and
+            # is stored so the value band can multiply it in for in-budget items.
+            uc_rel = _use_case_relevance(product_name, use_case, review_data)
+            if uc_rel:
+                score = min(1.3, score + UC_LEGACY_WEIGHT * uc_rel)
+                if uc_rel >= 0.5:
+                    reasons.append(f"Strong fit for {use_case}")
+
             item: Dict[str, Any] = {
                 "product_name": product_name,
                 "score": round(score, 2),
                 "reasons": reasons,
             }
+            if uc_rel:
+                item["use_case_relevance"] = round(uc_rel, 2)
 
             # ── Outcome 9: attach value signals when a budget was stated ──
             if has_budget:
@@ -306,10 +359,19 @@ async def product_ranking(state: Dict[str, Any]) -> Dict[str, Any]:
             ]
             if value_candidates:
                 max_value = max(it["rating"] / it["price"] for it in value_candidates)
+                # Fix A: fold the use-case relevance into the band as a bounded
+                # multiplier (×1.0–1.5). value_per_dollar stays the RAW rating/price
+                # (compose mirrors that field), only the score ordering shifts. With
+                # no relevance anywhere, _uc_adj == raw value → scores byte-identical.
+                for it in value_candidates:
+                    it["_uc_adj"] = (it["rating"] / it["price"]) * (
+                        1.0 + UC_VALUE_WEIGHT * it.get("use_case_relevance", 0.0)
+                    )
+                max_adjusted = max(it["_uc_adj"] for it in value_candidates)
                 for it in value_candidates:
                     value = it["rating"] / it["price"]
                     it["value_per_dollar"] = round(value, 5)
-                    it["score"] = round(2.0 + (value / max_value), 2)
+                    it["score"] = round(2.0 + (it.pop("_uc_adj") / max_adjusted), 2)
                     if value == max_value:
                         it["reasons"].insert(
                             0, f"Best value in your budget (${it['price']:.0f} at {it['rating']}★)"

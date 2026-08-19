@@ -176,7 +176,14 @@ async def product_search(state: Dict[str, Any]) -> Dict[str, Any]:
         if features:
             criteria_parts.append(f"Features: {features}")
         if use_case:
-            criteria_parts.append(f"Use case: {use_case}")
+            # Fix A (2026-07-05): the use case was one buried line among 11 slots and
+            # got ignored — "running" returned commuter buds. Promote it to the FIRST
+            # criterion and frame it as the priority so the generator weights fit.
+            criteria_parts.insert(
+                0,
+                f"PRIMARY USE CASE: {use_case} — prefer models purpose-built for this "
+                f"use, not just category best-sellers",
+            )
         if gender:
             criteria_parts.append(f"Gender: {gender}")
 
@@ -260,6 +267,7 @@ Requirements:
 - Be specific: "Nike Air Zoom Pegasus 40" not just "Nike running shoes"
 - If unsure about exact model numbers, use the product name the user specified
 - NEVER pad the list with items of a different product type that merely contain the user's words (a movie, perfume, or toy that happens to carry a brand name is wrong)
+- If a PRIMARY USE CASE is given (e.g. running, gaming, travel), at least 5 of the products MUST be purpose-built for that use case (e.g. for running: sport-fit / ear-hook / sweat-resistant models) — generically popular flagships that merely fit the broad category do NOT count
 {comparison_block}
 ESCAPE HATCH: if the message names only brands or companies and you cannot tell what type of product they want (e.g. "ford or chevy" with no category), do NOT guess across categories — return {{"products": []}}.
 
