@@ -142,7 +142,9 @@ async def test_no_aspects_falls_back_to_grounded_synthesis():
         {"snippet": "However, this raw snippet must never render on a card.",
          "site_name": "S1", "url": "https://x/1"},
     ])
-    data = _card(await _run(json.dumps(blog), state))
+    # pros_cons only rides the consolidated payload (PLAN-3)
+    with patch("app.core.config.settings.USE_CONSOLIDATED_COMPOSE", True):
+        data = _card(await _run(json.dumps(blog), state))
     pros = [p["description"] for p in data["pros"]]
     cons = [c["description"] for c in data["cons"]]
     assert pros == ["Built-in burr grinder"]

@@ -1,66 +1,52 @@
 """
-Redis Client with Retry Logic
-Connection pooling and automatic retry for failed operations
+KV client with retry logic (2026-08-18: Redis retired, Postgres-backed).
+
+Historically this module owned the app's Redis connection. The Redis server is
+gone — init_redis() now builds a PostgresKV adapter (app.core.pg_kv) that
+mirrors the redis-py method surface on Postgres tables in the same database
+the app already uses. The module/function names are unchanged on purpose:
+every consumer imports `get_redis`/`redis_*_with_retry` from here, and the
+test suite patches these exact names.
 """
 from app.core.centralized_logger import get_logger
 from typing import Any, Optional
 import asyncio
-from redis import asyncio as aioredis
-from redis.asyncio import Redis, ConnectionPool
 from redis.exceptions import ConnectionError, TimeoutError
 
 from app.core.config import settings
+from app.core.pg_kv import PostgresKV
 
 logger = get_logger(__name__)
 
-# Global Redis client
-redis_client: Optional[Redis] = None
-connection_pool: Optional[ConnectionPool] = None
+# Global KV client (PostgresKV; the name stays for import/patch compatibility)
+redis_client: Optional[PostgresKV] = None
+connection_pool = None  # retained for import compatibility; always None now
 
 
 async def init_redis() -> None:
-    """Initialize Redis connection with connection pooling"""
-    global redis_client, connection_pool
+    """Initialize the Postgres-backed KV adapter (requires init_db() first)."""
+    global redis_client
 
     try:
-        # Create connection pool
-        connection_pool = ConnectionPool.from_url(
-            settings.REDIS_URL,
-            max_connections=settings.REDIS_MAX_CONNECTIONS,
-            decode_responses=True,
-            socket_connect_timeout=settings.REDIS_SOCKET_CONNECT_TIMEOUT,
-            socket_keepalive=True,
-            health_check_interval=settings.REDIS_HEALTH_CHECK_INTERVAL,
-        )
-
-        # Create Redis client
-        redis_client = Redis(connection_pool=connection_pool)
-
-        # Test connection
-        await redis_client.ping()
-
-        logger.info("Redis connection initialized successfully")
-
+        client = PostgresKV()
+        await client.ping()
+        redis_client = client
+        logger.info("PostgresKV adapter initialized (Redis retired)")
     except Exception as e:
-        logger.error(f"Failed to initialize Redis: {e}")
+        logger.error(f"Failed to initialize PostgresKV adapter: {e}")
         raise
 
 
 async def close_redis() -> None:
-    """Close Redis connections"""
-    global redis_client, connection_pool
-
+    """Close the KV adapter (no-op: storage lifecycle belongs to close_db())."""
+    global redis_client
     if redis_client:
         await redis_client.close()
-
-    if connection_pool:
-        await connection_pool.disconnect()
-
-    logger.info("Redis connections closed")
+    logger.info("PostgresKV adapter closed")
 
 
-async def get_redis() -> Redis:
-    """Get Redis client instance"""
+async def get_redis() -> PostgresKV:
+    """Get the KV client instance"""
     if not redis_client:
         raise RuntimeError("Redis not initialized. Call init_redis() first.")
     return redis_client

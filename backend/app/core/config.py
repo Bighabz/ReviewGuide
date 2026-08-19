@@ -64,7 +64,10 @@ class Settings(BaseSettings):
     DB_CONNECT_TIMEOUT: int = Field(default=10, description="Database connection timeout in seconds")
 
     # Redis
-    REDIS_URL: str = Field(..., description="Redis connection string")
+    # 2026-08-18: Redis retired — the "redis" client is a Postgres adapter
+    # (app.core.pg_kv) living in the main DATABASE_URL. REDIS_URL is kept only
+    # so stale deploy environments don't crash config parsing; it is unused.
+    REDIS_URL: str = Field(default="", description="UNUSED since the Postgres KV port (2026-08-18)")
     REDIS_MAX_CONNECTIONS: int = Field(default=50, description="Redis connection pool max connections")
     REDIS_RETRY_MAX_ATTEMPTS: int = Field(default=3, description="Redis retry max attempts")
     REDIS_SOCKET_CONNECT_TIMEOUT: int = Field(default=5, description="Redis socket connect timeout in seconds")
@@ -85,9 +88,12 @@ class Settings(BaseSettings):
     )
 
     # Conversation History
+    # 2026-08-18: default flipped to False — conversation_messages in Postgres
+    # is the source of truth and the KV layer is Postgres anyway, so the cache
+    # hop adds a round-trip for nothing.
     USE_REDIS_FOR_HISTORY: bool = Field(
-        default=True,
-        description="Use Redis cache for history (true) or load directly from PostgreSQL (false)"
+        default=False,
+        description="Use KV cache for history (true) or load directly from PostgreSQL (false)"
     )
     MAX_HISTORY_MESSAGES: int = Field(
         default=30,

@@ -58,6 +58,19 @@ class SchedulerService:
             else:
                 logger.info("Link health checker disabled (ENABLE_LINK_HEALTH_CHECKER=false)")
 
+            # KV sweeper (2026-08-18 Redis retirement): Postgres doesn't evict
+            # expired kv rows on its own the way Redis did — reads filter on
+            # expires_at for correctness; this job reclaims the disk.
+            self.scheduler.add_job(
+                self._run_kv_sweep,
+                trigger=IntervalTrigger(minutes=15),
+                id="kv_sweep",
+                name="KV expired-row sweep (every 15m)",
+                replace_existing=True,
+                max_instances=1,
+            )
+            logger.info("KV expired-row sweeper scheduled (every 15m)")
+
             self.scheduler.start()
             self.is_running = True
 
@@ -86,6 +99,14 @@ class SchedulerService:
         self.scheduler.shutdown(wait=True)
         self.is_running = False
         logger.info("Scheduler stopped")
+
+    async def _run_kv_sweep(self):
+        """Background job: delete expired KV rows (pg_kv.sweep_expired)."""
+        try:
+            from app.core.pg_kv import sweep_expired
+            await sweep_expired()
+        except Exception as e:
+            logger.error(f"KV sweep failed: {e}")
 
     async def _run_link_health_check(self):
         """
