@@ -10,7 +10,10 @@ from datetime import datetime
 from app.core.centralized_logger import get_logger
 
 from app.core.redis_client import get_redis
-from app.core.database import engine
+# Import the MODULE, not the `engine` name: `from ... import engine` binds None
+# at import time (before init_db reassigns the global), so the probe would never
+# see the live engine. Reference database.engine at call time. (Matches pg_kv.py.)
+from app.core import database
 from app.services.startup_manifest import get_manifest
 
 logger = get_logger(__name__)
@@ -82,9 +85,9 @@ async def health_check():
 
     # Check database — real SELECT 1 probe (was hardcoded "unknown")
     try:
-        if engine is None:
+        if database.engine is None:
             raise RuntimeError("database engine not initialized")
-        async with engine.connect() as conn:
+        async with database.engine.connect() as conn:
             await conn.execute(sqlalchemy.text("SELECT 1"))
         health_status["database"] = "healthy"
     except Exception as e:

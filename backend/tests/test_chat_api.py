@@ -87,7 +87,7 @@ class TestHealthEndpoint:
         # Import here to avoid module-level import issues
         from app.main import app
 
-        with patch("app.api.v1.health.engine", mock_engine):
+        with patch("app.core.database.engine", mock_engine):
             with TestClient(app) as client:
                 response = client.get("/health")
                 assert response.status_code == 200
