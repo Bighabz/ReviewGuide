@@ -30,6 +30,10 @@ router = APIRouter(tags=["admin"])
 # Get timezone from config
 APP_TIMEZONE = pytz.timezone(settings.TIMEZONE)
 
+# QA containment: synthetic (qa-auto-*) traffic is excluded from user-visible
+# metrics. One source of truth for the predicate used by the aggregate queries.
+_QA_EXCLUDE_PREDICATE = "session_id NOT LIKE 'qa-auto-%'"
+
 # Initialize Langfuse client for fetching traces
 langfuse_client = Langfuse(
     public_key=settings.LANGFUSE_PUBLIC_KEY,
@@ -329,14 +333,16 @@ async def get_metrics(
         one_day_ago = now - timedelta(days=1)
 
         # Request Volume (only count user messages)
+        # QA: synthetic (qa-auto-*) traffic excluded from user-visible metrics
         result_1h = await db.execute(
-            text("SELECT COUNT(*) FROM conversation_messages WHERE created_at >= :time AND role = 'user'"),
+            text(f"SELECT COUNT(*) FROM conversation_messages WHERE created_at >= :time AND role = 'user' AND {_QA_EXCLUDE_PREDICATE}"),
             {"time": one_hour_ago}
         )
         requests_1h = result_1h.fetchone()[0] or 0
 
+        # QA: synthetic (qa-auto-*) traffic excluded from user-visible metrics
         result_24h = await db.execute(
-            text("SELECT COUNT(*) FROM conversation_messages WHERE created_at >= :time AND role = 'user'"),
+            text(f"SELECT COUNT(*) FROM conversation_messages WHERE created_at >= :time AND role = 'user' AND {_QA_EXCLUDE_PREDICATE}"),
             {"time": one_day_ago}
         )
         requests_24h = result_24h.fetchone()[0] or 0
@@ -371,11 +377,12 @@ async def get_metrics(
         # Top Queries
         # Get most popular queries
         try:
+            # QA: synthetic (qa-auto-*) traffic excluded from user-visible metrics
             result_popular = await db.execute(
-                text("""
+                text(f"""
                 SELECT content, COUNT(*) as count
                 FROM conversation_messages
-                WHERE role = 'user' AND created_at >= :time
+                WHERE role = 'user' AND created_at >= :time AND {_QA_EXCLUDE_PREDICATE}
                 GROUP BY content
                 ORDER BY count DESC
                 LIMIT 10
@@ -438,13 +445,14 @@ async def get_chart_data(
             interval = "hour"
 
         # Get request counts grouped by time interval (only user messages)
+        # QA: synthetic (qa-auto-*) traffic excluded from user-visible metrics
         result = await db.execute(
             text(f"""
             SELECT
                 DATE_TRUNC('{interval}', created_at) as time_bucket,
                 COUNT(*) as count
             FROM conversation_messages
-            WHERE created_at >= :start_time AND role = 'user'
+            WHERE created_at >= :start_time AND role = 'user' AND {_QA_EXCLUDE_PREDICATE}
             GROUP BY time_bucket
             ORDER BY time_bucket
             """),

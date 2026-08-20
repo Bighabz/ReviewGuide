@@ -1137,6 +1137,10 @@ async def list_conversations(
         if not is_admin and allowed_sessions:
             stmt = stmt.where(ConversationMessage.session_id.in_(allowed_sessions))
 
+        # QA: synthetic (qa-auto-*) sessions must never surface in the admin listing
+        if is_admin:
+            stmt = stmt.where(ConversationMessage.session_id.not_like('qa-auto-%'))
+
         stmt = stmt.order_by(desc(ConversationMessage.created_at)).limit(50)
 
         result = await db.execute(stmt)
