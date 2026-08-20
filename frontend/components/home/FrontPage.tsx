@@ -72,6 +72,10 @@ export function MastheadHero() {
         Independent buying advice · Updated continuously
       </p>
 
+      {/* T6 (2026-08-19): the page's single semantic <h1>. The hero logo
+          is the visual masthead; this visually-hidden h1 carries the document
+          outline for screen readers and crawlers without changing the design. */}
+      <h1 className="sr-only">ReviewGuide.ai — Ask Before You Buy</h1>
       {/* The brand mark IS the masthead — the existing animated hero logo */}
       <div className="w-full max-w-[240px] md:max-w-[280px] mx-auto">
         <DiscoverHeroLogo width={280} />

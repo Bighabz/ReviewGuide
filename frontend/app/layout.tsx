@@ -20,6 +20,9 @@ export const metadata: Metadata = {
   },
   description: TAGLINE,
   applicationName: 'ReviewGuide.ai',
+  alternates: {
+    canonical: '/',
+  },
   // app/opengraph-image.png and app/twitter-image.png supply the 1200×630 share
   // cards automatically (Next emits og:image / twitter:image with dimensions).
   openGraph: {

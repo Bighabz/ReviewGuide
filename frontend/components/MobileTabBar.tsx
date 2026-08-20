@@ -129,8 +129,8 @@ export default function MobileTabBar() {
               <button
                 key="ask"
                 onClick={() => router.push('/chat?new=1')}
-                className="relative flex flex-col items-center justify-center active:scale-95 transition-transform"
-                aria-label="Start new research"
+                className="relative flex flex-col items-center justify-center min-w-[56px] min-h-[44px] active:scale-95 transition-transform"
+                aria-label="Ask"
                 data-active={isActive ? 'true' : undefined}
               >
                 <div
@@ -164,8 +164,8 @@ export default function MobileTabBar() {
             return (
               <div key="profile" ref={profileRef} className="relative">
                 <button
-                  className="flex flex-col items-center gap-0.5 min-w-[56px] py-1"
-                  aria-label="Profile"
+                  className="flex flex-col items-center gap-0.5 min-w-[56px] min-h-[44px] py-2"
+                  aria-label="You"
                   data-active={isActive ? 'true' : undefined}
                   onClick={() => router.push('/profile')}
                   onMouseDown={startLongPress}
@@ -235,7 +235,7 @@ export default function MobileTabBar() {
             <button
               key={tab.id}
               onClick={() => tab.href && router.push(tab.href)}
-              className="flex flex-col items-center gap-0.5 min-w-[56px] py-1"
+              className="flex flex-col items-center gap-0.5 min-w-[56px] min-h-[44px] py-2"
               aria-label={tab.label}
               aria-current={isActive ? 'page' : undefined}
               data-active={isActive ? 'true' : undefined}

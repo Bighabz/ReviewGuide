@@ -72,11 +72,11 @@ function trackSuggestionClick(suggestion: NextSuggestion, messageId: string, ind
 // After submit the whole card locks (QA Round 4 F0b — feedback + no duplicates).
 
 const CHIP_SELECTED =
-  'inline-flex min-h-[40px] items-center gap-2 rounded-[12px] border border-[var(--terra)] bg-[var(--terra)] transition-all px-3.5 py-2 text-[14px] font-medium text-white'
+  'inline-flex min-h-[44px] items-center gap-2 rounded-[12px] border border-[var(--terra)] bg-[var(--terra)] transition-all px-3.5 py-2 text-[14px] font-medium text-white'
 const CHIP_LOCKED =
-  'inline-flex min-h-[40px] items-center gap-2 rounded-[12px] border border-[var(--line-2)] bg-[var(--paper-hi)] transition-all px-3.5 py-2 text-[14px] font-medium text-[var(--ink-3)] opacity-60'
+  'inline-flex min-h-[44px] items-center gap-2 rounded-[12px] border border-[var(--line-2)] bg-[var(--paper-hi)] transition-all px-3.5 py-2 text-[14px] font-medium text-[var(--ink-3)] opacity-60'
 const CHIP_IDLE =
-  'inline-flex min-h-[40px] items-center gap-2 rounded-[12px] border border-[var(--line-2)] bg-[var(--paper-hi)] hover:border-[var(--terra)] hover:bg-[var(--terra-soft)] transition-all px-3.5 py-2 text-[14px] font-medium text-[var(--ink)]'
+  'inline-flex min-h-[44px] items-center gap-2 rounded-[12px] border border-[var(--line-2)] bg-[var(--paper-hi)] hover:border-[var(--terra)] hover:bg-[var(--terra-soft)] transition-all px-3.5 py-2 text-[14px] font-medium text-[var(--ink)]'
 
 /** One question's chip row. Fully controlled — selection lives in ClarifierCard. */
 function ClarifierQuestionGroup({
@@ -321,11 +321,11 @@ function ClarifierCard({
               value={freeText}
               onChange={(e) => setFreeText(e.target.value)}
               placeholder="Or type your own answer"
-              className="flex-1 min-h-[40px] rounded-[12px] border border-[var(--line)] bg-transparent px-3 text-[14px] text-[var(--ink)] placeholder:text-[var(--ink-3)] focus:border-[var(--terra)] focus:outline-none"
+              className="flex-1 min-h-[44px] rounded-[12px] border border-[var(--line)] bg-transparent px-3 text-[14px] text-[var(--ink)] placeholder:text-[var(--ink-3)] focus:border-[var(--terra)] focus:outline-none"
             />
             <button
               type="submit"
-              className="inline-flex min-h-[40px] items-center rounded-[12px] border border-[var(--terra)] px-3 text-[13px] font-medium text-[var(--terra)] hover:bg-[var(--terra)] hover:text-white transition-colors"
+              className="inline-flex min-h-[44px] items-center rounded-[12px] border border-[var(--terra)] px-3 text-[13px] font-medium text-[var(--terra)] hover:bg-[var(--terra)] hover:text-white transition-colors"
             >
               Send
             </button>
@@ -346,7 +346,7 @@ function ClarifierCard({
                 onSubmit('Just show me the best overall')
               }}
               data-testid="clarifier-skip-all"
-              className="inline-flex min-h-[40px] items-center gap-1.5 text-[13px] font-medium text-[var(--ink-2)] hover:text-[var(--terra)] transition-colors"
+              className="inline-flex min-h-[44px] items-center gap-1.5 text-[13px] font-medium text-[var(--ink-2)] hover:text-[var(--terra)] transition-colors"
             >
               <span className="underline underline-offset-4 decoration-[var(--line-2)]">
                 Just show me the best overall
@@ -359,7 +359,7 @@ function ClarifierCard({
                 onSubmit('Ask me a few more questions')
               }}
               data-testid="clarifier-ask-more"
-              className="inline-flex min-h-[40px] items-center gap-1.5 text-[13px] font-medium text-[var(--ink-2)] hover:text-[var(--terra)] transition-colors"
+              className="inline-flex min-h-[44px] items-center gap-1.5 text-[13px] font-medium text-[var(--ink-2)] hover:text-[var(--terra)] transition-colors"
             >
               <span className="underline underline-offset-4 decoration-[var(--line-2)]">
                 Ask me a few more questions

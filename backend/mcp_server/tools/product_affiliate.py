@@ -9,7 +9,7 @@ Returns a dictionary of provider -> products for flexible frontend rendering.
 import sys
 import os
 import asyncio
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from app.core.error_manager import tool_error_handler
 
 # Add backend to path (portable path)
@@ -249,11 +249,20 @@ async def product_affiliate(
             except Exception as e:
                 logger.warning(f"[product_affiliate] {provider_name} search failed for {product_name}: {e}")
 
+                # FIX-1: surface provider failures as an error marker instead of
+                # swallowing them into None (indistinguishable from "no results").
+                return {"__provider_error__": str(e)[:300]}
+
             return None
 
         # Helper function to search a provider for all products (in parallel)
         async def search_provider(provider_name: str) -> Dict[str, Any]:
-            """Search all products on a single provider using asyncio.gather."""
+            """Search all products on a single provider using asyncio.gather.
+
+            Returns "provider_error": str only when the provider raised —
+            absence means the provider ran clean (zero results is NOT an error).
+            """
+            provider_error: Optional[str] = None
             # For Amazon: match curated links to each product BY NAME (not by index).
             # A curated entry is only attached when it genuinely corresponds to the
             # card's product (see _match_curated_entry). Products with no curated
@@ -348,11 +357,18 @@ async def product_affiliate(
             results = []
             for r in raw_results:
                 if isinstance(r, Exception):
+                    # search_single_product swallows provider exceptions
+                    # (returns None), so a raw Exception here is a gather-
+                    # level failure — count it against the provider.
+                    provider_error = provider_error or str(r)[:300]
                     logger.warning(f"[product_affiliate] {provider_name} product search exception: {r}")
+                elif isinstance(r, dict) and "__provider_error__" in r:
+                    # FIX-1: provider raised - surface as error, do not treat as a result
+                    provider_error = provider_error or r["__provider_error__"]
                 elif r is not None:
                     results.append(r)
 
-            return {"provider": provider_name, "results": results}
+            return {"provider": provider_name, "results": results, "provider_error": provider_error}
 
         # Execute searches for all providers in parallel
         logger.info(f"[product_affiliate] Starting parallel search for {len(products_to_search)} products on {len(providers_to_use)} providers")
@@ -362,10 +378,20 @@ async def product_affiliate(
 
         # Build the affiliate_products dictionary
         affiliate_products = {}
-        for result in all_results:
+        # One entry per configured provider that ERRORED. Downstream
+        # (chat.py) downgrades completeness from "full" whenever this is
+        # non-empty, so a CJ/eBay outage can never read as a complete answer.
+        provider_errors: List[Dict[str, str]] = []
+        for result, pname in zip(all_results, providers_to_use):
             if isinstance(result, Exception):
                 logger.warning(f"[product_affiliate] Provider search failed: {result}")
+                provider_errors.append({"provider": pname, "error": str(result)[:300]})
                 continue
+            if result and result.get("provider_error"):
+                provider_errors.append({
+                    "provider": result["provider"],
+                    "error": result["provider_error"],
+                })
             if result and result.get("results"):
                 provider_name = result["provider"]
                 affiliate_products[provider_name] = result["results"]
@@ -382,6 +408,7 @@ async def product_affiliate(
 
         return {
             "affiliate_products": affiliate_products,
+            "provider_errors": provider_errors,
             "success": True
         }
 
@@ -389,6 +416,7 @@ async def product_affiliate(
         logger.error(f"[product_affiliate] Error: {e}", exc_info=True)
         return {
             "affiliate_products": {},
+            "provider_errors": [],
             "error": str(e),
             "success": False
         }

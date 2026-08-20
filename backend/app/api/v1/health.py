@@ -80,12 +80,13 @@ async def health_check():
         "version": _running_version(),
     }
 
-    # Check database
+    # Check database — real SELECT 1 probe (was hardcoded "unknown")
     try:
-        if engine:
-            async with engine.connect() as conn:
-                await conn.execute(sqlalchemy.text("SELECT 1"))
-            health_status["database"] = "healthy"
+        if engine is None:
+            raise RuntimeError("database engine not initialized")
+        async with engine.connect() as conn:
+            await conn.execute(sqlalchemy.text("SELECT 1"))
+        health_status["database"] = "healthy"
     except Exception as e:
         logger.error(f"Database health check failed: {e}")
         health_status["database"] = "unhealthy"
@@ -101,10 +102,9 @@ async def health_check():
         health_status["redis"] = "unhealthy"
         health_status["status"] = "degraded"
 
-    # Return 503 if any service is down
-    if health_status["status"] == "degraded":
-        raise HTTPException(status_code=503, detail=health_status)
-
+    # T4 (2026-08-19): always return 200 — a health endpoint that 500s when
+    # the DB is down tells the caller nothing. The "status" field reflects
+    # reality ("healthy" / "degraded") so monitors can alert on the payload.
     return health_status
 
 

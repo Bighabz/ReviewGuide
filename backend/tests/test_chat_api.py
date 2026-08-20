@@ -74,14 +74,25 @@ class TestHealthEndpoint:
 
     def test_health_check_returns_ok(self):
         """Test that health endpoint returns 200 OK"""
+        # FIX-2: health.py now probes the DB; in the test env engine is None,
+        # which made the probe report unhealthy -> status degraded. Patch a
+        # successful mock engine so the test exercises the intended healthy path.
+        mock_conn = MagicMock()
+        mock_conn.execute = AsyncMock(return_value=MagicMock())
+        mock_cm = MagicMock()
+        mock_cm.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_cm.__aexit__ = AsyncMock(return_value=False)
+        mock_engine = MagicMock()
+        mock_engine.connect = MagicMock(return_value=mock_cm)
         # Import here to avoid module-level import issues
         from app.main import app
 
-        with TestClient(app) as client:
-            response = client.get("/health")
-            assert response.status_code == 200
-            data = response.json()
-            assert data.get("status") in ["ok", "healthy"]
+        with patch("app.api.v1.health.engine", mock_engine):
+            with TestClient(app) as client:
+                response = client.get("/health")
+                assert response.status_code == 200
+                data = response.json()
+                assert data.get("status") in ["ok", "healthy"]
 
 
 class TestChatStreamEndpoint:

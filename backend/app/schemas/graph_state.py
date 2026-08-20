@@ -119,6 +119,11 @@ class GraphState(TypedDict):
 
     # Errors
     errors: Annotated[List[str], operator.add]
+    # T2 (2026-08-19): [{provider, error}] for CONFIGURED providers that
+    # raised during the request. Plain replace (not operator.add): written
+    # once per request by plan_executor_node; chat.py reads it to downgrade
+    # completeness and mark provider coverage as "error".
+    provider_errors: List[Dict[str, Any]]
 
     # RFC §1.1 — Stage Telemetry (list of StageTelemetry.to_dict() records)
     stage_telemetry: Annotated[List[Dict[str, Any]], operator.add]

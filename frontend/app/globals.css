@@ -52,7 +52,9 @@
   /* Text: Deep Ink Scale (blueprint ink/ink2/ink3) */
   --text: #1A1816;
   --text-secondary: #6B6560;
-  --text-muted: #9B9590;
+  /* T8a (2026-08-19): was #9B9590 (2.83:1 on --paper). Darkened to the
+     warm-stone #7A746E — 4.61:1 on --paper, WCAG AA for small text. */
+  --text-muted: #7A746E;
 
   /* Borders: Warm Stone (blueprint line/line2) */
   --border: #E8E6E1;
@@ -160,7 +162,8 @@
   /* Text: Warm Ivory */
   --text: #F5F0EB;
   --text-secondary: #A8A29E;
-  --text-muted: #78716C;
+  /* T8a: was #78716C (4.0:1 on dark --paper). Lifted to #A8A29E — 7.0:1. */
+  --text-muted: #A8A29E;
 
   /* Card accent tints for Results page — dark mode */
   --card-accent-1: #2A2218;
@@ -501,6 +504,21 @@ a, button, input, textarea, select {
 .rg-display { font-family: var(--font-instrument), Georgia, serif; font-style: italic; }
 .rg-serif   { font-family: var(--font-newsreader), Georgia, serif; }
 .rg-sans    { font-family: var(--font-dm-sans), system-ui, sans-serif; }
+
+/* T6 (2026-08-19): visually hidden but screen-reader/crawler-visible.
+   Explicit here (not Tailwind's sr-only) so the h1 stays hidden regardless
+   of JIT class-scan order. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
 
 @media (prefers-reduced-motion: reduce) {
   .rg-breath, .rg-ring, .rg-bookmark-pop, .rg-word-fade, .rg-blog-in {

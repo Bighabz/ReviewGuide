@@ -88,7 +88,7 @@ export default function UnifiedTopbar({
           {/* Mobile Menu */}
           <button
             onClick={onMenuClick}
-            className="lg:hidden p-2 -ml-2 rounded-lg text-[var(--text-secondary)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)]"
+            className="lg:hidden p-3 -ml-2 rounded-lg text-[var(--text-secondary)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)]"
             aria-label="Open menu"
           >
             <Menu size={22} strokeWidth={1.5} />
@@ -176,7 +176,7 @@ export default function UnifiedTopbar({
             {/* Mobile Search */}
             <button
               onClick={() => setMobileSearchOpen(!mobileSearchOpen)}
-              className="md:hidden p-2 rounded-lg text-[var(--text-secondary)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)]"
+              className="md:hidden p-3 rounded-lg text-[var(--text-secondary)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)]"
               aria-label="Search"
             >
               <Search size={20} strokeWidth={1.5} />
@@ -186,7 +186,7 @@ export default function UnifiedTopbar({
             <button
               data-testid="topbar-history-button"
               onClick={() => onHistoryClick ? onHistoryClick() : router.push('/chat')}
-              className="p-2 rounded-lg text-[var(--text-secondary)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)]"
+              className="p-3 rounded-lg text-[var(--text-secondary)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)]"
               aria-label="Chat history"
               title="Chat history"
             >
@@ -205,7 +205,7 @@ export default function UnifiedTopbar({
             {/* Mobile New Chat */}
             <button
               onClick={() => onNewChat ? onNewChat() : router.push('/chat?new=1')}
-              className="sm:hidden p-2 rounded-lg bg-[var(--primary)] text-white active:scale-95"
+              className="sm:hidden p-3 rounded-lg bg-[var(--primary)] text-white active:scale-95"
               aria-label="New chat"
             >
               <Plus size={20} />
@@ -216,7 +216,7 @@ export default function UnifiedTopbar({
             {/* Theme Toggle */}
             <button
               onClick={toggleTheme}
-              className="p-2 rounded-lg text-[var(--text-secondary)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)]"
+              className="p-3 rounded-lg text-[var(--text-secondary)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)]"
               title={theme === 'light' ? 'Dark mode' : 'Light mode'}
               aria-label="Toggle theme"
             >
@@ -231,7 +231,7 @@ export default function UnifiedTopbar({
 
             {/* User Avatar */}
             <button
-              className="hidden sm:flex w-8 h-8 rounded-full bg-[var(--surface)] border border-[var(--border)] items-center justify-center text-[var(--text-muted)] hover:border-[var(--primary)] hover:text-[var(--primary)] transition-all"
+              className="hidden sm:flex w-11 h-11 rounded-full bg-[var(--surface)] border border-[var(--border)] items-center justify-center text-[var(--text-muted)] hover:border-[var(--primary)] hover:text-[var(--primary)] transition-all"
               aria-label="User menu"
             >
               <User size={14} strokeWidth={1.5} />

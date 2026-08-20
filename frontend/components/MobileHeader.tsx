@@ -49,7 +49,7 @@ export default function MobileHeader({ onHistoryClick }: MobileHeaderProps) {
           {/* Back arrow — goes to /chat from results, or / from chat */}
           <button
             onClick={() => router.push(isResultsRoute ? '/chat' : '/')}
-            className="flex items-center justify-center w-10 h-10 rounded-lg -ml-1"
+            className="flex items-center justify-center w-11 h-11 rounded-lg -ml-1"
             style={{ color: 'var(--text)' }}
             aria-label={isResultsRoute ? 'Back to Chat' : 'Back to Discover'}
           >
@@ -78,7 +78,7 @@ export default function MobileHeader({ onHistoryClick }: MobileHeaderProps) {
           {onHistoryClick && (
             <button
               data-testid="mobile-history-button"
-              className="flex items-center justify-center w-10 h-10 rounded-lg"
+              className="flex items-center justify-center w-11 h-11 rounded-lg"
               style={{ color: 'var(--text-muted)' }}
               aria-label="Chat history"
               onClick={onHistoryClick}
@@ -90,7 +90,7 @@ export default function MobileHeader({ onHistoryClick }: MobileHeaderProps) {
           {/* Expand icon — hidden on /results (already on results page) */}
           {!isResultsRoute && (
             <button
-              className="flex items-center justify-center w-10 h-10 rounded-lg"
+              className="flex items-center justify-center w-11 h-11 rounded-lg"
               style={{ color: 'var(--text-muted)' }}
               aria-label="Expand results"
               onClick={handleExpandClick}
@@ -116,7 +116,7 @@ export default function MobileHeader({ onHistoryClick }: MobileHeaderProps) {
 
           {/* User avatar */}
           <button
-            className="flex w-10 h-10 rounded-full items-center justify-center border transition-all"
+            className="flex w-11 h-11 rounded-full items-center justify-center border transition-all"
             style={{
               background: 'var(--surface)',
               borderColor: 'var(--border)',

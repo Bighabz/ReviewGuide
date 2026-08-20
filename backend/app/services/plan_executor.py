@@ -911,6 +911,18 @@ class PlanExecutor:
         if self.state.get("affiliate_products"):
             results["affiliate_products"] = self.state["affiliate_products"]
 
+        # T2 (2026-08-19): surface configured-provider failures — product_affiliate
+        # returns provider_errors as a top-level field that _write_tool_outputs_to_state
+        # does NOT lift into self.state, so scan the stored tool results here.
+        # chat.py downgrades completeness to "degraded" when this is non-empty.
+        _provider_errors = []
+        for _key, _value in self.context.items():
+            if "product_affiliate" in _key and isinstance(_value, dict) and _value.get("provider_errors"):
+                _provider_errors = _value["provider_errors"]
+                break
+        if _provider_errors:
+            results["provider_errors"] = _provider_errors
+
         # Look for next_step_suggestion results
         for key, value in self.context.items():
             if "next_step_suggestion" in key and isinstance(value, dict):

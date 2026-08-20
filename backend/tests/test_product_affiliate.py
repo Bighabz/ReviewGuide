@@ -376,3 +376,103 @@ async def test_amazon_curated_path_still_used_while_pa_api_disabled():
     assert offers, "curated path must still produce an Amazon offer"
     # Curated entries use amzn.to short links; search-URL fallbacks use amazon.com
     assert "amzn.to" in offers[0]["url"] or "amazon.com" in offers[0]["url"]
+
+
+# ---------------------------------------------------------------------------
+# T2 (PLAN 2026-08-19): a CONFIGURED provider that raises mid-request must
+# surface as a provider error and downgrade the done payload's completeness.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_cj_provider_failure_surfaces_as_provider_error():
+    """When the CJ provider raises, product_affiliate must report the failure
+    in `provider_errors` instead of silently reporting empty results."""
+    state = {
+        "normalized_products": [{"title": "Sony WH-1000XM5"}],
+        "slots": {},
+        "last_search_context": {},
+    }
+
+    cj_provider = MagicMock()
+    cj_provider.search_products = AsyncMock(side_effect=RuntimeError("CJ API down"))
+
+    with patch("app.services.affiliate.manager.affiliate_manager") as mock_manager, \
+         patch("app.core.config.settings") as mock_settings:
+        mock_settings.MAX_AFFILIATE_OFFERS_PER_PRODUCT = 3
+        mock_settings.AMAZON_DEFAULT_COUNTRY = "US"
+        mock_settings.ENABLE_SERPAPI = False
+        mock_manager.get_available_providers.return_value = ["cj"]
+        mock_manager.get_provider.return_value = cj_provider
+
+        result = await product_affiliate(state)
+
+    assert result["success"] is True
+    assert result["affiliate_products"] == {}, "failed provider must not fabricate results"
+    assert result["provider_errors"] == [
+        {"provider": "cj", "error": "CJ API down"}
+    ], f"expected one structured CJ error, got {result.get('provider_errors')}"
+
+
+@pytest.mark.asyncio
+async def test_partial_provider_failure_keeps_successful_provider():
+    """One provider failing must not erase a sibling provider's results —
+    coverage is per-provider, not all-or-nothing."""
+    mock_result = MagicMock()
+    mock_result.merchant = "Amazon"
+    mock_result.price = 99.99
+    mock_result.currency = "USD"
+    mock_result.affiliate_link = "https://example.com/product"
+    mock_result.condition = "new"
+    mock_result.title = "Sony WH-1000XM5"
+    mock_result.image_url = ""
+    mock_result.rating = 4.5
+    mock_result.review_count = 100
+    mock_result.product_id = "B08"
+
+    ok_provider = MagicMock()
+    ok_provider.search_products = AsyncMock(return_value=[mock_result])
+    bad_provider = MagicMock()
+    bad_provider.search_products = AsyncMock(side_effect=RuntimeError("timeout"))
+
+    state = {
+        "normalized_products": [{"title": "Sony WH-1000XM5"}],
+        "slots": {},
+        "last_search_context": {},
+    }
+
+    with patch("app.services.affiliate.manager.affiliate_manager") as mock_manager, \
+         patch("app.core.config.settings") as mock_settings:
+        mock_settings.MAX_AFFILIATE_OFFERS_PER_PRODUCT = 3
+        mock_settings.AMAZON_DEFAULT_COUNTRY = "US"
+        mock_settings.ENABLE_SERPAPI = False
+        mock_manager.get_available_providers.return_value = ["ebay", "cj"]
+        mock_manager.get_provider.side_effect = lambda name: {
+            "ebay": ok_provider,
+            "cj": bad_provider,
+        }[name]
+
+        result = await product_affiliate(state)
+
+    assert result["success"] is True
+    assert "ebay" in result["affiliate_products"], "healthy provider results must survive"
+    assert len(result["affiliate_products"]["ebay"]) == 1
+    assert result["provider_errors"] == [
+        {"provider": "cj", "error": "timeout"}
+    ]
+
+
+def test_completeness_downgrades_when_provider_errors_present():
+    """The done payload's completeness must read "degraded" — not "full" —
+    whenever a configured provider raised, even if stage telemetry is clean."""
+    from app.api.v1.chat import _derive_completeness
+
+    assert _derive_completeness([], []) == "full"
+    assert _derive_completeness([{"stage": "plan_exec", "timeout_hit": False}], []) == "full"
+    assert _derive_completeness([], [{"provider": "cj", "error": "down"}]) == "degraded"
+    assert (
+        _derive_completeness(
+            [{"stage": "plan_exec", "timeout_hit": False}],
+            [{"provider": "cj", "error": "down"}],
+        )
+        == "degraded"
+    )

@@ -171,14 +171,19 @@ def is_consent_confirmation(request) -> bool:
 
 
 
-def _derive_completeness(stage_telemetry) -> str:
+def _derive_completeness(stage_telemetry, provider_errors=None) -> str:
     """The done payload's completeness, derived from what actually happened.
 
     Was hardcoded "full" — so the executor-timeout path told the user "partial
     results" in prose while telling the UI the answer was complete. A stage
     degrades the answer when it hit its hard timeout OR failed fatally into its
     fallback (validation catch: fatal fallbacks carry timeout_hit=False).
+    T2 (2026-08-19): a CONFIGURED provider that raised mid-request (CJ was the
+    live case) also degrades the answer — reporting "full" with a dead source
+    would misstate coverage to the UI.
     """
+    if provider_errors:
+        return "degraded"
     for entry in stage_telemetry or []:
         # D5 guard: the clarifier's timeout-fallback (silent skip) still exists
         # until the decided fail-closed flip lands (DOCTRINE D5, 2026-08-17) —
@@ -413,6 +418,8 @@ async def generate_chat_stream(
             "last_search_context": halt_state_data.get("last_search_context", {}) if halt_state_data else {},
             "search_history": halt_state_data.get("search_history", []) if halt_state_data else [],
             "errors": [],
+            # T2 (2026-08-19): must be initialized or LangGraph TypedDict channels crash when plan_executor_node writes it. See CONCERNS.md "GraphState / initial_state Coupling".
+            "provider_errors": [],
             "stage_telemetry": [],  # RFC §1.1 — populated by each agent node
             "metadata": {
                 # NOTE: Do NOT add langfuse_handler or callbacks here!
@@ -893,24 +900,27 @@ async def generate_chat_stream(
         # entry matched this error provider — so we append a new timed_out entry.
         for err in _provider_errors:
             err_provider = err if isinstance(err, str) else err.get("provider", "")
+            # Structured [{provider, error}] entries (T2) mean the provider
+            # RAISED — mark "error"; bare strings stay "timed_out" (legacy shape).
+            _err_status = "error" if isinstance(err, dict) else "timed_out"
             for cov in _provider_coverage:
                 if cov["provider"] == err_provider:
-                    cov["status"] = "timed_out"
+                    cov["status"] = _err_status
                     break
             else:
-                # No existing coverage entry matched — add a new timed_out entry.
+                # No existing coverage entry matched — add a new failed entry.
                 if err_provider:
-                    _provider_coverage.append({"provider": err_provider, "status": "timed_out"})
+                    _provider_coverage.append({"provider": err_provider, "status": _err_status})
 
         _missing_sources = [
-            p["provider"] for p in _provider_coverage if p["status"] in ("timed_out", "unavailable")
+            p["provider"] for p in _provider_coverage if p["status"] in ("timed_out", "unavailable", "error")
             and p.get("result_count", 0) == 0
         ]
         _degraded = bool(_provider_errors) or bool(_errors and result_state.get("status") != "completed")
 
         # confidence_score: 1.0 if all ok, 0.5 if some providers failed, 0.3 if critical (affiliate) failed
         _affiliate_failed = any(
-            p["status"] in ("timed_out", "unavailable") for p in _provider_coverage
+            p["status"] in ("timed_out", "unavailable", "error") for p in _provider_coverage
             if p["provider"] in ("amazon", "ebay")
         )
         if _affiliate_failed or (_degraded and _provider_errors):
@@ -933,7 +943,7 @@ async def generate_chat_stream(
         # RFC §1.8 — completeness derived from stage telemetry (was hardcoded
         # "full"). Written back into result_state so the QoS log line and the
         # request_metrics row report the same truth as the done payload.
-        _completeness = _derive_completeness(result_state.get("stage_telemetry"))
+        _completeness = _derive_completeness(result_state.get("stage_telemetry"), _provider_errors)
         result_state["completeness"] = _completeness
 
         final_done_payload = {

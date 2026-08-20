@@ -529,6 +529,11 @@ async def plan_executor_node(state: GraphState) -> Dict[str, Any]:
             # product_affiliate and lifted by _extract_results. Without this
             # entry chat.py reports amazon/ebay as "unavailable".
             "affiliate_products": results.get("affiliate_products", {}),
+            # T2 (2026-08-19): configured-provider failures surface as
+            # provider_errors — chat.py uses them to downgrade completeness
+            # from "full" to "degraded" and to mark the provider coverage
+            # entry "error" instead of "ok".
+            "provider_errors": results.get("provider_errors", []),
             "current_agent": "plan_executor",
             "status": "halted" if results.get("halt") else "completed",
             "next_agent": None,
@@ -548,6 +553,7 @@ async def plan_executor_node(state: GraphState) -> Dict[str, Any]:
         "next_suggestions": [],
         "tool_citations": [],
         "affiliate_products": {},
+        "provider_errors": [],
         "current_agent": "plan_executor",
         "status": "completed",
         "next_agent": None,
