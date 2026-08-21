@@ -93,3 +93,8 @@ frontend/design/ReviewGuide standalone.html
 # Codex review scratch (transient — the ask-codex.sh wrapper IS tracked)
 .codex-review-prompt.txt
 .codex-review-output.txt
+
+# QA loop secrets + artifacts
+qa/.env
+qa/DISABLED
+qa/runs/

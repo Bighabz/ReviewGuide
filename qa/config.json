@@ -1,0 +1,10 @@
+{
+  "prod_backend": "https://backend-production-0ae7.up.railway.app",
+  "prod_frontend": "https://www.reviewguide.ai",
+  "supabase_ref": "qvowmjjcotdonezdtvur",
+  "dry_run": true,
+  "cadence": "aggressive",
+  "daily_usd_cap": 10,
+  "chat_prompts_per_day": 6,
+  "flake_retries": 2
+}

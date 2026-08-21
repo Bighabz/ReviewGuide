@@ -195,3 +195,24 @@ that constant is present in each query string — pick whichever is cleaner and 
 - Langfuse per-trace tagging (deferred; volume-cap handled runner-side).
 - Rate-limit exemption / X-QA-Token (deferred; runner preflights /health/ready).
 - The runner's user_id-resend contract (that's runner code in the P1 build, not the app).
+
+---
+# FIX ROUND (dual diff-review — Sol found a tautological test; code itself is correct)
+The B1/B2 production changes are CORRECT and stay as-is (all 4 filters + /conversations verified,
+991 tests pass). Fix ONLY the test quality so the tests genuinely guard the production predicate:
+
+## FX1 — make the predicate production-owned (admin.py)
+Add a module constant `_QA_EXCLUDE_PREDICATE = "session_id NOT LIKE 'qa-auto-%'"` in admin.py and
+build the 4 aggregate SQL strings using it (f-string/concat into the `text(...)`), so there is ONE
+source of truth. Behavior identical.
+
+## FX2 — untautologize the tests (tests/test_qa_containment.py)
+- The doc test (d) currently declares its own `QA_EXCLUDE_PREDICATE` literal and compares it to an
+  identical literal — it passes even if every app filter is deleted. Instead: `from app.api.v1.admin
+  import _QA_EXCLUDE_PREDICATE` and assert the 4 captured aggregate SQL strings EACH contain it
+  (so deleting the filter from any query fails the test). Remove the self-comparing literal.
+- The /conversations admin test (c) asserts only that `qa-auto-%` appears; an accidental inclusive
+  `LIKE` would pass. Compile the statement with literal_binds and assert it contains `NOT LIKE`
+  (case-insensitive) applied to session_id, not merely the pattern string.
+Keep tests (a)/(b) as-is (already removal-sensitive). Do not change production behavior. Full suite
+must stay green.
