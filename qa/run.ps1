@@ -26,12 +26,15 @@ New-Item -ItemType Directory -Force -Path $RunDir | Out-Null
 function Invoke-Py([string]$Name, [string[]]$ArgList, [int]$TimeoutSec) {
     $out = Join-Path $RunDir ("{0}.out" -f $Name)
     $err = Join-Path $RunDir ("{0}.err" -f $Name)
-    $p = Start-Process -FilePath $Python -ArgumentList $ArgList -WorkingDirectory $QaDir `
+    # Quote every arg so a spaced install path can't split an argument.
+    $argStr = ($ArgList | ForEach-Object { '"' + $_ + '"' }) -join ' '
+    $p = Start-Process -FilePath $Python -ArgumentList $argStr -WorkingDirectory $QaDir `
         -PassThru -NoNewWindow -RedirectStandardOutput $out -RedirectStandardError $err
     try {
         $p | Wait-Process -Timeout $TimeoutSec -ErrorAction Stop
     } catch {
-        try { Stop-Process -Id $p.Id -Force } catch {}
+        # Kill the whole tree - wsl.exe / npm / npx grandchildren survive a bare Stop-Process.
+        try { & taskkill.exe /T /F /PID $p.Id 2>$null | Out-Null } catch { try { Stop-Process -Id $p.Id -Force } catch {} }
         return 124
     }
     return $p.ExitCode
@@ -45,7 +48,17 @@ function Ctl([string[]]$ArgList) {
 Ctl @('-m','lib.runctl','start','--run-id',$RunId,'--host',$env:COMPUTERNAME)
 Ctl @('-m','lib.runctl','beat','--run-id',$RunId)
 
-$Timeout = 900
+# Per-runner supervisor caps - each STRICTLY exceeds that runner's own inner
+# budget (unit_suite runs 3 commands x unit_timeout_s; browser/lighthouse have
+# their own config timeouts) so a slow-but-healthy runner is not hard-killed.
+$timeouts = @{
+    unit_suite     = 6000
+    deps_audit     = 600
+    api_suite      = 900
+    browser_qa     = 1500
+    lighthouse     = 900
+    data_integrity = 300
+}
 $order = @('unit_suite','deps_audit','api_suite','browser_qa','lighthouse','data_integrity')
 $prodRunners = @('api_suite','browser_qa','lighthouse','data_integrity')
 $results = @{}
@@ -56,7 +69,7 @@ foreach ($runner in $order) {
         $results[$runner] = 'SKIPPED(breach)'
         continue
     }
-    $rc = Invoke-Py $runner @('-m',"runners.$runner",'--run-id',$RunId,'--artifacts-dir',$RunDir) $Timeout
+    $rc = Invoke-Py $runner @('-m',"runners.$runner",'--run-id',$RunId,'--artifacts-dir',$RunDir) $timeouts[$runner]
     $results[$runner] = $rc
     Ctl @('-m','lib.runctl','beat','--run-id',$RunId)
     if ($runner -eq 'api_suite' -and $rc -eq 3) {
@@ -91,8 +104,14 @@ $summary -join "`n" | Out-File -FilePath $summaryPath -Encoding utf8
 $countsJson = ($counts | ConvertTo-Json -Compress)
 Ctl @('-m','lib.runctl','finish','--run-id',$RunId,'--counts',$countsJson)
 
+# ANY non-zero exit is a failure (a module-not-found / import error exits 1
+# BEFORE the runner's 0/2/3 contract - it must not read as success).
 $crashed = $false
-foreach ($runner in $order) { if ($results[$runner] -eq 2 -or $results[$runner] -eq 124) { $crashed = $true } }
+foreach ($runner in $order) {
+    $r = $results[$runner]
+    if ($r -eq 'SKIPPED(breach)') { continue }
+    if ($r -ne 0) { $crashed = $true }
+}
 if ($breached -or $crashed) {
     $kind = 'run_failed'
     $msg = "QA run $RunId FAILED (breach=$breached crash=$crashed). high=$($counts.high) med=$($counts.medium)."

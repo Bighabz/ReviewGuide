@@ -16,7 +16,9 @@ Set-Location $QaDir
 
 if (Test-Path (Join-Path $QaDir 'DISABLED')) { exit 0 }
 
-$today = (Get-Date -Format 'yyyy-MM-dd')
+# qa.heartbeats.created_at is UTC; compare in UTC so an evening-local run
+# (which stamps the next UTC day) does not trip a spurious dead-man alert.
+$today = ((Get-Date).ToUniversalTime().ToString('yyyy-MM-dd'))
 $last = ''
 try { $last = (& $Python -m lib.runctl last-beat 2>$null | Select-Object -First 1).Trim() } catch {}
 
