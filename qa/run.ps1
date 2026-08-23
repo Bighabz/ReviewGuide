@@ -12,6 +12,13 @@ $Python = 'C:\Python313\python.exe'
 $env:PYTHONPATH = $QaDir
 Set-Location $QaDir
 
+# Pin the Playwright browser cache for the task account (its per-user cache may
+# be empty/absent). Read from config; skip if not set.
+try {
+    $cfg0 = Get-Content (Join-Path $QaDir 'config.json') -Raw | ConvertFrom-Json
+    if ($cfg0.playwright_browsers_path) { $env:PLAYWRIGHT_BROWSERS_PATH = [string]$cfg0.playwright_browsers_path }
+} catch {}
+
 # 1. Kill-switch.
 if (Test-Path (Join-Path $QaDir 'DISABLED')) {
     Write-Output 'qa/DISABLED present - exiting 0 (kill-switch).'
