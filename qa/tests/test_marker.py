@@ -1,16 +1,27 @@
-"""F3 tests: the marker contract - green path and breach (red) path.
+"""F3 tests: the marker contract - green path and breach (red) paths.
 
-All chat + DB access is mocked; no network.
+The orphan scan keys on CONTENT (conversation_messages has no user_id
+column and the re-key lands under a new user), so probe messages embed the
+qa-auto session string and a leaked row is found by that marker. All chat +
+DB access is mocked; no network.
 """
 
 import uuid
 
 from lib import marker
 
+# Real backend wire shape: the event NAME is on the `event:` line and the
+# done payload carries NO `type` key inside the JSON (chat.py _sse_event).
 TURN_STREAM = (
-    'data: {"type": "token", "content": "Hello"}\n'
-    'data: {"type": "token", "content": " there"}\n'
-    'data: {"type": "done", "user_id": "%s"}\n'
+    "event: status\n"
+    'data: {"text": "Reading reviews..."}\n'
+    "\n"
+    "event: content\n"
+    'data: {"token": "Hello there"}\n'
+    "\n"
+    "event: done\n"
+    'data: {"session_id": "s", "user_id": "%s", "status": "completed"}\n'
+    "\n"
 )
 
 
@@ -20,6 +31,7 @@ class FakeChatEndpoint:
     turn 1: assigns a user_id.
     turn 2+ WITHOUT user_id: server REPLACES the session_id with a fresh
     UUID (the containment-bypass bug the marker contract guards against).
+    Stores each row's content so the content-based orphan scan can run.
     """
 
     def __init__(self, db):
@@ -35,6 +47,7 @@ class FakeChatEndpoint:
         row = {
             "session_id": session_id,
             "user_id": payload.get("user_id") or self.user_id,
+            "content": payload.get("message", ""),
         }
         self.db.setdefault(session_id, []).append(row)
         return TURN_STREAM % row["user_id"]
@@ -50,14 +63,20 @@ class FakeQuery:
         if kind == "rows_for_session":
             return list(self.db.get(params["session_id"], []))
         if kind == "orphan_scan":
+            marker_str = params["content_marker"]
+            prefix = params["prefix"]
             return [
                 row
                 for rows in self.db.values()
                 for row in rows
-                if row["user_id"] == params["user_id"]
-                and not row["session_id"].startswith(params["prefix"])
+                if marker_str in row.get("content", "")
+                and not row["session_id"].startswith(prefix)
             ]
         raise AssertionError("unexpected query kind: %r" % kind)
+
+
+def _marked(session, text):
+    return "%s [qa-ref:%s]" % (text, session)
 
 
 def test_mint_session_uses_passed_in_parts_only():
@@ -73,18 +92,16 @@ def test_two_turn_convo_threading_user_id_stays_intact_green():
     session = marker.mint_session("20260821T101500Z", "ab12cd")
     window_start = "2026-08-21T10:15:00Z"
 
-    ok1, user_id = marker.chat_turn(chat, session, "hi")
+    ok1, user_id = marker.chat_turn(chat, session, _marked(session, "hi"))
     assert ok1 and user_id
-    ok2, _ = marker.chat_turn(chat, session, "follow up", user_id=user_id)
+    ok2, _ = marker.chat_turn(chat, session, _marked(session, "follow up"), user_id=user_id)
     assert ok2
 
-    # user_id was threaded into turn 2.
     assert chat.payloads[1]["user_id"] == user_id
-    # Both turns stayed under the qa-auto session.
     assert set(db.keys()) == {session}
 
     ok, reason = marker.assert_marker_intact(
-        query, session, expected_turns=2, user_id=user_id, window_start=window_start
+        query, session, expected_turns=2, content_marker=session, window_start=window_start
     )
     assert ok, reason
     assert reason == "ok"
@@ -92,42 +109,38 @@ def test_two_turn_convo_threading_user_id_stays_intact_green():
 
 def test_marker_breach_detected_when_user_id_not_threaded_red_path():
     """RED PATH: turn 2 omits user_id, server re-keys the turn under a bare
-    UUID, and assert_marker_intact MUST catch it - including via the
-    negative orphan scan (rows for the user outside qa-auto-* sessions)."""
+    UUID, so the qa-auto session is missing turn 2's row -> count check
+    fails AND the marked orphan row is found by the negative scan."""
     db = {}
     chat = FakeChatEndpoint(db)
     query = FakeQuery(db)
     session = marker.mint_session("20260821T101500Z", "ab12cd")
     window_start = "2026-08-21T10:15:00Z"
 
-    ok1, user_id = marker.chat_turn(chat, session, "hi")
+    ok1, user_id = marker.chat_turn(chat, session, _marked(session, "hi"))
     assert ok1 and user_id
     # BUG: caller fails to thread user_id into turn 2.
-    ok2, _ = marker.chat_turn(chat, session, "follow up")
+    ok2, _ = marker.chat_turn(chat, session, _marked(session, "follow up"))
     assert ok2
 
-    # The server replaced the session with a UUID: the prefix is gone.
     orphan_sessions = [sid for sid in db.keys() if sid != session]
     assert len(orphan_sessions) == 1
-    uuid.UUID(orphan_sessions[0])  # really a UUID
+    uuid.UUID(orphan_sessions[0])
     assert not orphan_sessions[0].startswith(marker.MARKER_PREFIX)
 
     ok, reason = marker.assert_marker_intact(
-        query, session, expected_turns=2, user_id=user_id, window_start=window_start
+        query, session, expected_turns=2, content_marker=session, window_start=window_start
     )
     assert not ok
-    assert "expected 2" in reason  # count check fired (turn-2 row landed outside the session)
+    assert "expected 2" in reason
     assert session in reason
 
 
 def test_missing_rows_fails_count_check():
     query = FakeQuery({})
+    session = "qa-auto-20260821T101500Z-ab12cd"
     ok, reason = marker.assert_marker_intact(
-        query,
-        "qa-auto-20260821T101500Z-ab12cd",
-        expected_turns=2,
-        user_id="u-1",
-        window_start="2026-08-21T10:15:00Z",
+        query, session, expected_turns=2, content_marker=session, window_start="2026-08-21T10:15:00Z"
     )
     assert not ok
     assert "expected 2" in reason
@@ -137,8 +150,8 @@ def test_row_without_prefix_fails_even_with_clean_orphan_scan():
     session = "qa-auto-20260821T101500Z-ab12cd"
     db = {
         session: [
-            {"session_id": session, "user_id": "u-1"},
-            {"session_id": "plain-session", "user_id": "u-1"},
+            {"session_id": session, "content": _marked(session, "a")},
+            {"session_id": "plain-session", "content": "no marker here"},
         ]
     }
 
@@ -149,40 +162,39 @@ def test_row_without_prefix_fails_even_with_clean_orphan_scan():
             return super().__call__(kind, params)
 
     ok, reason = marker.assert_marker_intact(
-        RiggedQuery(db),
-        session,
-        expected_turns=2,
-        user_id="u-1",
-        window_start="2026-08-21T10:15:00Z",
+        RiggedQuery(db), session, expected_turns=2, content_marker=session, window_start="2026-08-21T10:15:00Z"
     )
     assert not ok
     assert "prefix" in reason
 
 
 def test_marker_breach_detected_by_negative_orphan_scan_red_path():
-    """RED PATH (negative-orphan-scan): the qa-auto session itself kept the
-    full expected row count, but a scan for user_id rows under non-qa-auto
-    sessions since window_start finds an orphan -> containment breach."""
+    """RED PATH (negative-orphan-scan): the qa-auto session kept its full
+    expected row count, but a marked row leaked under a non-qa-auto session
+    since window_start -> containment breach caught by content scan."""
     session = marker.mint_session("20260821T101500Z", "ab12cd")
-    user_id = "u-orphan"
     orphan_session = str(uuid.uuid4())
     db = {
         session: [
-            {"session_id": session, "user_id": user_id},
-            {"session_id": session, "user_id": user_id},
+            {"session_id": session, "content": _marked(session, "hi")},
+            {"session_id": session, "content": _marked(session, "again")},
         ],
-        orphan_session: [{"session_id": orphan_session, "user_id": user_id}],
+        orphan_session: [{"session_id": orphan_session, "content": _marked(session, "leaked")}],
     }
     assert not orphan_session.startswith(marker.MARKER_PREFIX)
 
     ok, reason = marker.assert_marker_intact(
-        FakeQuery(db),
-        session,
-        expected_turns=2,
-        user_id=user_id,
-        window_start="2026-08-21T10:15:00Z",
+        FakeQuery(db), session, expected_turns=2, content_marker=session, window_start="2026-08-21T10:15:00Z"
     )
     assert not ok
-    assert "orphan" in reason  # negative-orphan-scan path fired
-    assert user_id in reason
+    assert "orphan" in reason
+    assert session in reason
 
+
+def test_no_content_marker_is_red():
+    """Defense-in-depth (#14): a missing marker can never be a green pass."""
+    ok, reason = marker.assert_marker_intact(
+        FakeQuery({}), "qa-auto-x", expected_turns=2, content_marker="", window_start="w"
+    )
+    assert not ok
+    assert "content_marker" in reason

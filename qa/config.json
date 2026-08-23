@@ -6,5 +6,15 @@
   "cadence": "aggressive",
   "daily_usd_cap": 10,
   "chat_prompts_per_day": 6,
-  "flake_retries": 2
+  "flake_retries": 2,
+  "runner_version": "1",
+  "marker_gate_proven": false,
+  "messages_per_turn": 2,
+  "per_prompt_usd": 0.02,
+  "marker_settle_attempts": 15,
+  "marker_settle_interval_s": 2.0,
+  "security_probe_interval_s": 1.5,
+  "notify_channel": "telegram",
+  "npx_path": "npx",
+  "browser_timeout_s": 900
 }

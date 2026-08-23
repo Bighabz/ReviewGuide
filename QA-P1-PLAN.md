@@ -213,6 +213,30 @@ F5 — Tests `qa/tests/` (pytest): flake gate (passes on transient, fails on 3/3
 Gate: `cd qa && python -m pytest tests/ -q` green. No qa/.env created. .gitignore updated. Print files changed + the marker red-path test name proving the breach is caught.
 
 ---
+# INCREMENT 2 — BUILT + REVIEWED 2026-08-22 (Claude build; route waived for P1 by Habib)
+Status: DONE, 73 qa tests green. Built by Claude under ultracode; adversarially reviewed by a
+5-lens Claude workflow (containment/python/spec/tests/frontend) → 38 confirmed findings → 18
+distinct defects, ALL FIXED. Two containment-critical fixes independently re-verified against the
+live backend:
+  - CRITICAL SSE parser: the first parser only read `data:` lines + inferred type from an inline
+    `type` key, but the real backend puts the type on the `event:` line (event: done\ndata:{...},
+    no type key). It would have returned user_id=None on prod → fired turn 2 unthreaded → caused
+    the exact containment breach on the live site. FIXED (marker._parse_stream_full now honors
+    `event:` framing, matching chatApi.ts) + test mocks rewritten to the real wire shape.
+  - CRITICAL orphan scan: conversation_messages has NO user_id column, so the user_id-based scan
+    would 400 forever AND couldn't attribute the re-key (lands under a new user). REDESIGNED to a
+    CONTENT scan: api_suite embeds "[qa-ref:<qa-auto-session>]" in each probe message; a leaked row
+    carries that marker under a non-qa-auto session. Verified the backend persists the raw message
+    verbatim as content.
+Other fixes: crash→EXIT_BREACH (not CRASH) so findings/alerts survive; turn-2 refused if no user_id
+captured; marker settle-poll for the fire-and-forget save race; oversized probe carries a qa-auto
+session id; browser_qa env whitelisted + stdout redacted; non-zero-exit-with-no-failures = finding;
+Playwright: global default-deny network lockdown, history-restore seeding (localStorage seed is
+wiped by switchToSession), qa-auto-pw session-id assertion, mobile forced onto chromium.
+OPEN (needs a live run to validate, not blockers to commit): the Playwright specs are DELIVERED but
+unexecuted (need npm ci + playwright install); the live marker gate (--prove-marker) still requires
+the Supabase key on this box.
+
 # INCREMENT 2 BUILD SPEC (P1-5 Playwright + P1-4 api_suite/browser_qa + observations DDL — build EXACTLY this)
 
 Python 3.11, STDLIB ONLY (urllib/json/time/argparse — no requests/httpx). All new code under `qa/`
