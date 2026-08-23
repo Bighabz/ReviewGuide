@@ -116,7 +116,12 @@ def _parse_stream_full(body):
             pass  # placeholder status line, not real assistant content
         elif etype == "done":
             done = event
-            if event.get("status") in ("completed", "complete", "ok", "success"):
+            # A clean done is a successful turn - including a clarifier
+            # "halted" (the assistant asked a question), which is a valid
+            # response, not a failure. Only an explicit error/failed status
+            # (or an error event / done.error, handled below) marks failure.
+            status = str(event.get("status") or "").lower()
+            if status not in ("error", "failed", "failure"):
                 assistant_ok = True
         elif etype == "error":
             error = event

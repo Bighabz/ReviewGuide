@@ -79,6 +79,33 @@ def _marked(session, text):
     return "%s [qa-ref:%s]" % (text, session)
 
 
+def test_clarifier_halt_done_is_a_successful_turn():
+    """A clarifier 'halted' done (assistant asked a question, no content
+    tokens) is a valid response, not a failed turn."""
+    stream = (
+        "event: status\n"
+        'data: {"text": "Thinking..."}\n'
+        "\n"
+        "event: done\n"
+        'data: {"session_id": "s", "user_id": "u-1", "status": "halted", "followups": {"questions": []}}\n'
+        "\n"
+    )
+    ok, user_id, done = marker.chat_turn_full(lambda payload: stream, "qa-auto-s", "hi")
+    assert ok
+    assert user_id == "u-1"
+    assert done.get("status") == "halted"
+
+
+def test_error_status_done_is_a_failed_turn():
+    stream = (
+        "event: done\n"
+        'data: {"session_id": "s", "user_id": "u-1", "status": "error"}\n'
+        "\n"
+    )
+    ok, _user_id, _done = marker.chat_turn_full(lambda payload: stream, "qa-auto-s", "hi")
+    assert not ok
+
+
 def test_mint_session_uses_passed_in_parts_only():
     session = marker.mint_session("20260821T101500Z", "ab12cd")
     assert session == "qa-auto-20260821T101500Z-ab12cd"

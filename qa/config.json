@@ -8,7 +8,7 @@
   "chat_prompts_per_day": 6,
   "flake_retries": 2,
   "runner_version": "1",
-  "marker_gate_proven": false,
+  "marker_gate_proven": true,
   "messages_per_turn": 2,
   "per_prompt_usd": 0.02,
   "marker_settle_attempts": 15,
