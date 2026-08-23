@@ -4,8 +4,6 @@ Pure functions only - no I/O, no network, no clock access.
 """
 
 import hashlib
-import json
-import os
 
 PASS = "PASS"
 FAIL = "FAIL"
@@ -14,10 +12,10 @@ _DEFAULT_RETRIES = 2
 
 
 def _config_retries():
-    config_path = os.path.join(os.path.dirname(__file__), "..", "config.json")
+    from lib import config
+
     try:
-        with open(config_path, "r", encoding="utf-8") as handle:
-            return int(json.load(handle).get("flake_retries", _DEFAULT_RETRIES))
+        return int(config.load().get("flake_retries", _DEFAULT_RETRIES))
     except (OSError, ValueError):
         return _DEFAULT_RETRIES
 

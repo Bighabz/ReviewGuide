@@ -67,6 +67,13 @@ $timeouts = @{
     data_integrity = 300
 }
 $order = @('unit_suite','deps_audit','api_suite','browser_qa','lighthouse','data_integrity')
+# Honor an optional enabled_runners allowlist from config (parity with run.sh).
+try {
+    if ($cfg0 -and $cfg0.enabled_runners) {
+        $en = @($cfg0.enabled_runners)
+        $order = @($order | Where-Object { $en -contains $_ })
+    }
+} catch {}
 $prodRunners = @('api_suite','browser_qa','lighthouse','data_integrity')
 $results = @{}
 $breached = $false

@@ -16,9 +16,9 @@ from lib import envfile, notify
 
 
 def _config():
-    path = os.path.join(os.path.dirname(__file__), "..", "config.json")
-    with open(path, "r", encoding="utf-8") as fh:
-        return json.load(fh)
+    from lib import config
+
+    return config.load()
 
 
 def _rc_runner(script_path, message):

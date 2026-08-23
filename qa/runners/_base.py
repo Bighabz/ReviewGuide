@@ -29,13 +29,10 @@ _SECRET_ENV_KEYS = (
 SEVERITIES = ("low", "medium", "high", "info")
 
 
-def _config_path():
-    return os.path.join(os.path.dirname(__file__), "..", "config.json")
-
-
 def load_config():
-    with open(_config_path(), "r", encoding="utf-8") as handle:
-        return json.load(handle)
+    from lib import config
+
+    return config.load()
 
 
 def _network_guard(*_args, **_kwargs):

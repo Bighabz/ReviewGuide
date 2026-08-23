@@ -98,5 +98,6 @@ frontend/design/ReviewGuide standalone.html
 qa/.env
 qa/DISABLED
 qa/runs/
+qa/config.local.json
 qa/playwright/node_modules/
 qa/playwright/test-results/

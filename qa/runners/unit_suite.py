@@ -41,7 +41,14 @@ def run(ctx, args):
         return EXIT_OK
 
     repo = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-    cmds = ctx.config.get("unit_suite_cmds") or _DEFAULT_CMDS
+    # An explicit [] in config.local.json disables local suites (e.g. the VPS
+    # prod-monitor, which has no local checkout to test). Missing key = defaults.
+    cmds = ctx.config.get("unit_suite_cmds")
+    if cmds is None:
+        cmds = _DEFAULT_CMDS
+    if not cmds:
+        emit(ctx, RUNNER, [finding("unit", "skipped", RUNNER, "info", "unit_suite disabled (no unit_suite_cmds)")])
+        return EXIT_OK
     timeout = int(ctx.config.get("unit_timeout_s", 1800))
     findings = []
     tails = {}
