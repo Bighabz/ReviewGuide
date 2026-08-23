@@ -82,6 +82,7 @@ class RunnerContext(object):
         http_get=None,
         http_post=None,
         http_options=None,
+        public_get=None,
         run_subprocess=None,
         now_fn=None,
         rand_fn=None,
@@ -98,6 +99,7 @@ class RunnerContext(object):
         self.http_get = http_get or guard
         self.http_post = http_post or guard
         self.http_options = http_options or guard
+        self.public_get = public_get or guard
         self.run_subprocess = run_subprocess or guard
         self.now_fn = now_fn or (lambda: "1970-01-01T00:00:00Z")
         self.rand_fn = rand_fn or (lambda: "00000000")
@@ -219,6 +221,7 @@ def build_real_context(run_id, artifacts_dir, config=None):
             http_get=httpio.status_get,
             http_post=httpio.post_status,
             http_options=httpio.options_cors,
+            public_get=httpio.public_get,
             run_subprocess=_real_subprocess,
         )
     return RunnerContext(**ctx_kwargs)

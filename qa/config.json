@@ -2,7 +2,7 @@
   "prod_backend": "https://backend-production-0ae7.up.railway.app",
   "prod_frontend": "https://www.reviewguide.ai",
   "supabase_ref": "qvowmjjcotdonezdtvur",
-  "dry_run": true,
+  "dry_run": false,
   "cadence": "aggressive",
   "daily_usd_cap": 10,
   "chat_prompts_per_day": 6,
@@ -16,5 +16,13 @@
   "security_probe_interval_s": 1.5,
   "notify_channel": "telegram",
   "npx_path": "npx",
-  "browser_timeout_s": 900
+  "npm_path": "npm",
+  "lighthouse_path": "C:\\Users\\habib\\AppData\\Roaming\\npm\\lighthouse.cmd",
+  "browser_timeout_s": 900,
+  "unit_timeout_s": 1800,
+  "deps_timeout_s": 300,
+  "deps_accepted_high": 8,
+  "lighthouse_timeout_s": 180,
+  "prune_warn_rows": 2000,
+  "retention_days": 30
 }

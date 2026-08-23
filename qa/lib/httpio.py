@@ -198,6 +198,17 @@ def _build_pg_query(kind, params):
     raise ValueError("unknown marker query kind: %r" % kind)
 
 
+def public_get(path, query, timeout=DEFAULT_TIMEOUT_S):
+    """GET a PUBLIC-schema table via PostgREST; return a list of rows (empty
+    on non-list). Read-only; used by data_integrity reconciliation."""
+    full = store.BASE_URL + path + "?" + urllib.parse.urlencode(query)
+    req = urllib.request.Request(full, headers=_public_headers(), method="GET")
+    resp = _urlopen(req, timeout)
+    with resp:
+        rows = _read_json(resp)
+    return rows if isinstance(rows, list) else []
+
+
 def pg_rest_query(kind, params, timeout=DEFAULT_TIMEOUT_S):
     """Real query_fn for marker.assert_marker_intact. Returns a list of row
     dicts. RAISES on any HTTP/transport error - the marker gate treats an
