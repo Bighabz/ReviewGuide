@@ -28,13 +28,13 @@ def _last_beat_date():
             "method": "GET",
             "url": store.BASE_URL + "/rest/v1/heartbeats",
             "headers": store._headers(),
-            "query": {"select": "created_at", "order": "created_at.desc", "limit": "1"},
+            "query": {"select": "beat_at", "order": "beat_at.desc", "limit": "1"},
             "json": None,
         }
     )
     rows = resp.get("json") or []
     if rows and isinstance(rows, list):
-        ts = str(rows[0].get("created_at", ""))
+        ts = str(rows[0].get("beat_at", ""))
         return ts[:10] or None
     return None
 

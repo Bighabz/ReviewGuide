@@ -49,8 +49,12 @@ else
     notes="$notes\n- lighthouse OFF (run: npm install -g lighthouse ; needs chromium)"
 fi
 
+# notify channel: RC SMS via the clawd stack when RC_SCRIPT_PATH is set in .env, else telegram
+if grep -q '^RC_SCRIPT_PATH=.\+' "$QADIR/.env"; then notify=rc; else notify=telegram; fi
+
 cat > "$QADIR/config.local.json" <<JSON
 {
+  "notify_channel": "$notify",
   "npx_path": "npx",
   "npm_path": "npm",
   "lighthouse_path": "lighthouse",
@@ -59,7 +63,7 @@ cat > "$QADIR/config.local.json" <<JSON
   "enabled_runners": [$enabled]
 }
 JSON
-echo "wrote config.local.json  enabled_runners=[$enabled]"
+echo "wrote config.local.json  enabled_runners=[$enabled]  notify_channel=$notify"
 
 chmod +x "$QADIR/run.sh" "$QADIR/heartbeat-check.sh" "$QADIR/install-cron.sh" 2>/dev/null || true
 

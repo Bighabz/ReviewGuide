@@ -3,8 +3,9 @@
     python -m lib.notifyctl <kind> "<text>"
 
 kind in run_complete|run_failed|breach. Channel from config.notify_channel
-(default telegram). Reads TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID (or RC_SCRIPT_PATH)
-from qa/.env; never prints them. Prints "SENT" / "SKIPPED: <reason>".
+(default telegram; deploy-vps.sh sets "rc" when RC_SCRIPT_PATH is in qa/.env).
+Reads TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID (or RC_SCRIPT_PATH) from qa/.env;
+never prints them. Prints "SENT" / "SKIPPED: <reason>".
 """
 
 import json
@@ -22,6 +23,27 @@ def _config():
 
 
 def _rc_runner(script_path, message):
+    if os.name != "nt":
+        # Linux / VPS: the RC sender lives in the `clawd` personal stack
+        # (Send-Sms.ps1 takes the message as remaining args, texts Habib only).
+        # Run it AS clawd so its inbox/pending-delivery files stay clawd-owned,
+        # from clawd's home (an unreadable cwd such as /root breaks pwsh spawns).
+        return subprocess.run(
+            [
+                "runuser",
+                "-u",
+                "clawd",
+                "--",
+                "pwsh",
+                "-NoProfile",
+                "-File",
+                script_path,
+                message,
+            ],
+            capture_output=True,
+            text=True,
+            cwd="/home/clawd",
+        ).returncode
     return subprocess.run(
         [
             r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
